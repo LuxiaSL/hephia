@@ -8,12 +8,12 @@ class Pet:
         self.stamina = 100
         self.emotional_state = '😊'  # Default emotional state
 
-    def update_needs(self):
+    def update_needs(self, activity_level=1.0):
         # Random decay to introduce stochastic behavior
-        self.hunger += random.uniform(0.1, 0.5)
-        self.thirst += random.uniform(0.1, 0.5)
-        self.boredom += random.uniform(0.1, 0.5)
-        self.stamina -= random.uniform(0.1, 0.5)
+        self.hunger += random.uniform(0.1, 0.5) * activity_level
+        self.thirst += random.uniform(0.1, 0.5) * activity_level
+        self.boredom += random.uniform(0.1, 0.5) * activity_level
+        self.stamina -= random.uniform(0.1, 0.5) * activity_level
 
         # Keep values within 0-100%
         self.hunger = min(max(self.hunger, 0), 100)
