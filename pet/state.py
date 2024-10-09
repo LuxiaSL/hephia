@@ -1,6 +1,7 @@
 # pet/state.py
 
 from utils.vector import Vector2D
+import config
 
 class PetState:
     """
@@ -27,6 +28,10 @@ class PetState:
 
         # Current movement behavior
         self.current_movement = None
+
+        # Pet dimensions
+        self.width = config.PET_DEFAULT_WIDTH
+        self.height = config.PET_DEFAULT_HEIGHT
 
     def update_emotional_state(self):
         """

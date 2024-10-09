@@ -24,49 +24,72 @@ class Pet:
             activity_level (float): Modifier for how quickly needs decay.
         """
         # Random decay to introduce stochastic behavior
-        self.state.hunger += random.uniform(0.1, 0.5) * activity_level
-        self.state.thirst += random.uniform(0.1, 0.5) * activity_level
-        self.state.boredom += random.uniform(0.1, 0.5) * activity_level
-        self.state.stamina -= random.uniform(0.1, 0.5) * activity_level
-
-        # Keep values within 0-100%
-        self.state.hunger = clamp(self.state.hunger, 0, 100)
-        self.state.thirst = clamp(self.state.thirst, 0, 100)
-        self.state.boredom = clamp(self.state.boredom, 0, 100)
-        self.state.stamina = clamp(self.state.stamina, 0, 100)
+        self.alter_need('hunger', random.uniform(0.1, 0.5) * activity_level)
+        self.alter_need('thirst', random.uniform(0.1, 0.5) * activity_level)
+        self.alter_need('boredom', random.uniform(0.1, 0.5) * activity_level)
+        self.alter_need('stamina', -random.uniform(0.1, 0.5) * activity_level)  # Decrease stamina
 
         self.state.update_emotional_state()
 
-    def feed(self):
+    def alter_need(self, need, amount):
+        """
+        Alters a specified need by a given amount.
+
+        Args:
+            need (str): The name of the need to alter.
+            amount (float): The amount to alter the need by.
+        """
+        if hasattr(self.state, need):
+            current_value = getattr(self.state, need)
+            new_value = clamp(current_value + amount, 0, 100)
+            setattr(self.state, need, new_value)
+        else:
+            raise AttributeError(f"PetState has no attribute '{need}'")
+
+    def feed(self, food_value=1, type=None):
         """
         Feeds the pet, reducing hunger.
+
+        Args:
+            food_value (int, optional): The strength of the food being given
+            type (str, optional): The name of the item given (eventually used for favorites/dislikes)
         """
-        self.state.hunger -= 20
-        self.state.hunger = clamp(self.state.hunger, 0, 100)
+        # Placeholder logic for different food items
+        hunger_reduction = -20 * food_value 
+        self.alter_need('hunger', hunger_reduction)
         self.state.update_emotional_state()
 
-    def give_water(self):
+    def drink(self, thirst_value=1, type=None):
         """
-        Gives water to the pet, reducing thirst.
+        Gives drink to the pet, reducing thirst.
+
+        Args:
+            thirst_value (int, optional): The strength of the drink being given
+            type (str, optional): The name of the item given (eventually used for favorites/dislikes)
         """
-        self.state.thirst -= 20
-        self.state.thirst = clamp(self.state.thirst, 0, 100)
+        # Placeholder logic for different water items
+        thirst_reduction = -20 * thirst_value
+        self.alter_need('thirst', thirst_reduction)
         self.state.update_emotional_state()
 
-    def play(self):
+    def play(self, play_value=1, type=None):
         """
         Plays with the pet, reducing boredom and stamina.
+
+        Args:
+            play_value (int, optional): The strength of the play being performed
+            type (str, optional): The name of the play performed (eventually used for favorites/dislikes)
         """
-        self.state.boredom -= 20
-        self.state.boredom = clamp(self.state.boredom, 0, 100)
-        self.state.stamina -= 10
-        self.state.stamina = clamp(self.state.stamina, 0, 100)
+        # Placeholder logic for different play activities
+        boredom_reduction = -20 * play_value
+        stamina_cost = -10 * play_value
+        self.alter_need('boredom', boredom_reduction)
+        self.alter_need('stamina', stamina_cost)
         self.state.update_emotional_state()
 
     def rest(self):
         """
         Allows the pet to rest, increasing stamina.
         """
-        self.state.stamina += 20
-        self.state.stamina = clamp(self.state.stamina, 0, 100)
+        self.alter_need('stamina', 20)
         self.state.update_emotional_state()
