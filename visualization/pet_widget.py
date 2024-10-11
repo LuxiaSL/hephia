@@ -1,110 +1,183 @@
-# visualization/pet_widget.py
-
-from PyQt5.QtWidgets import QWidget, QMenu, QAction, QApplication
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QMouseEvent
+from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QMenu, QAction, QApplication, QDesktopWidget, QFrame
+from PyQt5.QtCore import Qt, QTimer, QRect, QRectF
+from visualization.pet_graphics_item import PetGraphicsItem
+from visualization.dialogs.stats_dialog import StatsDialog
 from pet.pet import Pet
-from pet.movement import IdleMovement, MoveMovement
-from pet.actions import PetActions
-from utils.vector import Vector2D
-from visualization.renderer import Renderer
-import random
+import sys
 
-class PetWidget(QWidget):
-    """
-    PetWidget serves as the main interface between the pet's logic and its visual representation.
-    """
-
-    def __init__(self):
+class PetWidget(QGraphicsView):
+    def __init__(self, pet):
         super().__init__()
-        self.pet = Pet()
-        self.renderer = Renderer(self.pet.state, self)
-        self.dragging = False
-        self.drag_position = None
-
+        self.pet = pet
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setStyleSheet("background: transparent;")
+        self.setFrameShape(QFrame.NoFrame)
+        
+        self.pet_item = PetGraphicsItem(self.pet)
+        self.scene.addItem(self.pet_item)
+        
         self.init_ui()
         self.setup_timers()
+        self.setup_observers()
 
     def init_ui(self):
-        """Initializes the UI components of the widget."""
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.resize(250, 250)
-        # Update pet dimensions in state
-        self.pet.state.width = self.width()
-        self.pet.state.height = self.height()
+        
+        # Get the geometry of all screens
+        desktop = QDesktopWidget()
+        combined_geometry = QRect()
+        for i in range(desktop.screenCount()):
+            combined_geometry = combined_geometry.united(desktop.screenGeometry(i))
+        
+        # Set the widget and scene to cover all screens
+        self.setGeometry(combined_geometry)
+        self.setSceneRect(QRectF(combined_geometry))
+        
+        # Ensure the view doesn't render anything outside the scene rect
+        self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
+        
+        # Position the pet on a random screen
+        random_screen = desktop.screen(desktop.primaryScreen())
+        random_rect = random_screen.geometry()
+        initial_x = random_rect.x() + random_rect.width() // 2
+        initial_y = random_rect.y() + random_rect.height() // 2
+        self.pet_item.setPos(initial_x, initial_y)
+        
+        self.show()
+        
         self.show()
 
     def setup_timers(self):
-        """Sets up timers for updating the pet and its needs."""
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_pet)
-        self.update_timer.start(50)  # Update every 50ms
+        self.update_timer.start(50)
 
-        self.needs_timer = QTimer()
-        self.needs_timer.timeout.connect(self.update_needs)
-        self.needs_timer.start(5000)  # Update needs every 5 seconds
+        self.pet_timer = QTimer()
+        self.pet_timer.timeout.connect(self.pet.update)
+        self.pet_timer.start(1000)
 
-    def show_context_menu(self, position):
-        """Displays the context menu at the given position."""
-        menu = QMenu()
+    def setup_observers(self):
+        self.pet.action_manager.subscribe_to_action('feed', self.on_action_perform)
+        self.pet.action_manager.subscribe_to_action('play', self.on_action_perform)
+        self.pet.action_manager.subscribe_to_action('give_water', self.on_action_perform)
+        self.pet.action_manager.subscribe_to_action('rest', self.on_action_perform)
 
-        stats_action = QAction('Stats', self)
-        stats_action.triggered.connect(self.show_stats)
-        menu.addAction(stats_action)
+        self.pet.behavior_manager.subscribe_to_behavior('start', self.on_behavior_event)
+        self.pet.behavior_manager.subscribe_to_behavior('stop', self.on_behavior_event)
+        self.pet.behavior_manager.subscribe_to_behavior('update', self.on_behavior_event)
 
-        feed_action = QAction('Feed', self)
-        feed_action.triggered.connect(self.feed_pet)
-        menu.addAction(feed_action)
-
-        water_action = QAction('Give Water', self)
-        water_action.triggered.connect(self.give_water)
-        menu.addAction(water_action)
-
-        play_action = QAction('Play', self)
-        play_action.triggered.connect(self.play_with_pet)
-        menu.addAction(play_action)
-
-        rest_action = QAction('Rest', self)
-        rest_action.triggered.connect(self.pet_rest)
-        menu.addAction(rest_action)
-
-        settings_action = QAction('Settings', self)
-        settings_action.triggered.connect(self.open_settings)
-        menu.addAction(settings_action)
-
-        quit_action = QAction('Quit', self)
-        quit_action.triggered.connect(QApplication.instance().quit)
-        menu.addAction(quit_action)
-
-        menu.exec_(position)
-
-    def feed_pet(self):
-        """Feeds the pet."""
-        PetActions.feed(self.pet, food_value=1)  # Default food_value for now
-
-    def give_water(self):
-        """Gives water to the pet."""
-        PetActions.give_water(self.pet, thirst_value=1)  # Default thirst_value for now
-
-    def play_with_pet(self):
-        """Plays with the pet."""
-        PetActions.play_with_pet(self.pet, play_value=1)  # Default play_value for now
-
-    def pet_rest(self):
-        """Makes the pet rest."""
-        PetActions.rest_pet(self.pet)
-
-    def open_settings(self):
-        """Opens the settings dialog (placeholder)."""
-        print("Settings dialog opened (placeholder)")
-
-    def update_needs(self):
-        """Updates the pet's needs."""
-        self.pet.update_needs()
+        self.pet.needs_manager.subscribe_to_need('hunger', self.on_need_change)
+        self.pet.needs_manager.subscribe_to_need('thirst', self.on_need_change)
+        self.pet.needs_manager.subscribe_to_need('boredom', self.on_need_change)
+        self.pet.needs_manager.subscribe_to_need('stamina', self.on_need_change)
 
     def update_pet(self):
-        """Updates the pet's state."""
-        if self.pet.state.current_movement:
-            self.pet.state.current_movement.update()
-        self.renderer.update()
+        self.pet_item.update_position()
+        
+        # Check if the pet is out of the combined screen bounds
+        pet_pos = self.pet_item.pos()
+        if not self.sceneRect().contains(pet_pos):
+            # Find a new position on a random screen
+            desktop = QDesktopWidget()
+            random_screen = desktop.screen(desktop.primaryScreen())
+            random_rect = random_screen.geometry()
+            new_x = random_rect.x() + random_rect.width() // 2
+            new_y = random_rect.y() + random_rect.height() // 2
+            self.pet_item.setPos(new_x, new_y)
+        
+        self.scene.update()
+
+    def on_action_perform(self, action, event_type):
+        if event_type == 'perform':
+            action_name = action.__class__.__name__.replace('Action', '').lower()
+            print(f"PetWidget: Action '{action_name}' performed.")
+            self.pet_item.handle_event('action_perform', {'action_name': action_name})
+
+    def on_behavior_event(self, behavior, event_type):
+        print(f"PetWidget: Behavior '{behavior.__class__.__name__}' {event_type}.")
+        self.pet_item.handle_event('behavior_event', {'behavior_name': behavior.__class__.__name__, 'event_type': event_type})
+
+    def on_need_change(self, need):
+        print(f"PetWidget: Need '{need.name}' changed to {need.value}.")
+        self.pet_item.handle_event('emotional_change', {'new_state': self.pet.state.emotional_state})
+
+    def contextMenuEvent(self, event):
+        context_menu = QMenu(self)
+        context_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                color: black;
+            }
+            QMenu::item:selected {
+                background-color: lightgray;
+            }
+        """)
+
+        feed_action = QAction("Feed", self)
+        give_water_action = QAction("Give Water", self)
+        play_action = QAction("Play", self)
+        rest_action = QAction("Rest", self)
+        view_stats_action = QAction("View Stats", self)
+        settings_action = QAction("Settings", self)
+        quit_action = QAction("Quit", self)
+
+        context_menu.addAction(feed_action)
+        context_menu.addAction(give_water_action)
+        context_menu.addAction(play_action)
+        context_menu.addAction(rest_action)
+        context_menu.addSeparator()
+        context_menu.addAction(view_stats_action)
+        context_menu.addAction(settings_action)
+        context_menu.addSeparator()
+        context_menu.addAction(quit_action)
+
+        feed_action.triggered.connect(lambda: self.perform_action('feed'))
+        give_water_action.triggered.connect(lambda: self.perform_action('give_water'))
+        play_action.triggered.connect(lambda: self.perform_action('play'))
+        rest_action.triggered.connect(lambda: self.perform_action('rest'))
+        view_stats_action.triggered.connect(self.show_stats_dialog)
+        settings_action.triggered.connect(self.open_settings)
+        quit_action.triggered.connect(self.close_application)
+
+        context_menu.exec_(event.globalPos())
+
+    def perform_action(self, action_name):
+        try:
+            self.pet.perform_action(action_name)
+        except ValueError as e:
+            print(f"PetWidget: {e}")
+
+    def show_stats_dialog(self):
+        stats_dialog = StatsDialog(self.pet.needs_manager, self)
+        stats_dialog.setWindowFlags(stats_dialog.windowFlags() | Qt.WindowStaysOnTopHint)
+        stats_dialog.setStyleSheet("""
+            QDialog {
+                background-color: white;
+                color: black;
+            }
+            QLabel, QProgressBar {
+                color: black;
+            }
+        """)
+        stats_dialog.show()
+
+    def open_settings(self):
+        print("Settings dialog is not yet implemented.")
+
+    def close_application(self):
+        self.pet.shutdown()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        self.pet.shutdown()
+        event.accept()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    pet = Pet()
+    widget = PetWidget(pet)
+    sys.exit(app.exec_())

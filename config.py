@@ -23,15 +23,8 @@ class Config:
     INITIAL_BOREDOM = 50.0
     INITIAL_STAMINA = 100.0
 
-    # Needs decay rates
-    HUNGER_DECAY_RATE = (0.1, 0.5)
-    THIRST_DECAY_RATE = (0.1, 0.5)
-    BOREDOM_DECAY_RATE = (0.1, 0.5)
-    STAMINA_DECAY_RATE = (0.1, 0.5)
-
-    # Activity levels
-    IDLE_ACTIVITY_LEVEL = 0.5
-    MOVE_ACTIVITY_LEVEL = 1.0
-
-    # Placeholder for future settings
-    # e.g., User preferences, AI model configurations, etc.
+    # Base decay rates
+    HUNGER_BASE_DECAY_RATE = 0.2
+    THIRST_BASE_DECAY_RATE = 0.2
+    BOREDOM_BASE_DECAY_RATE = 0.1
+    STAMINA_BASE_DECAY_RATE = -0.1  # Negative because stamina decreases over time

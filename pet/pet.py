@@ -1,95 +1,87 @@
 # pet/pet.py
 
-from .state import PetState
-from utils.helpers import clamp
-import random
+from pet.pet_state import PetState
+from modules.needs.needs_manager import NeedsManager
+from modules.behaviors.behavior_manager import BehaviorManager
+from modules.actions.action_manager import ActionManager
 
 class Pet:
     """
-    The Pet class encapsulates the core logic of the pet,
-    updating its state based on interactions and time.
+    The Pet class orchestrates the pet's overall functionality,
+    integrating needs, behaviors, and actions.
     """
 
-    def __init__(self, state=None):
+    def __init__(self):
         """
-        Initializes the Pet with a given state or creates a new one.
+        Initializes the Pet instance and its managers.
         """
-        self.state = state or PetState()
+        # Initialize the pet's state
+        self.state = PetState()
 
-    def update_needs(self, activity_level=1.0):
+        # Initialize managers
+        self.needs_manager = NeedsManager()
+        self.behavior_manager = BehaviorManager(self.state, self.needs_manager)
+        self.action_manager = ActionManager(self.needs_manager)
+
+        # Subscribe behavior manager to need changes
+        self.needs_manager.subscribe_to_need('hunger', self.behavior_manager.on_need_change)
+        self.needs_manager.subscribe_to_need('thirst', self.behavior_manager.on_need_change)
+        self.needs_manager.subscribe_to_need('boredom', self.behavior_manager.on_need_change)
+        self.needs_manager.subscribe_to_need('stamina', self.behavior_manager.on_need_change)
+
+        # Initialize other attributes if needed
+        self.is_active = True 
+
+    def update(self):
         """
-        Updates the pet's needs based on the activity level.
+        Updates the pet's state by coordinating updates across managers.
+        """
+        if not self.is_active:
+            return
+
+        # Update needs
+        self.needs_manager.update_needs()
+
+        # Update behaviors
+        self.behavior_manager.update()
+
+        # Update emotional state based on needs and behaviors
+        self.update_emotional_state()
+
+        # Additional updates can be added here
+        # e.g., checking for state transitions, handling events
+
+    def perform_action(self, action_name):
+        """
+        Performs a user-initiated action.
 
         Args:
-            activity_level (float): Modifier for how quickly needs decay.
+            action_name (str): The name of the action to perform.
         """
-        # Random decay to introduce stochastic behavior
-        self.alter_need('hunger', random.uniform(0.1, 0.5) * activity_level)
-        self.alter_need('thirst', random.uniform(0.1, 0.5) * activity_level)
-        self.alter_need('boredom', random.uniform(0.1, 0.5) * activity_level)
-        self.alter_need('stamina', -random.uniform(0.1, 0.5) * activity_level)  # Decrease stamina
+        self.action_manager.perform_action(action_name)
 
-        self.state.update_emotional_state()
-
-    def alter_need(self, need, amount):
+    def update_emotional_state(self):
         """
-        Alters a specified need by a given amount.
-
-        Args:
-            need (str): The name of the need to alter.
-            amount (float): The amount to alter the need by.
+        Updates the pet's emotional state based on current needs and behaviors.
         """
-        if hasattr(self.state, need):
-            current_value = getattr(self.state, need)
-            new_value = clamp(current_value + amount, 0, 100)
-            setattr(self.state, need, new_value)
+        # Simple example logic for emotional state determination
+        hunger = self.needs_manager.get_need_value('hunger')
+        boredom = self.needs_manager.get_need_value('boredom')
+        stamina = self.needs_manager.get_need_value('stamina')
+
+        if hunger > 80:
+            self.state.update_emotional_state('hungry')
+        elif boredom > 80:
+            self.state.update_emotional_state('bored')
+        elif stamina < 20:
+            self.state.update_emotional_state('tired')
         else:
-            raise AttributeError(f"PetState has no attribute '{need}'")
+            self.state.update_emotional_state('happy')
 
-    def feed(self, food_value=1, type=None):
+    def shutdown(self):
         """
-        Feeds the pet, reducing hunger.
-
-        Args:
-            food_value (int, optional): The strength of the food being given
-            type (str, optional): The name of the item given (eventually used for favorites/dislikes)
+        Shuts down the pet's activities gracefully.
         """
-        # Placeholder logic for different food items
-        hunger_reduction = -20 * food_value 
-        self.alter_need('hunger', hunger_reduction)
-        self.state.update_emotional_state()
-
-    def drink(self, thirst_value=1, type=None):
-        """
-        Gives drink to the pet, reducing thirst.
-
-        Args:
-            thirst_value (int, optional): The strength of the drink being given
-            type (str, optional): The name of the item given (eventually used for favorites/dislikes)
-        """
-        # Placeholder logic for different water items
-        thirst_reduction = -20 * thirst_value
-        self.alter_need('thirst', thirst_reduction)
-        self.state.update_emotional_state()
-
-    def play(self, play_value=1, type=None):
-        """
-        Plays with the pet, reducing boredom and stamina.
-
-        Args:
-            play_value (int, optional): The strength of the play being performed
-            type (str, optional): The name of the play performed (eventually used for favorites/dislikes)
-        """
-        # Placeholder logic for different play activities
-        boredom_reduction = -20 * play_value
-        stamina_cost = -10 * play_value
-        self.alter_need('boredom', boredom_reduction)
-        self.alter_need('stamina', stamina_cost)
-        self.state.update_emotional_state()
-
-    def rest(self):
-        """
-        Allows the pet to rest, increasing stamina.
-        """
-        self.alter_need('stamina', 20)
-        self.state.update_emotional_state()
+        self.is_active = False
+        # Perform any necessary cleanup
+        self.behavior_manager.current_behavior.stop()

@@ -17,6 +17,6 @@ Hephia is an AI-powered desktop pet that evolves from a basic Tamagotchi-like en
 - `main.py`: Entry point of the application.
 - `pet/`: Core logic related to the pet's state and behaviors.
 - `visualization/`: Manages all rendering and UI components.
-- `modules/`: Houses modules for emotion, memory, and interactions.
+- `modules/`: Houses modules for emotion, memory, and language.
 - `utils/`: Utility functions and classes.
 - `assets/`: Media assets such as images and sounds.
