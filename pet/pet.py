@@ -4,6 +4,7 @@ from pet.pet_state import PetState
 from modules.needs.needs_manager import NeedsManager
 from modules.behaviors.behavior_manager import BehaviorManager
 from modules.actions.action_manager import ActionManager
+from event_dispatcher import global_event_dispatcher, Event
 
 class Pet:
     """
@@ -23,14 +24,42 @@ class Pet:
         self.behavior_manager = BehaviorManager(self.state, self.needs_manager)
         self.action_manager = ActionManager(self.needs_manager)
 
-        # Subscribe behavior manager to need changes
-        self.needs_manager.subscribe_to_need('hunger', self.behavior_manager.on_need_change)
-        self.needs_manager.subscribe_to_need('thirst', self.behavior_manager.on_need_change)
-        self.needs_manager.subscribe_to_need('boredom', self.behavior_manager.on_need_change)
-        self.needs_manager.subscribe_to_need('stamina', self.behavior_manager.on_need_change)
+        # Set up event listeners
+        self.setup_event_listeners()
 
         # Initialize other attributes if needed
         self.is_active = True 
+
+    def setup_event_listeners(self):
+        """
+        Sets up event listeners for the pet.
+        """
+        global_event_dispatcher.add_listener("need:changed", self.on_need_change)
+        global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_change)
+        global_event_dispatcher.add_listener("action:performed", self.on_action_performed)
+
+    def on_need_change(self, event):
+        """
+        Handles need change events.
+        """
+        need_name = event.data['need_name']
+        new_value = event.data['new_value']
+        print(f"Pet: Need '{need_name}' changed to {new_value}")
+        self.update_emotional_state()
+
+    def on_behavior_change(self, event):
+        """
+        Handles behavior change events.
+        """
+        new_behavior = event.data['new_behavior']
+        print(f"Pet: Behavior changed to {new_behavior}")
+
+    def on_action_performed(self, event):
+        """
+        Handles action performed events.
+        """
+        action_name = event.data['action_name']
+        print(f"Pet: Action '{action_name}' performed")
 
     def update(self):
         """
@@ -48,8 +77,8 @@ class Pet:
         # Update emotional state based on needs and behaviors
         self.update_emotional_state()
 
-        # Additional updates can be added here
-        # e.g., checking for state transitions, handling events
+        # Dispatch a pet updated event
+        global_event_dispatcher.dispatch_event_sync(Event("pet:updated", {"pet": self}))
 
     def perform_action(self, action_name):
         """
@@ -69,14 +98,23 @@ class Pet:
         boredom = self.needs_manager.get_need_value('boredom')
         stamina = self.needs_manager.get_need_value('stamina')
 
+        old_state = self.state.emotional_state
+
         if hunger > 80:
-            self.state.update_emotional_state('hungry')
+            new_state = 'hungry'
         elif boredom > 80:
-            self.state.update_emotional_state('bored')
+            new_state = 'bored'
         elif stamina < 20:
-            self.state.update_emotional_state('tired')
+            new_state = 'tired'
         else:
-            self.state.update_emotional_state('happy')
+            new_state = 'happy'
+
+        if new_state != old_state:
+            self.state.update_emotional_state(new_state)
+            global_event_dispatcher.dispatch_event_sync(Event("pet:emotional_state_changed", {
+                "old_state": old_state,
+                "new_state": new_state
+            }))
 
     def shutdown(self):
         """
@@ -85,3 +123,4 @@ class Pet:
         self.is_active = False
         # Perform any necessary cleanup
         self.behavior_manager.current_behavior.stop()
+        global_event_dispatcher.dispatch_event_sync(Event("pet:shutdown"))

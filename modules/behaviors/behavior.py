@@ -1,6 +1,7 @@
 # modules/behaviors/behavior.py
 
 from abc import ABC, abstractmethod
+from event_dispatcher import global_event_dispatcher, Event
 
 class Behavior(ABC):
     """
@@ -19,50 +20,20 @@ class Behavior(ABC):
         self.pet_state = pet_state
         self.active = False
 
-        # Observers subscribing to this behavior
-        self.observers = []
-
     @abstractmethod
     def start(self):
         """Starts the behavior."""
-        pass
+        self.active = True
+        global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.__class__.__name__}:started"))
 
     @abstractmethod
     def update(self):
         """Updates the behavior."""
-        pass
+        if self.active:
+            global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.__class__.__name__}:updated"))
 
     @abstractmethod
     def stop(self):
         """Stops the behavior."""
-        pass
-
-    def subscribe(self, observer):
-        """
-        Subscribes an observer to this behavior.
-
-        Args:
-            observer (callable): The observer function or method.
-        """
-        if observer not in self.observers:
-            self.observers.append(observer)
-
-    def unsubscribe(self, observer):
-        """
-        Unsubscribes an observer from this behavior.
-
-        Args:
-            observer (callable): The observer function or method to remove.
-        """
-        if observer in self.observers:
-            self.observers.remove(observer)
-
-    def notify_observers(self, event_type):
-        """
-        Notifies all subscribed observers about an event.
-
-        Args:
-            event_type (str): The type of event ('start', 'update', 'stop').
-        """
-        for observer in self.observers:
-            observer(self, event_type)
+        self.active = False
+        global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.__class__.__name__}:stopped"))

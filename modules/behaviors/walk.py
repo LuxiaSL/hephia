@@ -1,4 +1,7 @@
+# modules/behaviors/walk.py
+
 from .behavior import Behavior
+from event_dispatcher import global_event_dispatcher, Event
 
 class WalkBehavior(Behavior):
     """
@@ -13,30 +16,24 @@ class WalkBehavior(Behavior):
 
     def start(self):
         """Starts the walk behavior."""
-        self.active = True
+        super().start()
         print("WalkBehavior started.")
         # Apply need decay modifiers
         self.apply_need_modifiers()
-        # Notify observers
-        self.notify_observers('start')
 
     def update(self):
         """Updates the walk behavior."""
+        super().update()
         if not self.active:
             return
         # Update walk-specific logic (e.g., moving position)
-        # ...
-        # Notify observers
-        self.notify_observers('update')
 
     def stop(self):
         """Stops the walk behavior."""
-        self.active = False
         print("WalkBehavior stopped.")
         # Remove need decay modifiers
         self.remove_need_modifiers()
-        # Notify observers
-        self.notify_observers('stop')
+        super().stop()
 
     def apply_need_modifiers(self):
         """
@@ -55,6 +52,11 @@ class WalkBehavior(Behavior):
         for need, modifier in self.multiplier_modifiers.items():
             needs_manager.alter_decay_rate_multiplier(need, modifier)
 
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:walk:modifiers_applied", {
+            "base_modifiers": self.base_rate_modifiers,
+            "multiplier_modifiers": self.multiplier_modifiers
+        }))
+
     def remove_need_modifiers(self):
         """
         Removes decay rate modifiers applied by walk behavior.
@@ -67,5 +69,10 @@ class WalkBehavior(Behavior):
         for need, modifier in self.multiplier_modifiers.items():
             needs_manager.alter_decay_rate_multiplier(need, 1/modifier)  # Reverse the modification
         
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:walk:modifiers_removed", {
+            "base_modifiers": self.base_rate_modifiers,
+            "multiplier_modifiers": self.multiplier_modifiers
+        }))
+
         self.base_rate_modifiers.clear()
         self.multiplier_modifiers.clear()

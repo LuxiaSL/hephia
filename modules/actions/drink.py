@@ -1,3 +1,5 @@
+# modules/actions/drink.py
+
 from .action import Action
 
 class GiveWaterAction(Action):
@@ -12,5 +14,17 @@ class GiveWaterAction(Action):
     def perform(self):
         """Performs the giving water action by reducing thirst."""
         print("Performing GiveWaterAction.")
+        self.dispatch_event("action:give_water:started")
+        
+        initial_thirst = self.needs_manager.get_need_value('thirst')
         self.needs_manager.alter_need('thirst', -self.water_value)
-        self.notify_observers('perform')
+        final_thirst = self.needs_manager.get_need_value('thirst')
+        
+        result = {
+            "initial_thirst": initial_thirst,
+            "final_thirst": final_thirst,
+            "thirst_reduced": initial_thirst - final_thirst
+        }
+        
+        self.dispatch_event("action:give_water:completed", result)
+        return result

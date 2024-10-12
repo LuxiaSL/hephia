@@ -2,6 +2,7 @@
 
 from .idle import IdleBehavior
 from .walk import WalkBehavior
+from event_dispatcher import global_event_dispatcher, Event
 
 class BehaviorManager:
     """
@@ -28,6 +29,15 @@ class BehaviorManager:
         # Start with idle behavior
         self.change_behavior(self.idle_behavior)
 
+        # Set up event listeners
+        self.setup_event_listeners()
+
+    def setup_event_listeners(self):
+        """
+        Sets up event listeners for the BehaviorManager.
+        """
+        global_event_dispatcher.add_listener("need:changed", self.on_need_change)
+
     def update(self):
         """
         Updates the current behavior.
@@ -44,40 +54,36 @@ class BehaviorManager:
         """
         if self.current_behavior:
             self.current_behavior.stop()
+        old_behavior = self.current_behavior
         self.current_behavior = new_behavior
         self.current_behavior.start()
 
-    # Methods to react to need changes...
-    def on_need_change(self, need):
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:changed", {
+            "old_behavior": old_behavior.__class__.__name__ if old_behavior else None,
+            "new_behavior": new_behavior.__class__.__name__
+        }))
+
+    def on_need_change(self, event):
         """
         Reacts to changes in needs.
 
         Args:
-            need (Need): The need that has changed.
+            event (Event): The need change event.
         """
+        need_name = event.data['need_name']
+        new_value = event.data['new_value']
+
         # Example logic: if hunger is high, switch to seek food behavior
-        if need.name == 'hunger' and need.value > 80:
+        if need_name == 'hunger' and new_value > 80:
             # Implement logic to change behavior accordingly
             pass
+        # Add more behavior change logic based on needs
 
-    def subscribe_to_behavior(self, event_type, observer):
+    def get_current_behavior(self):
         """
-        Subscribes an observer to a specific behavior event.
+        Returns the current behavior.
 
-        Args:
-            event_type (str): The type of event ('start', 'update', 'stop').
-            observer (callable): The observer function or method.
+        Returns:
+            Behavior: The current behavior instance.
         """
-        if self.current_behavior:
-            self.current_behavior.subscribe(observer)
-
-    def unsubscribe_from_behavior(self, event_type, observer):
-        """
-        Unsubscribes an observer from a specific behavior event.
-
-        Args:
-            event_type (str): The type of event ('start', 'update', 'stop').
-            observer (callable): The observer function or method to remove.
-        """
-        if self.current_behavior:
-            self.current_behavior.unsubscribe(observer)
+        return self.current_behavior

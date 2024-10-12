@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import QGraphicsItem, QDesktopWidget
 from PyQt5.QtCore import QRectF, Qt, QPointF
 from PyQt5.QtGui import QPainter, QColor, QFont, QFontDatabase
 from visualization.renderer import Renderer
+from event_dispatcher import global_event_dispatcher, Event
 import math
 
 class PetGraphicsItem(QGraphicsItem):
@@ -18,6 +19,13 @@ class PetGraphicsItem(QGraphicsItem):
         self.animation_speed = 0.1
         self.setZValue(1)
         self.speed = 2 
+
+        self.setup_event_listeners()
+
+    def setup_event_listeners(self):
+        global_event_dispatcher.add_listener("pet:updated", self.on_pet_updated)
+        global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_changed)
+        global_event_dispatcher.add_listener("pet:emotional_state_changed", self.on_emotional_state_changed)
 
     def boundingRect(self):
         return QRectF(-60, -60, 120, 120)
@@ -104,8 +112,22 @@ class PetGraphicsItem(QGraphicsItem):
         self.setPos(new_x, new_y)
         self.update()
 
+    def on_pet_updated(self, event):
+        self.update()
+
+    def on_behavior_changed(self, event):
+        new_behavior = event.data["new_behavior"]
+        # Update animation or appearance based on new behavior
+        self.update()
+
+    def on_emotional_state_changed(self, event):
+        new_state = event.data["new_state"]
+        # Update appearance based on new emotional state
+        self.update()
+
     def handle_event(self, event_type, event_data):
         self.renderer.handle_event(event_type, event_data)
+        self.update()
 
     def advance(self, phase):
         if phase == 0:

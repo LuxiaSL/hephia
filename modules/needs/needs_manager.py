@@ -2,6 +2,7 @@
 
 from .need import Need
 from config import Config
+from event_dispatcher import global_event_dispatcher, Event
 
 class NeedsManager:
     """
@@ -55,7 +56,14 @@ class NeedsManager:
         for need_name in needs_to_update:
             need = self.needs.get(need_name)
             if need:
+                old_value = need.value
                 need.update()
+                if need.value != old_value:
+                    global_event_dispatcher.dispatch_event_sync(Event("need:changed", {
+                        "need_name": need_name,
+                        "old_value": old_value,
+                        "new_value": need.value
+                    }))
 
     def alter_need(self, need_name, amount):
         """
@@ -67,7 +75,14 @@ class NeedsManager:
         """
         need = self.needs.get(need_name)
         if need:
+            old_value = need.value
             need.alter(amount)
+            if need.value != old_value:
+                global_event_dispatcher.dispatch_event_sync(Event("need:changed", {
+                    "need_name": need_name,
+                    "old_value": old_value,
+                    "new_value": need.value
+                }))
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")
 
@@ -98,6 +113,10 @@ class NeedsManager:
         need = self.needs.get(need_name)
         if need:
             need.alter_base_decay_rate(amount)
+            global_event_dispatcher.dispatch_event_sync(Event("need:decay_rate_changed", {
+                "need_name": need_name,
+                "new_base_rate": need.base_decay_rate
+            }))
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")
 
@@ -112,20 +131,9 @@ class NeedsManager:
         need = self.needs.get(need_name)
         if need:
             need.alter_decay_rate_multiplier(factor)
-        else:
-            raise ValueError(f"Need '{need_name}' does not exist.")
-
-    # Observer management methods remain the same...
-    def subscribe_to_need(self, need_name, observer):
-        need = self.needs.get(need_name)
-        if need:
-            need.subscribe(observer)
-        else:
-            raise ValueError(f"Need '{need_name}' does not exist.")
-
-    def unsubscribe_from_need(self, need_name, observer):
-        need = self.needs.get(need_name)
-        if need:
-            need.unsubscribe(observer)
+            global_event_dispatcher.dispatch_event_sync(Event("need:decay_rate_changed", {
+                "need_name": need_name,
+                "new_multiplier": need.decay_rate_multiplier
+            }))
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")

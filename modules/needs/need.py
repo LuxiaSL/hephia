@@ -24,9 +24,6 @@ class Need:
         self.max_value = max_value
         self.type = type
 
-        # Observers subscribing to this need
-        self.observers = []
-
         # Decay rate controls
         self.base_decay_rate = base_decay_rate
         self.decay_rate_multiplier = 1.0
@@ -45,10 +42,7 @@ class Need:
         Args:
             amount (float): The amount to change the need's value by.
         """
-        old_value = self.value
         self.value = max(self.min_value, min(self.value + amount, self.max_value))
-        if self.value != old_value:
-            self.notify_observers()
 
     def calculate_effective_decay_rate(self):
         """
@@ -57,7 +51,6 @@ class Need:
         Returns:
             float: The effective decay rate.
         """
-        # Calculate the effective decay rate
         return self.base_decay_rate * self.decay_rate_multiplier
 
     def alter_base_decay_rate(self, amount):
@@ -68,7 +61,6 @@ class Need:
             amount (float): The amount to change the base decay rate by.
         """
         self.base_decay_rate += amount
-        # Ensure the base decay rate doesn't go below 0
         self.base_decay_rate = max(0, self.base_decay_rate)
 
     def alter_decay_rate_multiplier(self, factor):
@@ -79,17 +71,4 @@ class Need:
             factor (float): The factor to multiply the current multiplier by.
         """
         self.decay_rate_multiplier *= factor
-        # Ensure the multiplier doesn't go below 0
         self.decay_rate_multiplier = max(0, self.decay_rate_multiplier)
-
-    def subscribe(self, observer):
-        if observer not in self.observers:
-            self.observers.append(observer)
-
-    def unsubscribe(self, observer):
-        if observer in self.observers:
-            self.observers.remove(observer)
-
-    def notify_observers(self):
-        for observer in self.observers:
-            observer(self)

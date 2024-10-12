@@ -1,8 +1,11 @@
+# visualization/pet_widget.py
+
 from PyQt5.QtWidgets import QGraphicsView, QGraphicsScene, QMenu, QAction, QApplication, QDesktopWidget, QFrame
 from PyQt5.QtCore import Qt, QTimer, QRect, QRectF
 from visualization.pet_graphics_item import PetGraphicsItem
 from visualization.dialogs.stats_dialog import StatsDialog
 from pet.pet import Pet
+from event_dispatcher import global_event_dispatcher, Event
 import sys
 
 class PetWidget(QGraphicsView):
@@ -22,7 +25,7 @@ class PetWidget(QGraphicsView):
         
         self.init_ui()
         self.setup_timers()
-        self.setup_observers()
+        self.setup_event_listeners()
 
     def init_ui(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -48,8 +51,6 @@ class PetWidget(QGraphicsView):
         self.pet_item.setPos(initial_x, initial_y)
         
         self.show()
-        
-        self.show()
 
     def setup_timers(self):
         self.update_timer = QTimer()
@@ -60,20 +61,12 @@ class PetWidget(QGraphicsView):
         self.pet_timer.timeout.connect(self.pet.update)
         self.pet_timer.start(1000)
 
-    def setup_observers(self):
-        self.pet.action_manager.subscribe_to_action('feed', self.on_action_perform)
-        self.pet.action_manager.subscribe_to_action('play', self.on_action_perform)
-        self.pet.action_manager.subscribe_to_action('give_water', self.on_action_perform)
-        self.pet.action_manager.subscribe_to_action('rest', self.on_action_perform)
+    def setup_event_listeners(self):
+        global_event_dispatcher.add_listener("action:completed", self.on_action_completed)
+        global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_changed)
+        global_event_dispatcher.add_listener("need:changed", self.on_need_changed)
+        global_event_dispatcher.add_listener("pet:emotional_state_changed", self.on_emotional_state_changed)
 
-        self.pet.behavior_manager.subscribe_to_behavior('start', self.on_behavior_event)
-        self.pet.behavior_manager.subscribe_to_behavior('stop', self.on_behavior_event)
-        self.pet.behavior_manager.subscribe_to_behavior('update', self.on_behavior_event)
-
-        self.pet.needs_manager.subscribe_to_need('hunger', self.on_need_change)
-        self.pet.needs_manager.subscribe_to_need('thirst', self.on_need_change)
-        self.pet.needs_manager.subscribe_to_need('boredom', self.on_need_change)
-        self.pet.needs_manager.subscribe_to_need('stamina', self.on_need_change)
 
     def update_pet(self):
         self.pet_item.update_position()
@@ -91,19 +84,26 @@ class PetWidget(QGraphicsView):
         
         self.scene.update()
 
-    def on_action_perform(self, action, event_type):
-        if event_type == 'perform':
-            action_name = action.__class__.__name__.replace('Action', '').lower()
-            print(f"PetWidget: Action '{action_name}' performed.")
-            self.pet_item.handle_event('action_perform', {'action_name': action_name})
+    def on_action_completed(self, event):
+        action_name = event.data["action_name"]
+        print(f"PetWidget: Action '{action_name}' completed.")
+        self.pet_item.handle_event('action_completed', event.data)
 
-    def on_behavior_event(self, behavior, event_type):
-        print(f"PetWidget: Behavior '{behavior.__class__.__name__}' {event_type}.")
-        self.pet_item.handle_event('behavior_event', {'behavior_name': behavior.__class__.__name__, 'event_type': event_type})
+    def on_behavior_changed(self, event):
+        new_behavior = event.data["new_behavior"]
+        print(f"PetWidget: Behavior changed to {new_behavior}")
+        self.pet_item.handle_event('behavior_changed', event.data)
 
-    def on_need_change(self, need):
-        print(f"PetWidget: Need '{need.name}' changed to {need.value}.")
-        self.pet_item.handle_event('emotional_change', {'new_state': self.pet.state.emotional_state})
+    def on_need_changed(self, event):
+        need_name = event.data["need_name"]
+        new_value = event.data["new_value"]
+        print(f"PetWidget: Need '{need_name}' changed to {new_value}")
+        self.pet_item.handle_event('need_changed', event.data)
+
+    def on_emotional_state_changed(self, event):
+        new_state = event.data["new_state"]
+        print(f"PetWidget: Emotional state changed to {new_state}")
+        self.pet_item.handle_event('emotional_state_changed', event.data)
 
     def contextMenuEvent(self, event):
         context_menu = QMenu(self)
@@ -150,6 +150,7 @@ class PetWidget(QGraphicsView):
             self.pet.perform_action(action_name)
         except ValueError as e:
             print(f"PetWidget: {e}")
+            global_event_dispatcher.dispatch_event_sync(Event("ui:error", {"message": str(e)}))
 
     def show_stats_dialog(self):
         stats_dialog = StatsDialog(self.pet.needs_manager, self)
@@ -167,13 +168,16 @@ class PetWidget(QGraphicsView):
 
     def open_settings(self):
         print("Settings dialog is not yet implemented.")
+        global_event_dispatcher.dispatch_event_sync(Event("ui:settings_requested"))
 
     def close_application(self):
         self.pet.shutdown()
+        global_event_dispatcher.dispatch_event_sync(Event("application:shutdown"))
         QApplication.instance().quit()
 
     def closeEvent(self, event):
         self.pet.shutdown()
+        global_event_dispatcher.dispatch_event_sync(Event("application:shutdown"))
         event.accept()
 
 if __name__ == '__main__':

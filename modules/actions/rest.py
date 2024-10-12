@@ -1,3 +1,5 @@
+# modules/actions/rest.py
+
 from .action import Action
 
 class RestAction(Action):
@@ -12,5 +14,17 @@ class RestAction(Action):
     def perform(self):
         """Performs the rest action by increasing stamina."""
         print("Performing RestAction.")
+        self.dispatch_event("action:rest:started")
+        
+        initial_stamina = self.needs_manager.get_need_value('stamina')
         self.needs_manager.alter_need('stamina', self.stamina_gain)
-        self.notify_observers('perform')
+        final_stamina = self.needs_manager.get_need_value('stamina')
+        
+        result = {
+            "initial_stamina": initial_stamina,
+            "final_stamina": final_stamina,
+            "stamina_gained": final_stamina - initial_stamina
+        }
+        
+        self.dispatch_event("action:rest:completed", result)
+        return result

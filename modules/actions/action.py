@@ -1,6 +1,7 @@
 # modules/actions/action.py
 
 from abc import ABC, abstractmethod
+from event_dispatcher import global_event_dispatcher, Event
 
 class Action(ABC):
     """
@@ -17,39 +18,21 @@ class Action(ABC):
         """
         self.action_manager = action_manager
         self.needs_manager = needs_manager
-        self.observers = []
 
     @abstractmethod
     def perform(self):
         """Performs the action."""
         pass
 
-    def subscribe(self, observer):
+    def dispatch_event(self, event_type, data=None):
         """
-        Subscribes an observer to this action.
+        Dispatches an event related to this action.
 
         Args:
-            observer (callable): The observer function or method.
+            event_type (str): The type of event to dispatch.
+            data (dict, optional): Additional data to include with the event.
         """
-        if observer not in self.observers:
-            self.observers.append(observer)
-
-    def unsubscribe(self, observer):
-        """
-        Unsubscribes an observer from this action.
-
-        Args:
-            observer (callable): The observer function or method to remove.
-        """
-        if observer in self.observers:
-            self.observers.remove(observer)
-
-    def notify_observers(self, event_type):
-        """
-        Notifies all subscribed observers about an event.
-
-        Args:
-            event_type (str): The type of event ('start', 'perform', 'end').
-        """
-        for observer in self.observers:
-            observer(self, event_type)
+        event_data = {"action_name": self.__class__.__name__}
+        if data:
+            event_data.update(data)
+        global_event_dispatcher.dispatch_event_sync(Event(event_type, event_data))

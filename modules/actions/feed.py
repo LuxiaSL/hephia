@@ -1,3 +1,5 @@
+# modules/actions/feed.py
+
 from .action import Action
 
 class FeedAction(Action):
@@ -12,5 +14,17 @@ class FeedAction(Action):
     def perform(self):
         """Performs the feeding action by reducing hunger."""
         print("Performing FeedAction.")
+        self.dispatch_event("action:feed:started")
+        
+        initial_hunger = self.needs_manager.get_need_value('hunger')
         self.needs_manager.alter_need('hunger', -self.food_value)
-        self.notify_observers('perform')
+        final_hunger = self.needs_manager.get_need_value('hunger')
+        
+        result = {
+            "initial_hunger": initial_hunger,
+            "final_hunger": final_hunger,
+            "hunger_reduced": initial_hunger - final_hunger
+        }
+        
+        self.dispatch_event("action:feed:completed", result)
+        return result

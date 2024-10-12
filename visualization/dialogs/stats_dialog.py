@@ -2,6 +2,7 @@
 
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar, QPushButton
 from PyQt5.QtCore import Qt
+from event_dispatcher import global_event_dispatcher, Event
 
 class StatsDialog(QDialog):
     """
@@ -21,7 +22,7 @@ class StatsDialog(QDialog):
         self.setWindowTitle("Pet Stats")
         self.setFixedSize(300, 300)  # Increased height to accommodate emotional state
         self.init_ui()
-        self.setup_observers()
+        self.setup_event_listeners()
         self.initialize_emotional_state()
 
     def init_ui(self):
@@ -88,79 +89,58 @@ class StatsDialog(QDialog):
         progress_bar.setStyleSheet(self.get_style_sheet(initial_value))
         return {'label': label, 'bar': progress_bar}
 
-    def setup_observers(self):
+    def setup_event_listeners(self):
         """
-        Subscribes to need changes to update the progress bars accordingly.
+        Sets up event listeners for need changes and emotional state changes.
         """
-        needs = ['hunger', 'thirst', 'boredom', 'stamina']
-        for need in needs:
-            self.needs_manager.subscribe_to_need(need, self.update_need)
-            self.needs_manager.subscribe_to_need(need, self.update_emotional_state)
+        global_event_dispatcher.add_listener("need:changed", self.on_need_changed)
+        global_event_dispatcher.add_listener("pet:emotional_state_changed", self.on_emotional_state_changed)
 
     def initialize_emotional_state(self):
         """
         Initializes the emotional state label based on current needs.
         """
-        # Trigger an initial emotional state update
-        self.update_emotional_state(None)
+        # Request the current emotional state
+        global_event_dispatcher.dispatch_event_sync(Event("ui:request_emotional_state"))
 
-    def update_need(self, need):
+    def on_need_changed(self, event):
         """
         Updates the corresponding progress bar when a need changes.
 
         Args:
-            need (Need): The need that has changed.
+            event (Event): The need change event.
         """
-        need_name = need.name.capitalize()
+        need_name = event.data['need_name']
+        new_value = event.data['new_value']
+        
         try:
-            # Assuming need.value is within [min_value, max_value]
-            normalized_value = (need.value - need.min_value) / (need.max_value - need.min_value) * 100
-            value = max(0, min(int(normalized_value), 100))  # Clamp between 0 and 100
+            value = max(0, min(int(new_value), 100))  # Clamp between 0 and 100
         except Exception as e:
-            print(f"Error normalizing value for {need.name}: {e}")
+            print(f"Error normalizing value for {need_name}: {e}")
             value = 50  # Default value in case of error
 
-        if need.name == 'hunger':
+        if need_name == 'hunger':
             self.hunger_bar['bar'].setValue(value)
             self.hunger_bar['bar'].setStyleSheet(self.get_style_sheet(value))
-        elif need.name == 'thirst':
+        elif need_name == 'thirst':
             self.thirst_bar['bar'].setValue(value)
             self.thirst_bar['bar'].setStyleSheet(self.get_style_sheet(value))
-        elif need.name == 'boredom':
+        elif need_name == 'boredom':
             self.boredom_bar['bar'].setValue(value)
             self.boredom_bar['bar'].setStyleSheet(self.get_style_sheet(value))
-        elif need.name == 'stamina':
+        elif need_name == 'stamina':
             self.stamina_bar['bar'].setValue(value)
             self.stamina_bar['bar'].setStyleSheet(self.get_style_sheet(value))
 
-    def update_emotional_state(self, need):
+    def on_emotional_state_changed(self, event):
         """
         Updates the emotional state label based on the pet's current state.
 
         Args:
-            need (Need): The need that has changed. (Optional for initial call)
+            event (Event): The emotional state change event.
         """
-        try:
-            hunger = self.needs_manager.get_need_value('hunger')
-            thirst = self.needs_manager.get_need_value('thirst')
-            boredom = self.needs_manager.get_need_value('boredom')
-            stamina = self.needs_manager.get_need_value('stamina')
-
-            if hunger > 80:
-                state = 'Hungry'
-            elif thirst > 80:
-                state = 'Thirsty'
-            elif boredom > 80:
-                state = 'Bored'
-            elif stamina < 20:
-                state = 'Tired'
-            else:
-                state = 'Happy'
-
-            self.emotional_state_label.setText(f"Emotional State: {state}")
-        except Exception as e:
-            print(f"Error updating emotional state: {e}")
-            self.emotional_state_label.setText("Emotional State: Unknown")
+        new_state = event.data['new_state']
+        self.emotional_state_label.setText(f"Emotional State: {new_state.capitalize()}")
 
     def get_style_sheet(self, value):
         """
