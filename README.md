@@ -1,5 +1,3 @@
-#  Hephia
-
 <div align="center">
 
 ![Hephia Concept Art](/assets/images/concept.png)
