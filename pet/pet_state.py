@@ -14,7 +14,7 @@ class PetState:
         self.direction = (1, 0)  # (dx, dy) direction vector
 
         # Emotional state
-        self.emotional_state = 'neutral'  # Placeholder for emotional states like 'happy', 'sad'
+        self.mood = 'neutral'  # Placeholder for emotional states like 'happy', 'sad'
 
         # Additional state attributes can be added here
         # e.g., health status, energy level, etc.
@@ -37,11 +37,11 @@ class PetState:
         """
         self.direction = new_direction
 
-    def update_emotional_state(self, new_state):
+    def update_mood(self, new_state):
         """
         Updates the pet's emotional state.
 
         Args:
             new_state (str): The new emotional state.
         """
-        self.emotional_state = new_state
+        self.mood = new_state

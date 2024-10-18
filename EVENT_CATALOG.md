@@ -35,6 +35,19 @@ This document lists all events used in the Hephia project.
   - `result`: dict (action-specific result data)
 - **Description**: Dispatched when an action is completed.
 
+### action:{action_name}:started
+- **Source**: Specific Action classes (e.g., FeedAction, PlayAction)
+- **Data**:
+  - `action_name`: str
+- **Description**: Dispatched when a specific action starts.
+
+### action:{action_name}:completed
+- **Source**: Specific Action classes (e.g., FeedAction, PlayAction)
+- **Data**:
+  - `action_name`: str
+  - `result`: dict (action-specific result data)
+- **Description**: Dispatched when a specific action is completed.
+
 ## Behaviors Module
 
 ### behavior:changed

@@ -25,7 +25,7 @@ class PetGraphicsItem(QGraphicsItem):
     def setup_event_listeners(self):
         global_event_dispatcher.add_listener("pet:updated", self.on_pet_updated)
         global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_changed)
-        global_event_dispatcher.add_listener("pet:emotional_state_changed", self.on_emotional_state_changed)
+        global_event_dispatcher.add_listener("mood:changed", self.on_mood_changed)
 
     def boundingRect(self):
         return QRectF(-60, -60, 120, 120)
@@ -120,9 +120,10 @@ class PetGraphicsItem(QGraphicsItem):
         # Update animation or appearance based on new behavior
         self.update()
 
-    def on_emotional_state_changed(self, event):
+    def on_mood_changed(self, event):
         new_state = event.data["new_state"]
-        # Update appearance based on new emotional state
+        # Update appearance based on new mood
+        self.renderer.handle_event('mood_change', {'new_state': new_state})
         self.update()
 
     def handle_event(self, event_type, event_data):

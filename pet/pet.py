@@ -29,7 +29,7 @@ class Pet:
 
         # Initialize cognitive and emotional modules
         self.memory_system = MemorySystem()
-        self.mood_synthesizer = MoodSynthesizer()
+        self.mood_synthesizer = MoodSynthesizer(self.memory_system, self.needs_manager)
         self.cognitive_processor = CognitiveProcessor()
         self.emotional_processor = EmotionalProcessor(
             self.cognitive_processor,
@@ -61,9 +61,6 @@ class Pet:
         new_value = event.data['new_value']
         print(f"Pet: Need '{need_name}' changed to {new_value}")
 
-        #STRONG NOTE: THE EMOTIONAL STATE FUNCTION HERE IS **NOT** RELATED TO THE EMOTIONAL MODULE. IT IS A VERY POORLY NAMED METHOD FOR UPDATING THE CURRENT VISUAL STATE, WHICH WOULD BE HANDLED BY BOTH THE MOOD/EMOTIONAL/COGNITIVE MODULES
-        self.update_emotional_state()
-
     def on_behavior_change(self, event):
         """
         Handles behavior change events.
@@ -86,13 +83,12 @@ class Pet:
             event (Event): The mood change event containing mood data.
         """
         # Extract mood information from the event
-        new_mood = event.data.get('new_mood')
+        new_mood = event.data.get('new_state')
+
+        self.state.update_mood(new_mood)
         
         # Log the mood change
         print(f"Pet: Mood changed to {new_mood}")
-        
-        # Update the pet's emotional state based on the new mood
-        self.update_emotional_state()
 
     def on_new_emotion(self, event):
         """
@@ -104,11 +100,8 @@ class Pet:
         # Extract emotion information from the event
         new_emotion = event.data.get('emotion')
         
-        # Log the new emotion
-        print(f"Pet: New emotion experienced: {new_emotion.name}")
-        
-        # Update the pet's emotional state based on the new emotion
-        self.update_emotional_state()
+        # Log the emotion
+        print(f"Pet: Emotion experienced: {new_emotion.name}")
 
     def update(self):
         """
@@ -126,12 +119,6 @@ class Pet:
         # Update mood
         self.mood_synthesizer.update_mood()
 
-        # Update emotional state based on needs and behaviors
-        # NOTE:: PLACE THE BELOW FUNCTIONALITY INTO THE MOOD SYNTHESIZER AND EXTEND BASED ON SUM OF RECENT EMOTIONS BEING POSITIVE OR NEGATIVE AND INTENSITY OR W.E
-        # NOTE:: THE SUM FUNCTIONALITY SIMULATES THE MEMORY FUNCTIONALITY, WHICH WILL LIKELY FOLLOW EMOTIONAL MODULE IN IMPLEMENTATION
-        # NOTE:: ALSO CAN OVERRIDE WHEN SPECIFIC NEEDS ARE V LOW TO SPECIFIC STATES
-        self.update_emotional_state()
-
         # Dispatch a pet updated event
         # See EVENT_CATALOG.md for full event details
         global_event_dispatcher.dispatch_event_sync(Event("pet:updated", {"pet": self}))
@@ -145,32 +132,6 @@ class Pet:
         """
         self.action_manager.perform_action(action_name)
 
-    def update_emotional_state(self):
-        """
-        Updates the pet's emotional state based on current needs and behaviors.
-        """
-        # Simple example logic for emotional state determination
-        hunger = self.needs_manager.get_need_value('hunger')
-        boredom = self.needs_manager.get_need_value('boredom')
-        stamina = self.needs_manager.get_need_value('stamina')
-
-        old_state = self.state.emotional_state
-
-        if hunger > 80:
-            new_state = 'hungry'
-        elif boredom > 80:
-            new_state = 'bored'
-        elif stamina < 20:
-            new_state = 'tired'
-        else:
-            new_state = 'happy'
-
-        if new_state != old_state:
-            self.state.update_emotional_state(new_state)
-            global_event_dispatcher.dispatch_event_sync(Event("pet:emotional_state_changed", {
-                "old_state": old_state,
-                "new_state": new_state
-            }))
 
     def shutdown(self):
         """

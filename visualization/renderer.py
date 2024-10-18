@@ -12,8 +12,8 @@ class Renderer(QObject):
         self.update_pet_signal.emit()
 
     def handle_event(self, event_type, event_data=None):
-        # This method can be used to handle events that might affect the pet's appearance
-        if event_type == 'emotional_change':
+        if event_type == 'mood_change':
+            self.pet_state.update_mood(event_data['new_state'])
             self.update()
         elif event_type == 'action_perform':
             self.update()
@@ -28,7 +28,7 @@ class Renderer(QObject):
             'tired': '😴',
             'neutral': '😐'
         }
-        return emojis.get(self.pet_state.emotional_state, '😐')
+        return emojis.get(self.pet_state.mood, '😐')
 
     def get_body_color(self):
         # Return the appropriate body color based on the pet's state

@@ -65,7 +65,7 @@ class PetWidget(QGraphicsView):
         global_event_dispatcher.add_listener("action:completed", self.on_action_completed)
         global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_changed)
         global_event_dispatcher.add_listener("need:changed", self.on_need_changed)
-        global_event_dispatcher.add_listener("pet:emotional_state_changed", self.on_emotional_state_changed)
+        global_event_dispatcher.add_listener("mood:changed", self.on_mood_changed)
         global_event_dispatcher.add_listener("emotion:new", self.on_new_emotion)
 
 
@@ -109,10 +109,10 @@ class PetWidget(QGraphicsView):
         #print(f"PetWidget: Need '{need_name}' changed to {new_value}")
         self.pet_item.handle_event('need_changed', event.data)
 
-    def on_emotional_state_changed(self, event):
+    def on_mood_changed(self, event):
         new_state = event.data["new_state"]
         #print(f"PetWidget: Emotional state changed to {new_state}")
-        self.pet_item.handle_event('emotional_state_changed', event.data)
+        self.pet_item.handle_event('mood_changed', event.data)
 
     def contextMenuEvent(self, event):
         context_menu = QMenu(self)
