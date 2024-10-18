@@ -58,6 +58,8 @@ class BehaviorManager:
         self.current_behavior = new_behavior
         self.current_behavior.start()
 
+        # Dispatch behavior:changed event
+        # See EVENT_CATALOG.md for full event details
         global_event_dispatcher.dispatch_event_sync(Event("behavior:changed", {
             "old_behavior": old_behavior.__class__.__name__ if old_behavior else None,
             "new_behavior": new_behavior.__class__.__name__

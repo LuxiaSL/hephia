@@ -64,34 +64,40 @@ class EventDispatcher:
         else:
             self.listeners[event_type] = [l for l in self.listeners[event_type] if l["callback"] != callback]
 
-    async def dispatch_event(self, event: Event) -> None:
+    def dispatch_event(self, event: Event) -> None:
         """
         Dispatches an event to all registered listeners.
 
+        This method handles both specific event type listeners and wildcard listeners.
+        It sorts listeners by priority and calls them in order.
+
         Args:
             event (Event): The event to dispatch.
+
+        Raises:
+            None, but prints error messages for exceptions in listeners.
         """
+        # Create a copy of the listeners for this event type
         listeners_to_call = self.listeners[event.event_type].copy()
-        listeners_to_call.extend([l for l in self.wildcard_listeners if l["pattern"].match(event.event_type)])
+        
+        # Add matching wildcard listeners to the list
+        listeners_to_call.extend(
+            [l for l in self.wildcard_listeners if l["pattern"].match(event.event_type)]
+        )
+        
+        # Sort listeners by priority (highest first)
         listeners_to_call.sort(key=lambda x: x["priority"], reverse=True)
 
+        # Call each listener's callback with the event
         for listener in listeners_to_call:
             try:
-                if asyncio.iscoroutinefunction(listener["callback"]):
-                    await listener["callback"](event)
-                else:
-                    listener["callback"](event)
+                listener["callback"](event)
             except Exception as e:
+                # Print any errors that occur in listeners
                 print(f"Error in event listener: {e}")
 
-    def dispatch_event_sync(self, event: Event) -> None:
-        """
-        Dispatches an event synchronously to all registered listeners.
-
-        Args:
-            event (Event): The event to dispatch.
-        """
-        asyncio.get_event_loop().run_until_complete(self.dispatch_event(event))
+    # For compatibility, dispatch_event_sync can be an alias to dispatch_event
+    dispatch_event_sync = dispatch_event
 
 # Global event dispatcher instance
 global_event_dispatcher = EventDispatcher()

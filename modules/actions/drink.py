@@ -14,6 +14,9 @@ class GiveWaterAction(Action):
     def perform(self):
         """Performs the giving water action by reducing thirst."""
         print("Performing GiveWaterAction.")
+        
+        # Dispatch action:give_water:started event
+        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:give_water:started")
         
         initial_thirst = self.needs_manager.get_need_value('thirst')
@@ -26,5 +29,7 @@ class GiveWaterAction(Action):
             "thirst_reduced": initial_thirst - final_thirst
         }
         
+        # Dispatch action:give_water:completed event
+        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:give_water:completed", result)
         return result

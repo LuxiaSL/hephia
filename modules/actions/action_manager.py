@@ -50,25 +50,3 @@ class ActionManager:
             "action_name": action_name,
             "result": result
         }))
-
-    def register_action(self, action_name, action_instance):
-        """
-        Registers a new action with the ActionManager.
-
-        Args:
-            action_name (str): The name of the action.
-            action_instance (Action): The action instance to register.
-        """
-        self.available_actions[action_name] = action_instance
-        global_event_dispatcher.dispatch_event_sync(Event("action:registered", {"action_name": action_name}))
-
-    def unregister_action(self, action_name):
-        """
-        Unregisters an action from the ActionManager.
-
-        Args:
-            action_name (str): The name of the action to unregister.
-        """
-        if action_name in self.available_actions:
-            del self.available_actions[action_name]
-            global_event_dispatcher.dispatch_event_sync(Event("action:unregistered", {"action_name": action_name}))

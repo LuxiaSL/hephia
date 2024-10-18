@@ -52,6 +52,8 @@ class IdleBehavior(Behavior):
         for need, modifier in self.multiplier_modifiers.items():
             needs_manager.alter_decay_rate_multiplier(need, modifier)
 
+        # Dispatch behavior:idle:modifiers_applied event
+        # See EVENT_CATALOG.md for full event details
         global_event_dispatcher.dispatch_event_sync(Event("behavior:idle:modifiers_applied", {
             "base_modifiers": self.base_rate_modifiers,
             "multiplier_modifiers": self.multiplier_modifiers
@@ -69,6 +71,8 @@ class IdleBehavior(Behavior):
         for need, modifier in self.multiplier_modifiers.items():
             needs_manager.alter_decay_rate_multiplier(need, 1/modifier)  # Reverse the modification
         
+        # Dispatch behavior:idle:modifiers_removed event
+        # See EVENT_CATALOG.md for full event details
         global_event_dispatcher.dispatch_event_sync(Event("behavior:idle:modifiers_removed", {
             "base_modifiers": self.base_rate_modifiers,
             "multiplier_modifiers": self.multiplier_modifiers

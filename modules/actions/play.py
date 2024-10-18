@@ -15,6 +15,9 @@ class PlayAction(Action):
     def perform(self):
         """Performs the play action by reducing boredom and stamina."""
         print("Performing PlayAction.")
+        
+        # Dispatch action:play:started event
+        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:play:started")
         
         initial_boredom = self.needs_manager.get_need_value('boredom')
@@ -35,5 +38,7 @@ class PlayAction(Action):
             "stamina_reduced": initial_stamina - final_stamina
         }
         
+        # Dispatch action:play:completed event
+        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:play:completed", result)
         return result

@@ -14,6 +14,9 @@ class FeedAction(Action):
     def perform(self):
         """Performs the feeding action by reducing hunger."""
         print("Performing FeedAction.")
+        
+        # Dispatch action:feed:started event
+        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:feed:started")
         
         initial_hunger = self.needs_manager.get_need_value('hunger')
@@ -26,5 +29,7 @@ class FeedAction(Action):
             "hunger_reduced": initial_hunger - final_hunger
         }
         
+        # Dispatch action:feed:completed event
+        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:feed:completed", result)
         return result

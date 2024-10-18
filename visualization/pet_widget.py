@@ -66,6 +66,7 @@ class PetWidget(QGraphicsView):
         global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_changed)
         global_event_dispatcher.add_listener("need:changed", self.on_need_changed)
         global_event_dispatcher.add_listener("pet:emotional_state_changed", self.on_emotional_state_changed)
+        global_event_dispatcher.add_listener("emotion:new", self.on_new_emotion)
 
 
     def update_pet(self):
@@ -86,23 +87,31 @@ class PetWidget(QGraphicsView):
 
     def on_action_completed(self, event):
         action_name = event.data["action_name"]
-        print(f"PetWidget: Action '{action_name}' completed.")
+        #print(f"PetWidget: Action '{action_name}' completed.")
         self.pet_item.handle_event('action_completed', event.data)
 
     def on_behavior_changed(self, event):
         new_behavior = event.data["new_behavior"]
-        print(f"PetWidget: Behavior changed to {new_behavior}")
+        #print(f"PetWidget: Behavior changed to {new_behavior}")
         self.pet_item.handle_event('behavior_changed', event.data)
+    
+    def on_new_emotion(self, event):
+        emotion = event.data["emotion"]
+
+        ##NOTE:: IN THE FUTURE, WE WANT THIS TO ONLY TRIGGER PAST A CERTAIN INTENSITY LEVEL VISUALLY. WE WANT IT TO FLOW THROUGH THE SYSTEM, BUT THINK OF HOW IT TAKES EITHER DIRECT CHOICE OR
+        ## A CERTAIN INTENSITY TO EVOKE A VISUAL EMOTIONAL RESPONSE FROM SOMEONE. MEANS WE NEED TO EITHER COGNITIVELY PUSH THE INTENSITY AND SHOW IT, OR IT IS INTENSE ENOUGH AS A STANDALONE
+        #print(f"PetWidget: New emotion received: {emotion}")
+        self.pet_item.handle_event('emotion_new', event.data)
 
     def on_need_changed(self, event):
         need_name = event.data["need_name"]
         new_value = event.data["new_value"]
-        print(f"PetWidget: Need '{need_name}' changed to {new_value}")
+        #print(f"PetWidget: Need '{need_name}' changed to {new_value}")
         self.pet_item.handle_event('need_changed', event.data)
 
     def on_emotional_state_changed(self, event):
         new_state = event.data["new_state"]
-        print(f"PetWidget: Emotional state changed to {new_state}")
+        #print(f"PetWidget: Emotional state changed to {new_state}")
         self.pet_item.handle_event('emotional_state_changed', event.data)
 
     def contextMenuEvent(self, event):
