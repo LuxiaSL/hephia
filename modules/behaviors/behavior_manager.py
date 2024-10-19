@@ -8,35 +8,36 @@ class BehaviorManager:
     """
     Manages the pet's behaviors.
     """
-
-    def __init__(self, pet_state, needs_manager):
+    def __init__(self, pet_context, needs_manager):
         """
         Initializes the BehaviorManager.
 
         Args:
-            pet_state (PetState): The pet's current state.
-            needs_manager (NeedsManager): The NeedsManager instance.
+            pet_context (PetContext): methods to retrieve pet's current internal state
+            needs_manager (NeedsManager): The NeedsManager instance (used by behaviors to manage decay rates)
         """
-        self.pet_state = pet_state
+        self.pet_context = pet_context
         self.needs_manager = needs_manager
         self.current_behavior = None
 
-        # Initialize behaviors
-        self.idle_behavior = IdleBehavior(self, pet_state)
-        self.walk_behavior = WalkBehavior(self, pet_state)
+        self.behaviors = {
+            'idle': IdleBehavior(self),
+            'walk': WalkBehavior(self),
+            # Add more behaviors here
+        }
         # Other behaviors...
 
         # Start with idle behavior
-        self.change_behavior(self.idle_behavior)
+        self.change_behavior('idle')
 
         # Set up event listeners
         self.setup_event_listeners()
 
     def setup_event_listeners(self):
-        """
-        Sets up event listeners for the BehaviorManager.
-        """
-        global_event_dispatcher.add_listener("need:changed", self.on_need_change)
+        global_event_dispatcher.add_listener("need:changed", self.determine_behavior)
+        global_event_dispatcher.add_listener("action:completed", self.determine_behavior)
+        global_event_dispatcher.add_listener("mood:changed", self.determine_behavior)
+        global_event_dispatcher.add_listener("emotion:new", self.determine_behavior)
 
     def update(self):
         """
@@ -45,41 +46,54 @@ class BehaviorManager:
         if self.current_behavior:
             self.current_behavior.update()
 
-    def change_behavior(self, new_behavior):
+    def change_behavior(self, new_behavior_name):
         """
         Changes the current behavior.
 
         Args:
-            new_behavior (Behavior): The new behavior to activate.
+            new_behavior_name (str): selected behavior to activate
         """
         if self.current_behavior:
+            old_behavior = self.current_behavior
             self.current_behavior.stop()
-        old_behavior = self.current_behavior
-        self.current_behavior = new_behavior
+        self.current_behavior = self.behaviors[new_behavior_name]
         self.current_behavior.start()
 
-        # Dispatch behavior:changed event
-        # See EVENT_CATALOG.md for full event details
         global_event_dispatcher.dispatch_event_sync(Event("behavior:changed", {
             "old_behavior": old_behavior.__class__.__name__ if old_behavior else None,
-            "new_behavior": new_behavior.__class__.__name__
+            "new_behavior": new_behavior_name
         }))
 
-    def on_need_change(self, event):
+    def determine_behavior(self, event):
         """
-        Reacts to changes in needs.
+        alters behavior based on event received, if necessary.
 
-        Args:
-            event (Event): The need change event.
+        args:
+            event (Event): *any* given event from above
         """
-        need_name = event.data['need_name']
-        new_value = event.data['new_value']
+        event_type = event.event_type
+        event_data = event.data
 
-        # Example logic: if hunger is high, switch to seek food behavior
-        if need_name == 'hunger' and new_value > 80:
-            # Implement logic to change behavior accordingly
-            pass
-        # Add more behavior change logic based on needs
+        # get holistic accounting
+        current_needs = self.pet_context.get_current_needs()
+        current_mood = self.pet_context.get_current_mood()
+        recent_emotions = self.pet_context.get_recent_emotions()
+        
+        # what to do...
+        new_behavior = self._calculate_behavior(event_type, event_data, current_needs, current_mood, recent_emotions)
+
+        if new_behavior != self.current_behavior.__class__.__name__:
+            self.change_behavior(new_behavior)
+
+    def _calculate_behavior(self, event_type, event_data, current_needs, current_mood, recent_emotions):
+        # Simple logic for demonstration purposes
+        # In a real implementation, this would be more complex
+        if current_needs['hunger'] > 80 or current_needs['thirst'] > 80:
+            return 'walk'  # Assume walking leads to finding food/water
+        elif current_needs['boredom'] > 70:
+            return 'walk'
+        else:
+            return 'idle'
 
     def get_current_behavior(self):
         """

@@ -8,8 +8,8 @@ class IdleBehavior(Behavior):
     Represents the pet's idle state.
     """
 
-    def __init__(self, behavior_manager, pet_state):
-        super().__init__(behavior_manager, pet_state)
+    def __init__(self, behavior_manager):
+        super().__init__(behavior_manager)
         # Initialize idle-specific properties
         self.base_rate_modifiers = {}
         self.multiplier_modifiers = {}

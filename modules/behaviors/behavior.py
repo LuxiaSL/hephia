@@ -8,16 +8,14 @@ class Behavior(ABC):
     Abstract base class for all behaviors.
     """
 
-    def __init__(self, behavior_manager, pet_state):
+    def __init__(self, behavior_manager):
         """
         Initializes the Behavior.
 
         Args:
             behavior_manager (BehaviorManager): Reference to the BehaviorManager.
-            pet_state (PetState): The pet's current state.
         """
         self.behavior_manager = behavior_manager
-        self.pet_state = pet_state
         self.active = False
 
     @abstractmethod

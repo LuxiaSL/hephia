@@ -1,23 +1,30 @@
 # pet/pet_state.py
 
+"""
+PetState module.
+
+Manages the pet's external state related to visualization, such as position and movement
+within the environment. It does not influence the pet's internal state or cognitive processes.
+"""
+
 class PetState:
     """
-    Encapsulates the pet's state information.
+    Encapsulates the pet's external state within the environment.
+
+    Used exclusively by visualization components to render the pet on the screen.
+    It includes attributes like position and movement direction.
     """
 
     def __init__(self):
         """
-        Initializes the PetState with default values.
+        Initializes the PetState with default values for external state.
         """
         # Position attributes
         self.position = (0, 0)  # (x, y) coordinates
         self.direction = (1, 0)  # (dx, dy) direction vector
 
-        # Emotional state
-        self.mood = 'neutral'  # Placeholder for emotional states like 'happy', 'sad'
-
-        # Additional state attributes can be added here
-        # e.g., health status, energy level, etc.
+        # Additional external state attributes can be added here
+        # e.g., animation states, visual effects, etc.
 
     def update_position(self, new_position):
         """
@@ -37,11 +44,4 @@ class PetState:
         """
         self.direction = new_direction
 
-    def update_mood(self, new_state):
-        """
-        Updates the pet's emotional state.
-
-        Args:
-            new_state (str): The new emotional state.
-        """
-        self.mood = new_state
+    # No methods or attributes related to internal state should be added here.

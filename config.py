@@ -28,3 +28,6 @@ class Config:
     THIRST_BASE_DECAY_RATE = 0.2
     BOREDOM_BASE_DECAY_RATE = 0.1
     STAMINA_BASE_DECAY_RATE = -0.1  # Negative because stamina decreases over time
+
+    # timers (in seconds)
+    NEED_UPDATE_TIMER = 5 

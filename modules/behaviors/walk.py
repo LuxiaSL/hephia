@@ -8,8 +8,8 @@ class WalkBehavior(Behavior):
     Represents the pet's walking state.
     """
 
-    def __init__(self, behavior_manager, pet_state):
-        super().__init__(behavior_manager, pet_state)
+    def __init__(self, behavior_manager):
+        super().__init__(behavior_manager)
         # Initialize walk-specific properties
         self.base_rate_modifiers = {}
         self.multiplier_modifiers = {}

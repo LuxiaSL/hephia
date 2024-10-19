@@ -19,4 +19,8 @@ class CognitiveProcessor:
         """
         # Placeholder implementation: return the emotion unmodified
         return emotion
+    
+    def periodic_check(self):
+        #eventually, will determine whether or not to generate a thought based on various factors
+        return None
 
