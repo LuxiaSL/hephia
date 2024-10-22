@@ -1,6 +1,5 @@
 # event_dispatcher.py
 
-import asyncio
 from collections import defaultdict
 import re
 from typing import Any, Callable, Dict, List, Optional
@@ -96,7 +95,7 @@ class EventDispatcher:
                 # Print any errors that occur in listeners
                 print(f"Error in event listener: {e}")
 
-    # For compatibility, dispatch_event_sync can be an alias to dispatch_event
+    # compatibility
     dispatch_event_sync = dispatch_event
 
 # Global event dispatcher instance

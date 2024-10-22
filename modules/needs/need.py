@@ -27,14 +27,7 @@ class Need:
         # Decay rate controls
         self.base_decay_rate = base_decay_rate
         self.decay_rate_multiplier = 1.0
-
-    def update(self):
-        """
-        Updates the need by increasing its value based on the effective decay rate.
-        """
-        decay_rate = self.calculate_effective_decay_rate()
-        self.alter(decay_rate)
-
+        
     def alter(self, amount):
         """
         Alters the need's value by a specified amount, ensuring it stays within min and max bounds.
@@ -43,6 +36,13 @@ class Need:
             amount (float): The amount to change the need's value by.
         """
         self.value = max(self.min_value, min(self.value + amount, self.max_value))
+
+    def update(self):
+        """
+        Updates the need by increasing its value based on the effective decay rate.
+        """
+        decay_rate = self.calculate_effective_decay_rate()
+        self.alter(decay_rate)
 
     def calculate_effective_decay_rate(self):
         """

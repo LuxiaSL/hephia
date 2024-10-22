@@ -74,15 +74,16 @@ class Pet:
         if not self.is_active:
             return
         
+        #event-based system means only need to update
         self.needs_manager.update_needs()
         self.cognitive_processor.periodic_check()
+        self.memory_system.coalesce()
 
         global_event_dispatcher.dispatch_event_sync(Event("pet:updated", {"pet": self}))
 
-
     def perform_action(self, action_name):
         """
-        Performs a user-initiated action.
+        performs desired action (used by either user or pet)
 
         Args:
             action_name (str): The name of the action to perform.

@@ -31,7 +31,7 @@ class PetContext:
         Returns:
             Mood: The current mood of the pet.
         """
-        return self.pet.mood_synthesizer.get_current_mood()
+        return {self.pet.mood_synthesizer.get_current_mood_name(), self.pet.mood_synthesizer.get_current_mood()}
 
     def get_current_behavior(self):
         """
@@ -47,9 +47,9 @@ class PetContext:
         Retrieves the pet's current needs from the NeedsManager.
 
         Returns:
-            dict: A dictionary of need names to their current values.
+            dict: A dictionary of need names to their current values and satisfaction levels
         """
-        return {need.name: need.value for need in self.pet.needs_manager.needs.values()}
+        return self.pet.needs_managet.get_needs_summary()
 
     def get_recent_emotions(self):
         """

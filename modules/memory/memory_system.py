@@ -43,3 +43,9 @@ class MemorySystem:
         self.body_memory = BodyMemory()
         # Other memory components like WorkingMemory, LongTermMemory can be added
 
+    def coalesce(self):
+        """
+        eventually, will self-review memories, send back to cognitive processor, determine whether to remember, done. something along those lines. discuss theory here.
+        """
+        return
+

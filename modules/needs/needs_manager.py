@@ -38,9 +38,7 @@ class NeedsManager:
         self.needs['stamina'] = Need(
             name='stamina',
             value=Config.INITIAL_STAMINA,
-            base_decay_rate=Config.STAMINA_BASE_DECAY_RATE,
-            min_value=0.0,
-            max_value=100.0
+            base_decay_rate=Config.STAMINA_BASE_DECAY_RATE
         )
 
     def update_needs(self, needs_to_update=None):
@@ -66,6 +64,8 @@ class NeedsManager:
                         "old_value": old_value,
                         "new_value": need.value
                     }))
+            else:
+                raise ValueError(f"Need '{need_name}' does not exist.")
 
     def alter_need(self, need_name, amount):
         """
@@ -139,3 +139,34 @@ class NeedsManager:
             }))
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")
+        
+    def get_needs_summary(self):
+        """
+        Gathers current needs information and packages it for use in computation with other modules.
+
+        Returns:
+            dict: A dictionary containing information about each need, including:
+                - current value
+                - satisfaction level (0-1)
+        """
+        needs_summary = {}
+        
+        for need_name, need in self.needs.items():
+            # Calculate the current decay rate
+            current_decay_rate = need.base_decay_rate * need.decay_rate_multiplier
+            
+            # calculate satisfaction based on type of decay
+            if need.base_decay_rate > 0:
+                raw_satisfaction = need.value / need.max_value
+            else:
+                raw_satisfaction = 1 - (need.value / need.max_value)
+        
+            # Ensure satisfaction is within [0, 1] range
+            satisfaction = max(0, min(1, satisfaction))
+            
+            needs_summary[need_name] = {
+                "current_value": need.value,
+                "satisfaction": satisfaction
+            }
+        
+        return needs_summary
