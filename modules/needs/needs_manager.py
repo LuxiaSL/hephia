@@ -23,22 +23,27 @@ class NeedsManager:
         self.needs['hunger'] = Need(
             name='hunger',
             value=Config.INITIAL_HUNGER,
-            base_decay_rate=Config.HUNGER_BASE_DECAY_RATE
+            base_rate=Config.HUNGER_BASE_RATE
         )
         self.needs['thirst'] = Need(
             name='thirst',
             value=Config.INITIAL_THIRST,
-            base_decay_rate=Config.THIRST_BASE_DECAY_RATE
+            base_rate=Config.THIRST_BASE_RATE
         )
         self.needs['boredom'] = Need(
             name='boredom',
             value=Config.INITIAL_BOREDOM,
-            base_decay_rate=Config.BOREDOM_BASE_DECAY_RATE
+            base_rate=Config.BOREDOM_BASE_RATE
+        ),
+        self.needs['companionship'] = Need(
+            name='companionship',
+            value=Config.INITIAL_COMPANIONSHIP,
+            base_rate=Config.COMPANIONSHIP_BASE_RATE
         )
         self.needs['stamina'] = Need(
             name='stamina',
             value=Config.INITIAL_STAMINA,
-            base_decay_rate=Config.STAMINA_BASE_DECAY_RATE
+            base_rate=Config.STAMINA_BASE_RATE
         )
 
     def update_needs(self, needs_to_update=None):
@@ -104,38 +109,38 @@ class NeedsManager:
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")
 
-    def alter_base_decay_rate(self, need_name, amount):
+    def alter_base_rate(self, need_name, amount):
         """
-        Alters the base decay rate of a specific need.
+        Alters the base rate of a specific need.
 
         Args:
             need_name (str): The name of the need.
-            amount (float): The amount to change the base decay rate by.
+            amount (float): The amount to change the base rate by.
         """
         need = self.needs.get(need_name)
         if need:
-            need.alter_base_decay_rate(amount)
-            global_event_dispatcher.dispatch_event_sync(Event("need:decay_rate_changed", {
+            need.alter_base_rate(amount)
+            global_event_dispatcher.dispatch_event_sync(Event("need:rate_changed", {
                 "need_name": need_name,
-                "new_base_rate": need.base_decay_rate
+                "new_base_rate": need.base_rate
             }))
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")
 
-    def alter_decay_rate_multiplier(self, need_name, factor):
+    def alter_rate_multiplier(self, need_name, factor):
         """
-        Alters the decay rate multiplier of a specific need.
+        Alters the rate multiplier of a specific need.
 
         Args:
             need_name (str): The name of the need.
-            factor (float): The factor to multiply the current multiplier by.
+            factor (float): The factor to add to the current multiplier.
         """
         need = self.needs.get(need_name)
         if need:
-            need.alter_decay_rate_multiplier(factor)
-            global_event_dispatcher.dispatch_event_sync(Event("need:decay_rate_changed", {
+            need.alter_rate_multiplier(factor)
+            global_event_dispatcher.dispatch_event_sync(Event("need:rate_changed", {
                 "need_name": need_name,
-                "new_multiplier": need.decay_rate_multiplier
+                "new_multiplier": need.base_rate_multiplier
             }))
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")
@@ -152,17 +157,14 @@ class NeedsManager:
         needs_summary = {}
         
         for need_name, need in self.needs.items():
-            # Calculate the current decay rate
-            current_decay_rate = need.base_decay_rate * need.decay_rate_multiplier
-            
-            # calculate satisfaction based on type of decay
-            if need.base_decay_rate > 0:
+            # calculate satisfaction based on type of rate
+            if need.base_rate > 0:
                 raw_satisfaction = need.value / need.max_value
             else:
                 raw_satisfaction = 1 - (need.value / need.max_value)
         
             # Ensure satisfaction is within [0, 1] range
-            satisfaction = max(0, min(1, satisfaction))
+            satisfaction = max(0, min(1, raw_satisfaction))
             
             needs_summary[need_name] = {
                 "current_value": need.value,

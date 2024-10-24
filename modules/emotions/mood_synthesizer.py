@@ -1,5 +1,22 @@
 # modules/emotions/mood_synthesizer.py
 
+"""
+Mood Synthesis System:
+
+Generates the pet's ongoing emotional state by integrating:
+- Recent emotional experiences {immediate feelings} -> {short-term impact}
+- Need satisfaction levels {physical state} -> {baseline mood}
+- Current behavior {activity influence} -> {embodied state}
+
+Unlike emotions which respond to specific events, mood represents a more
+stable emotional baseline that colors the pet's perception of events and
+influences its behavioral tendencies.
+
+Future integrations:
+- Memory-based mood influences through cognitive processing
+- Cognitive shaping of mood over time, indirectly via emotion influence & direct via mood influence
+"""
+
 from event_dispatcher import global_event_dispatcher, Event
 import time
 
@@ -54,6 +71,15 @@ class MoodSynthesizer:
         'frustrated': {'valence': -0.5, 'arousal': 0.5}
     }
 
+    BEHAVIOR_MOOD_INFLUENCES = {
+        'idle': {'valence': 0.1, 'arousal': -0.2},  # default state
+        'walk': {'valence': 0.2, 'arousal': 0.3},   # Active, engaged
+        'chase': {'valence': 0.6, 'arousal': 0.7},   # Energetic, excited
+        'sleep': {'valence': 0.1, 'arousal': -0.7},  # Peaceful, low arousal
+        'relax': {'valence': 0.3, 'arousal': -0.3},  # resting from action, slightly low arousal
+        # Future behaviors...
+    }
+
     def setup_event_listeners(self):
         global_event_dispatcher.add_listener("need:changed", self.update_mood)
         global_event_dispatcher.add_listener("action:completed", self.update_mood)
@@ -62,17 +88,14 @@ class MoodSynthesizer:
 
     def update_mood(self, event):
         # updates the pet's mood based on holistic information
-        event_type = event.event_type
-        event_data = event.data
-
         # retrieve info from context
         current_needs = self.pet_context.get_current_needs()
         recent_emotions = self.pet_context.get_recent_emotions()
         current_behavior = self.pet_context.get_current_behavior()
         # Calculate weighted valence and arousal from recent emotions
-        new_mood = self._calculate_mood(event_type, event_data, current_needs, recent_emotions, current_behavior)
+        new_mood = self._calculate_mood(current_needs, recent_emotions, current_behavior)
         
-        # if the mood has changed been altered
+        # if the mood has changed
         if new_mood.valence != self.current_mood.valence or new_mood.arousal != self.current_mood.arousal:
             # find relevant name
             self.current_mood = new_mood
@@ -87,7 +110,7 @@ class MoodSynthesizer:
                     "new_name": new_name
                 }))
 
-    def _calculate_mood(self, event_type, event_data, current_needs, recent_emotions, current_behavior):
+    def _calculate_mood(self, current_needs, recent_emotions, current_behavior):
         weighted_valence = 0.0
         weighted_arousal = 0.0
 
@@ -115,10 +138,12 @@ class MoodSynthesizer:
         weighted_arousal += self.weights['needs'] * need_arousal
 
         # calculate behavior contribution
-        behavior_valence = 0.1 if current_behavior.__class__.__name__ == 'WalkBehavior' else -0.1
-        behavior_arousal = 0.2 if current_behavior.__class__.__name__ == 'WalkBehavior' else -0.2
-        weighted_valence += self.weights['behavior'] * behavior_valence
-        weighted_arousal += self.weights['behavior'] * behavior_arousal
+        # calculate behavior contribution
+        behavior_name = current_behavior.__class__.__name__.lower()
+        if behavior_name in self.BEHAVIOR_MOOD_INFLUENCES:
+            influence = self.BEHAVIOR_MOOD_INFLUENCES[behavior_name]
+            weighted_valence += self.weights['behavior'] * influence['valence']
+            weighted_arousal += self.weights['behavior'] * influence['arousal']
 
         # eventually below, calculate the memory influence based on sentiment analysis via cognitive processing of non-body memory
         # when considering episodic memory; gradient scaling
@@ -129,20 +154,19 @@ class MoodSynthesizer:
             arousal=max(-1.0, min(1.0, weighted_arousal))
         )
 
-    def _map_mood_to_name(self, valence, arousal):
+    def _map_mood_to_name(self, _mood):
         """
-        Maps mood valence and arousal to a string.
+        Maps mood to a string.
 
         Args:
-            valence (float): The valence of the mood (-1 to 1).
-            arousal (float): The arousal level of the mood (-1 to 1).
+            _mood (Mood): contains valence/arousal to use
 
         Returns:
             str: The resulting mood string.
         """
         # estimate vicinity to mood
         distances = {
-            mood: ((v['valence'] - valence) ** 2 + (v['arousal'] - arousal) ** 2) ** 0.5
+            mood: ((v['valence'] - _mood.valence) ** 2 + (v['arousal'] - _mood.arousal) ** 2) ** 0.5
             for mood, v in self.MOOD_MAPPINGS.items()
         }
         

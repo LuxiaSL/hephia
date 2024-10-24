@@ -1,5 +1,15 @@
 # modules/emotions/emotional_processor.py
 
+"""
+Emotional Processing Pipeline:
+- Event triggers emotional response {immediate reaction} -> {models natural instinct}
+- Response modified by current mood {colors perception} -> {affects emotional intensity}
+- Behavior state influences emotion {physical state affects feelings} -> {models embodied cognition}
+- Future cognitive mediation {thoughtful processing} -> {enables emotional growth}
+
+Vectors accumulate and decay naturally, simulating the ebb and flow of emotional experience.
+"""
+
 from event_dispatcher import global_event_dispatcher, Event
 import time
 import copy
@@ -152,7 +162,10 @@ class EmotionalProcessor:
         },
         'behavior': {
             'idle': {'name': 'calm', 'valence': 0.1, 'arousal': -0.2},
-            'walk': {'name': 'alert', 'valence': 0.4, 'arousal': 0.5}
+            'walk': {'name': 'alert', 'valence': 0.4, 'arousal': 0.5},
+            'chase': {'name': 'excited', 'valence': 0.7, 'arousal': 0.8},
+            'sleep': {'name': 'peaceful', 'valence': 0.1, 'arousal': -0.8},
+            'relax': {'name': 'content', 'valence': 0.3, 'arousal': -0.4}
             # Add more behaviors as they are implemented
         }
     }
@@ -253,75 +266,120 @@ class EmotionalProcessor:
         # Process sequential influences on the same vector
         self._process_influences(initial_vector)
 
+    
     def _process_influences(self, vector):
-        """Processes mood and behavior influences on the given vector."""
-
-        # influence values *need* to be relative to original emotional vector.
-        # think of the analogy; when you're sad, blue is sad. when you're calm, blue is calm. when you're mad, you're harder to make happy, but you still acknowledge the attempt.
-        # when you're happy, it can be hard to make you sad, or it feels more like confusion.
-        # mood alters in jagged fashions. consider real paradigms and how to implement.
-
-        # then, same for behavior. when active, might be more arousal on average. when idle, more likely for things to be dull. and so on for other behaviors.
+        """
+        Processes mood and behavior influences on the given vector.
+       
+        Each influence is calculated relative to the current vector's state,
+        simulating how current emotions color our perception of new stimuli.
+        """
         # Apply mood influence
         mood_vector_data = self._get_mood_influence_vector()
         if mood_vector_data:
-            # Copy the vector to maintain the history
-            mood_vector = copy.deepcopy(vector)
-            mood_vector.source_type = 'mood_influenced'
-            mood_vector.name += '_mood'
+            # Copy while maintaining original event data
+            influenced_vector = copy.deepcopy(vector)
+           
+            # Calculate relative influence
+            rel_valence, rel_arousal = self._calculate_relative_influence(
+                vector, 
+                mood_vector_data['valence'],
+                mood_vector_data['arousal'],
+                influence_type='mood'
+            )
+           
+            # Calculate and apply dampening
             mood_intensity = self._calculate_intensity('mood', mood_vector_data)
-            dampening = self._calculate_dampening(
-                self._categorize_vector(mood_vector.valence, mood_vector.arousal)
-            )
-            mood_intensity *= dampening
+            category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
+            dampening = self._calculate_dampening(category)
+           
+            # Apply influence
+            influenced_vector.apply_influence(rel_valence, rel_arousal, mood_intensity * dampening)
+           
+            # Update name only if category changed
+            new_category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
+            if new_category != category:
+               influenced_vector.name = self._get_emotion_name_by_category(new_category)
+               
+            # Add to stimulus and log
+            self.current_stimulus.add_vector(influenced_vector)
+            self.memory_system.body_memory.log(influenced_vector)
+            vector = influenced_vector  # Continue with influenced vector
 
-            # Apply mood influence
-            mood_vector.apply_influence(
-                valence_delta=mood_vector_data['valence'],
-                arousal_delta=mood_vector_data['arousal'],
-                intensity_delta=mood_intensity
-            )
-
-            # Add to stimulus
-            self.current_stimulus.add_vector(mood_vector)
-
-            # Log and dispatch
-            self.memory_system.body_memory.log(mood_vector)
-            global_event_dispatcher.dispatch_event_sync(Event("emotion:update", {
-                "emotion": mood_vector
-            }))
-
-            # Continue with mood-influenced vector
-            vector = mood_vector
-
-        # Apply behavior influence
+        # Apply behavior influence similarly
         behavior_vector_data = self._get_behavior_influence_vector()
         if behavior_vector_data:
-            # Copy the vector to maintain the history
-            behavior_vector = copy.deepcopy(vector)
-            behavior_vector.source_type = 'behavior_influenced'
-            behavior_vector.name += '_behavior'
+            influenced_vector = copy.deepcopy(vector)
+           
+            rel_valence, rel_arousal = self._calculate_relative_influence(
+               vector,
+               behavior_vector_data['valence'],
+               behavior_vector_data['arousal'],
+               influence_type='behavior'
+            )
+           
             behavior_intensity = self._calculate_intensity('behavior', behavior_vector_data)
-            dampening = self._calculate_dampening(
-                self._categorize_vector(behavior_vector.valence, behavior_vector.arousal)
-            )
-            behavior_intensity *= dampening
+            category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
+            dampening = self._calculate_dampening(category)
+           
+            influenced_vector.apply_influence(rel_valence, rel_arousal, behavior_intensity * dampening)
+           
+            new_category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
+            if new_category != category:
+               influenced_vector.name = self._get_emotion_name_by_category(new_category)
+               
+            self.current_stimulus.add_vector(influenced_vector)
+            self.memory_system.body_memory.log(influenced_vector)
 
-            # Apply behavior influence
-            behavior_vector.apply_influence(
-                valence_delta=behavior_vector_data['valence'],
-                arousal_delta=behavior_vector_data['arousal'],
-                intensity_delta=behavior_intensity
-            )
+        # Cognitive processing placeholder
+        # Note: Will integrate with future cognitive module for higher-level processing,
+        # emotion regulation, and memory formation
+        influenced_vector = self.cognitive_processor.modulate_emotion(vector)
+        if influenced_vector:
+            new_category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
+            if new_category != category:
+               influenced_vector.name = self._get_emotion_name_by_category(new_category)
+            # Add the cognitively influenced vector to the current stimulus
+            self.current_stimulus.add_vector(influenced_vector)
+            # Log the influenced vector in the body memory
+            self.memory_system.body_memory.log(influenced_vector)
+            # Update our working vector to the influenced version for potential further processing
+            vector = influenced_vector
 
-            # Add to stimulus
-            self.current_stimulus.add_vector(behavior_vector)
-
-            # Log and dispatch
-            self.memory_system.body_memory.log(behavior_vector)
-            global_event_dispatcher.dispatch_event_sync(Event("emotion:update", {
-                "emotion": behavior_vector
-            }))
+    def _calculate_relative_influence(self, base_vector, influence_valence, influence_arousal, influence_type):
+        """
+        Calculates how much an influence affects the current emotional state.
+       
+        Args:
+           base_vector (EmotionalVector): Current emotional vector
+           influence_valence (float): Raw valence influence
+           influence_arousal (float): Raw arousal influence
+           influence_type (str): Type of influence ('mood' or 'behavior')
+       
+        Returns:
+           tuple: (relative_valence, relative_arousal)
+        """
+       # Base factors for different influence types
+        influence_factors = {
+           'mood': 0.5,    # Mood has moderate influence
+           'behavior': 0.3  # Behavior has lesser influence
+        }
+        base_factor = influence_factors.get(influence_type, 0.1)
+       
+        # Calculate resistance based on current state
+        # Stronger emotions are harder to influence
+        state_resistance = abs(base_vector.valence) + abs(base_vector.arousal)
+       
+        # Calculate relative changes
+        # If current valence and influence valence have opposite signs,
+        # the influence is reduced (harder to make happy when sad)
+        valence_agreement = 1.0 if (base_vector.valence * influence_valence) >= 0 else 0.5
+        arousal_agreement = 1.0 if (base_vector.arousal * influence_arousal) >= 0 else 0.7
+       
+        relative_valence = influence_valence * base_factor * valence_agreement / (1 + state_resistance)
+        relative_arousal = influence_arousal * base_factor * arousal_agreement / (1 + state_resistance)
+       
+        return relative_valence, relative_arousal
 
     def _generate_emotional_vector(self, event_type, event_data):
         """
