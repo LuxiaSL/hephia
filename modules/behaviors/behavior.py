@@ -22,16 +22,16 @@ class Behavior(ABC):
     def start(self):
         """Starts the behavior."""
         self.active = True
-        global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.__class__.__name__}:started"))
+        global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.name}:started"))
 
     @abstractmethod
     def update(self):
         """Updates the behavior."""
         if self.active:
-            global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.__class__.__name__}:updated"))
+            global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.name}:updated"))
 
     @abstractmethod
     def stop(self):
         """Stops the behavior."""
         self.active = False
-        global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.__class__.__name__}:stopped"))
+        global_event_dispatcher.dispatch_event_sync(Event(f"behavior:{self.name}:stopped"))

@@ -31,13 +31,13 @@ class BehaviorManager:
             'transitions': {
                 'walk': {
                     'trigger': 'boredom',
-                    'probability': lambda needs: needs['boredom'] / 100.0,
-                    'min_threshold': 30
+                    'probability': lambda needs: 1 - needs['boredom']['satisfaction'],  # Inverse of satisfaction
+                    'min_threshold': 0.3  # 30% satisfaction or below to start walk
                 },
                 'relax': {
                     'trigger': 'stamina',
-                    'probability': lambda needs: (100 - needs['stamina']) / 100.0,
-                    'min_threshold': 40
+                    'probability': lambda needs: 1 - needs['stamina']['satisfaction'],
+                    'min_threshold': 0.6  # Relax triggers if stamina is less than 60% satisfied
                 }
             }
         },
@@ -46,34 +46,19 @@ class BehaviorManager:
             'transitions': {
                 'chase': {
                     'trigger': 'boredom',
-                    'probability': lambda needs: (needs['boredom'] - 50) / 50.0,
-                    'min_threshold': 50,
-                    'condition': lambda needs: needs['stamina'] > 40
+                    'probability': lambda needs: 1 - needs['boredom']['satisfaction'],
+                    'min_threshold': 0.5,
+                    'condition': lambda needs: needs['stamina']['satisfaction'] > 0.4  # Only chase if stamina is above 40%
                 },
                 'relax': {
                     'trigger': 'stamina',
-                    'probability': lambda needs: max(0, (70 - needs['stamina']) / 70.0),
-                    'min_threshold': 30
+                    'probability': lambda needs: 1 - needs['stamina']['satisfaction'],
+                    'min_threshold': 0.3
                 },
                 'idle': {
                     'trigger': 'boredom',
-                    'probability': lambda needs: (30 - needs['boredom']) / 30.0,
-                    'min_threshold': 0
-                }
-            }
-        },
-        'chase': {
-            'base_weight': 0.1,
-            'transitions': {
-                'relax': {
-                    'trigger': 'stamina',
-                    'probability': lambda needs: max(0, (60 - needs['stamina']) / 60.0),
-                    'min_threshold': 40
-                },
-                'walk': {
-                    'trigger': 'stamina',
-                    'probability': lambda needs: max(0, (40 - needs['stamina']) / 40.0),
-                    'min_threshold': 20
+                    'probability': lambda needs: needs['boredom']['satisfaction'],
+                    'min_threshold': 0.3
                 }
             }
         },
@@ -82,13 +67,13 @@ class BehaviorManager:
             'transitions': {
                 'sleep': {
                     'trigger': 'stamina',
-                    'probability': lambda needs: max(0, (80 - needs['stamina']) / 80.0),
-                    'min_threshold': 20
+                    'probability': lambda needs: 1 - needs['stamina']['satisfaction'],
+                    'min_threshold': 0.2
                 },
                 'idle': {
                     'trigger': 'stamina',
-                    'probability': lambda needs: needs['stamina'] / 100.0,
-                    'min_threshold': 60
+                    'probability': lambda needs: needs['stamina']['satisfaction'],
+                    'min_threshold': 0.6
                 }
             }
         },
@@ -96,17 +81,20 @@ class BehaviorManager:
             'base_weight': 0.1,
             'force_threshold': {
                 'trigger': 'stamina',
-                'value': 10
+                'value': 0.1  # Trigger sleep when stamina satisfaction drops below 10%
             },
             'transitions': {
                 'idle': {
                     'trigger': 'stamina',
-                    'probability': lambda needs: needs['stamina'] / 100.0,
-                    'min_threshold': 80
+                    'probability': lambda needs: needs['stamina']['satisfaction'],
+                    'min_threshold': 0.8  # Wake up if stamina is above 80% satisfied
                 }
             }
         }
     }
+
+
+
     
     def __init__(self, pet_context, needs_manager):
         """
@@ -153,14 +141,17 @@ class BehaviorManager:
         Args:
             new_behavior_name (str): selected behavior to activate
         """
+        old_behavior = None  # Ensure old_behavior is always defined
+
         if self.current_behavior:
             old_behavior = self.current_behavior
             self.current_behavior.stop()
+            
         self.current_behavior = self.behaviors[new_behavior_name]
         self.current_behavior.start()
 
         global_event_dispatcher.dispatch_event_sync(Event("behavior:changed", {
-            "old_behavior": old_behavior.__class__.__name__ if old_behavior else None,
+            "old_behavior": old_behavior.name if old_behavior else None,
             "new_behavior": new_behavior_name
         }))
 
@@ -206,7 +197,7 @@ class BehaviorManager:
         
         new_behavior = self._calculate_behavior(event_type, event_data, current_needs, current_mood, recent_emotions)
 
-        if new_behavior != self.current_behavior.__class__.__name__.lower():
+        if new_behavior != self.current_behavior.name:
             self.change_behavior(new_behavior)
 
     def _calculate_behavior(self, event_type, event_data, current_needs, current_mood, recent_emotions):
@@ -217,35 +208,50 @@ class BehaviorManager:
             event_type (str): The type of event that triggered the behavior calculation.
             event_data (dict): Additional data associated with the event.
             current_needs (dict): The current state of the pet's needs.
-            current_mood (Mood): The current mood of the pet.
+            current_mood (dict): The current mood info of the pet.
             recent_emotions (list): A list of recent EmotionalVector objects.
 
         Returns:
             str: The name of the selected behavior.
         """
+
         if self.is_locked():
-            return self.current_behavior.__class__.__name__.lower()
+            print("Behavior is locked; returning current behavior.")
+            return self.current_behavior.name
         
-        current = self.current_behavior.__class__.__name__.lower()
+        current = self.current_behavior.name
         pattern = self.BEHAVIOR_PATTERNS[current]
-        
+
+
+        # Step 1: Check force_threshold conditions
         for behavior, data in self.BEHAVIOR_PATTERNS.items():
             if 'force_threshold' in data:
                 threshold = data['force_threshold']
-                if current_needs[threshold['trigger']] <= threshold['value']:
+                current_value = current_needs[threshold['trigger']]['satisfaction']
+                if current_value <= threshold['value']:
                     return behavior
 
+        # Step 2: Calculate transition weights
         transition_weights = {}
         for next_behavior, rules in pattern['transitions'].items():
-            if current_needs[rules['trigger']] >= rules['min_threshold']:
-                prob = rules['probability'](current_needs)
+            current_value = current_needs[rules['trigger']]['satisfaction']
+            probability = rules['probability'](current_needs)
+            if current_value <= rules['min_threshold']:
                 if 'condition' in rules and not rules['condition'](current_needs):
                     continue
-                transition_weights[next_behavior] = prob * random.random()
-        
+                transition_weights[next_behavior] = probability * random.random()
+
+
+        # Step 3: Add weight for staying in current behavior
         transition_weights[current] = pattern['base_weight'] * random.random()
-        
-        return max(transition_weights.items(), key=lambda x: x[1])[0]
+
+        # Step 4: Determine the highest-weighted behavior
+        try:
+            selected_behavior = max(transition_weights.items(), key=lambda x: x[1])[0]
+            return selected_behavior
+        except Exception as e:
+            print(f"Error selecting behavior from weights: {e}")
+            raise e
 
     def get_current_behavior(self):
         """

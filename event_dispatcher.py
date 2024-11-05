@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 import re
+import traceback
 from typing import Any, Callable, Dict, List, Optional
 
 class Event:
@@ -92,8 +93,14 @@ class EventDispatcher:
             try:
                 listener["callback"](event)
             except Exception as e:
-                # Print any errors that occur in listeners
-                print(f"Error in event listener: {e}")
+                print("Error in event listener:")
+                print("Event Data:", event.data)
+                print("Event Type:", event.event_type)
+                print("Listener Callback:", listener["callback"])
+                print("Error Type:", type(e).__name__)
+                print("Error Message:", str(e))
+                print("Traceback:")
+                traceback.print_exc()
 
     # compatibility
     dispatch_event_sync = dispatch_event

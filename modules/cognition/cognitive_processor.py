@@ -5,7 +5,7 @@ class CognitiveProcessor:
     Placeholder for the CognitiveProcessor.
     """
 
-    def mediate_emotion(self, emotion, event_type, event_data):
+    def mediate_emotion(self, emotion):
         """
         Mediates the emotional response based on cognitive appraisal.
 

@@ -11,6 +11,7 @@ class IdleBehavior(Behavior):
 
     def __init__(self, behavior_manager):
         super().__init__(behavior_manager)
+        self.name = "idle"
 
     def start(self):
         super().start()

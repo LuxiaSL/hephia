@@ -1,6 +1,5 @@
 # pet/pet.py
 
-from pet.pet_state import PetState
 from pet.pet_context import PetContext
 from modules.needs.needs_manager import NeedsManager
 from modules.behaviors.behavior_manager import BehaviorManager
@@ -10,6 +9,8 @@ from modules.cognition.cognitive_processor import CognitiveProcessor
 from modules.emotions.mood_synthesizer import MoodSynthesizer
 from modules.memory.memory_system import MemorySystem
 from event_dispatcher import global_event_dispatcher, Event
+from global_timer import GlobalTimer
+from config import Config
 
 class Pet:
     """
@@ -22,25 +23,30 @@ class Pet:
         """
         # Initialize internals & externals
         self.context = PetContext(self)
-        self.state = PetState()
 
         # Initialize managers
         self.needs_manager = NeedsManager()
-        self.behavior_manager = BehaviorManager(self.state, self.needs_manager)
+        self.behavior_manager = BehaviorManager(self.context, self.needs_manager)
         self.action_manager = ActionManager(self.needs_manager)
 
         # Initialize cognitive and emotional modules
         self.memory_system = MemorySystem()
-        self.mood_synthesizer = MoodSynthesizer(self.memory_system, self.needs_manager)
+        self.mood_synthesizer = MoodSynthesizer(self.context)
         self.cognitive_processor = CognitiveProcessor()
         self.emotional_processor = EmotionalProcessor(
+            self.context,
             self.cognitive_processor,
-            self.mood_synthesizer,
             self.memory_system
         )
 
         # Set up event listeners
         self.setup_event_listeners()
+
+        # establish timers
+        self.timer = GlobalTimer()
+
+        self.timer.add_task(Config.NEED_UPDATE_TIMER, self.tick_needs)
+        self.timer.add_task(Config.EMOTION_UPDATE_TIMER, self.tick_emotions)
 
         # Initialize other attributes if needed
         self.is_active = True
@@ -62,24 +68,23 @@ class Pet:
         print(f"Pet: Action '{event.data['action_name']}' performed")
 
     def on_mood_change(self, event):
-        print(f"Pet: Mood changed to {event.data.get('new_state')}")
+        print(f"Pet: Mood changed to {event.data.get('new_name')}")
 
     def on_new_emotion(self, event):
         print(f"Pet: Emotion experienced: {event.data.get('emotion').name}")
 
-    def update(self):
-        """
-        coordinating periodic updates across modules
-        """
-        if not self.is_active:
-            return
-        
-        #event-based system means only need to update
+    async def tick_needs(self):
         self.needs_manager.update_needs()
-        self.cognitive_processor.periodic_check()
-        self.memory_system.coalesce()
 
-        global_event_dispatcher.dispatch_event_sync(Event("pet:updated", {"pet": self}))
+    async def tick_emotions(self):
+        self.emotional_processor.update()
+
+    async def start(self):
+        await self.timer.run()
+        
+    def stop(self):
+        self.timer.stop()
+        self.is_active = False
 
     def perform_action(self, action_name):
         """

@@ -87,28 +87,35 @@ class MoodSynthesizer:
         global_event_dispatcher.add_listener("emotion:new", self.update_mood)
 
     def update_mood(self, event):
-        # updates the pet's mood based on holistic information
-        # retrieve info from context
-        current_needs = self.pet_context.get_current_needs()
-        recent_emotions = self.pet_context.get_recent_emotions()
-        current_behavior = self.pet_context.get_current_behavior()
-        # Calculate weighted valence and arousal from recent emotions
+        # Retrieve current needs, emotions, and behavior from the context
+        current_needs = self.context.get_current_needs()
+        recent_emotions = self.context.get_recent_emotions()
+        current_behavior = self.context.get_current_behavior()
+
+        # Calculate the new mood object based on current context
         new_mood = self._calculate_mood(current_needs, recent_emotions, current_behavior)
-        
-        # if the mood has changed
+
+        # Fallback to neutral mood if no change is detected or no emotions are present
+        if new_mood.valence == 0 and new_mood.arousal == 0:
+            new_mood = Mood(valence=0.0, arousal=0.0)  # Explicitly set to neutral
+
+        # Check if mood has changed in terms of valence and arousal
         if new_mood.valence != self.current_mood.valence or new_mood.arousal != self.current_mood.arousal:
-            # find relevant name
             self.current_mood = new_mood
-            new_name = self._map_mood_to_name(new_mood)
-            # if name is updated
+            new_name = self._map_mood_to_name(new_mood)  # Map mood object to its descriptive name
+            
+            # If the mood name has also updated
             if new_name != self.current_mood_name:
                 old_name = self.current_mood_name
                 self.current_mood_name = new_name
-                #set and send
+                
+                # Dispatch the mood change event with consistent dictionary formatting
                 global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
                     "old_name": old_name,
-                    "new_name": new_name
+                    "new_name": new_name,
+                    "mood_object": new_mood  # Include full object if deeper access is required
                 }))
+
 
     def _calculate_mood(self, current_needs, recent_emotions, current_behavior):
         weighted_valence = 0.0
@@ -138,8 +145,7 @@ class MoodSynthesizer:
         weighted_arousal += self.weights['needs'] * need_arousal
 
         # calculate behavior contribution
-        # calculate behavior contribution
-        behavior_name = current_behavior.__class__.__name__.lower()
+        behavior_name = current_behavior.name
         if behavior_name in self.BEHAVIOR_MOOD_INFLUENCES:
             influence = self.BEHAVIOR_MOOD_INFLUENCES[behavior_name]
             weighted_valence += self.weights['behavior'] * influence['valence']
@@ -147,7 +153,6 @@ class MoodSynthesizer:
 
         # eventually below, calculate the memory influence based on sentiment analysis via cognitive processing of non-body memory
         # when considering episodic memory; gradient scaling
-
         # done, send it
         return Mood(
             valence=max(-1.0, min(1.0, weighted_valence)),

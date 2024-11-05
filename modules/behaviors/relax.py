@@ -11,6 +11,7 @@ class RelaxBehavior(Behavior):
 
     def __init__(self, behavior_manager):
         super().__init__(behavior_manager)
+        self.name = "relax"
 
     def start(self):
         super().start()

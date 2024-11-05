@@ -11,6 +11,7 @@ class ChaseBehavior(Behavior):
 
     def __init__(self, behavior_manager):
         super().__init__(behavior_manager)
+        self.name = "chase"
 
     def start(self):
         super().start()

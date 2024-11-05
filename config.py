@@ -32,39 +32,36 @@ class Config:
     STAMINA_BASE_RATE = -0.0056  # Approximately 3 hours to deplete (100-0)
 
     # behavior effects on needs
-    IDLE_NEED_MODIFIERS = {
-        'stamina': 0.0002,
-        'boredom': 0.0001,
-        'companionship': 0.0001
-    }
+    IDLE_NEED_MODIFIERS = {}  # No modifiers during idle
 
     WALK_NEED_MODIFIERS = {
-        'hunger': 0.0002,
-        'thirst': 0.0002,
-        'boredom': -0.0001,
-        'companionship': 0.0001
+        'hunger': 0.001,
+        'thirst': 0.001,
+        'boredom': -0.001,
+        'companionship': 0.001
     }
 
     CHASE_NEED_MODIFIERS = {
-        'hunger': 0.0005,
-        'thirst': 0.0005,
-        'stamina': -0.001,
-        'boredom': -0.0005,
-        'companionship': -0.0003
+        'hunger': 0.0025,
+        'thirst': 0.0025,
+        'stamina': -0.01,  # Increased stamina use in chase
+        'boredom': -0.005,
+        'companionship': -0.003
     }
 
     RELAX_NEED_MODIFIERS = {
-        'hunger': -0.0002,
-        'thirst': -0.0002,
-        'stamina': 0.0005,
-        'boredom': 0.0001,
-        'companionship': 0.0001
+        'hunger': -0.0015,
+        'thirst': -0.0015,
+        'stamina': 0.001,  # Gradual stamina recovery
+        'boredom': 0.001,
+        'companionship': 0.001
     }
 
     SLEEP_NEED_MODIFIERS = {
-        'hunger': -0.0005,
-        'thirst': -0.0005,
-        'stamina': 0.001,
+        'hunger': -0.0015,
+        'thirst': -0.0015,
+        'stamina': 0.015,  # Rapid stamina recovery during sleep
         'boredom': 0.0002,
         'companionship': 0.0002
     }
+

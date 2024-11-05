@@ -334,7 +334,7 @@ class EmotionalProcessor:
         # Cognitive processing placeholder
         # Note: Will integrate with future cognitive module for higher-level processing,
         # emotion regulation, and memory formation
-        influenced_vector = self.cognitive_processor.modulate_emotion(vector)
+        influenced_vector = self.cognitive_processor.mediate_emotion(vector)
         if influenced_vector:
             new_category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
             if new_category != category:
@@ -463,15 +463,15 @@ class EmotionalProcessor:
         current_mood = self.pet_context.get_current_mood()
         if current_mood:
             return {
-                'valence': current_mood.valence * 0.5,  # Adjust scaling factor as needed
-                'arousal': current_mood.arousal * 0.5,
+                'valence': current_mood['mood_object'].valence * 0.5,  # Adjust scaling factor as needed
+                'arousal': current_mood['mood_object'].arousal * 0.5,
             }
         return None
 
     def _get_behavior_influence_vector(self):
         """Generates a vector representing the behavior influence."""
         current_behavior = self.pet_context.get_current_behavior()
-        behavior_name = current_behavior.__class__.__name__.lower()
+        behavior_name = current_behavior.name
         mapping = self.EMOTION_MAPPINGS['behavior'].get(behavior_name)
 
         if mapping:

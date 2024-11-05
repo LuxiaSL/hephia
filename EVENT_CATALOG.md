@@ -109,9 +109,3 @@ This document lists all events used in the Hephia project.
 ### pet:shutdown
 - **Source**: Pet (pet/pet.py)
 - **Description**: Dispatched when the pet is shutting down.
-
-## Application Module
-
-### application:shutdown
-- **Source**: PetWidget (visualization/pet_widget.py)
-- **Description**: Dispatched when the application is shutting down.

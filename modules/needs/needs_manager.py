@@ -34,7 +34,7 @@ class NeedsManager:
             name='boredom',
             value=Config.INITIAL_BOREDOM,
             base_rate=Config.BOREDOM_BASE_RATE
-        ),
+        )
         self.needs['companionship'] = Need(
             name='companionship',
             value=Config.INITIAL_COMPANIONSHIP,
@@ -117,6 +117,7 @@ class NeedsManager:
             need_name (str): The name of the need.
             amount (float): The amount to change the base rate by.
         """
+
         need = self.needs.get(need_name)
         if need:
             need.alter_base_rate(amount)
@@ -158,10 +159,7 @@ class NeedsManager:
         
         for need_name, need in self.needs.items():
             # calculate satisfaction based on type of rate
-            if need.base_rate > 0:
-                raw_satisfaction = need.value / need.max_value
-            else:
-                raw_satisfaction = 1 - (need.value / need.max_value)
+            raw_satisfaction = (1 - (need.value / need.max_value)) if need_name != 'stamina' else (need.value / need.max_value)
         
             # Ensure satisfaction is within [0, 1] range
             satisfaction = max(0, min(1, raw_satisfaction))

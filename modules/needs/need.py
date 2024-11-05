@@ -39,7 +39,7 @@ class Need:
         """
         Updates the need by increasing its value based on the effective rate.
         """
-        rate = self.calculate_effective__rate()
+        rate = self.calculate_effective_rate()
         self.alter(rate)
 
     def calculate_effective_rate(self):

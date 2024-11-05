@@ -11,6 +11,7 @@ class SleepBehavior(Behavior):
 
     def __init__(self, behavior_manager):
         super().__init__(behavior_manager)
+        self.name = "sleep"
 
     def start(self):
         super().start()
