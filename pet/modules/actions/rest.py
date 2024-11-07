@@ -15,8 +15,6 @@ class RestAction(Action):
         """Performs the rest action by increasing stamina."""
         print("Performing RestAction.")
         
-        # Dispatch action:rest:started event
-        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:rest:started")
         
         initial_stamina = self.needs_manager.get_need_value('stamina')
@@ -29,7 +27,5 @@ class RestAction(Action):
             "stamina_gained": final_stamina - initial_stamina
         }
         
-        # Dispatch action:rest:completed event
-        # See EVENT_CATALOG.md for full event details
         self.dispatch_event("action:rest:completed", result)
         return result

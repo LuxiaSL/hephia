@@ -153,6 +153,10 @@ class EmotionalProcessor:
                 'increase': {'name': 'energetic', 'valence': 0.3, 'arousal': 0.5},
                 'decrease': {'name': 'tired', 'valence': -0.3, 'arousal': -0.4}
             },
+            'loneliness':{
+                'increase': {'name': 'forlorn', 'valence': -0.3, 'arousal': 0.2},
+                'decrease': {'name': 'connected', 'valence': -0.3, 'arousal': 0.2}
+            }
         },
         'action': {
             'feed': {'name': 'sated', 'valence': 0.5, 'arousal': 0.2},

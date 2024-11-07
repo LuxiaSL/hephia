@@ -241,10 +241,13 @@ class BehaviorManager:
                     continue
                 transition_weights[next_behavior] = probability * random.random()
 
+        if not transition_weights:
+            # Default to current behavior or choose a safe fallback
+            return current
 
         # Step 3: Add weight for staying in current behavior
         transition_weights[current] = pattern['base_weight'] * random.random()
-
+        
         # Step 4: Determine the highest-weighted behavior
         try:
             selected_behavior = max(transition_weights.items(), key=lambda x: x[1])[0]

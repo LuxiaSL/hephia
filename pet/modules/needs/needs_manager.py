@@ -35,10 +35,10 @@ class NeedsManager:
             value=Config.INITIAL_BOREDOM,
             base_rate=Config.BOREDOM_BASE_RATE
         )
-        self.needs['companionship'] = Need(
-            name='companionship',
-            value=Config.INITIAL_COMPANIONSHIP,
-            base_rate=Config.COMPANIONSHIP_BASE_RATE
+        self.needs['loneliness'] = Need(
+            name='loneliness',
+            value=Config.INITIAL_LONELINESS,
+            base_rate=Config.LONELINESS_BASE_RATE
         )
         self.needs['stamina'] = Need(
             name='stamina',

@@ -2,7 +2,7 @@
 
 from .action import Action
 from .feed import FeedAction
-from .drink import GiveWaterAction
+from .drink import DrinkAction
 from .play import PlayAction
 from .rest import RestAction
 from .action_manager import ActionManager

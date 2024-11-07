@@ -1,7 +1,7 @@
 # modules/actions/action_manager.py
 
 from .feed import FeedAction
-from .drink import GiveWaterAction
+from .drink import DrinkAction
 from .play import PlayAction
 from .rest import RestAction
 from event_dispatcher import global_event_dispatcher, Event
@@ -21,7 +21,7 @@ class ActionManager:
         self.needs_manager = needs_manager
         self.available_actions = {
             'feed': FeedAction(self, self.needs_manager),
-            'give_water': GiveWaterAction(self, self.needs_manager),
+            'give_water': DrinkAction(self, self.needs_manager),
             'play': PlayAction(self, self.needs_manager),
             'rest': RestAction(self, self.needs_manager)
             # Add more actions as needed

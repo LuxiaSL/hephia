@@ -42,3 +42,13 @@ env/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Precious vars
+.env
+
+# Storage
+data/
+*.log
+
+# PyTest
+.pytest_cache/

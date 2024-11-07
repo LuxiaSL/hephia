@@ -8,12 +8,6 @@ the actual state values.
 """
 
 class PetContext:
-    """
-    PetContext serves as an access point to the pet's internal state.
-
-    It retrieves up-to-date snapshots of the pet's current mood, behavior, and needs
-    by querying the relevant modules. It does not manage or store these values.
-    """
 
     def __init__(self, pet):
         """
@@ -23,6 +17,45 @@ class PetContext:
             pet (Pet): The pet instance.
         """
         self.pet = pet
+
+    def get_api_context(self):
+        """Gets complete JSON-serializable context with type verification."""
+        try:
+            mood = self.pet.mood_synthesizer
+            current_mood = mood.get_current_mood()
+            mood_data = {
+                'name': mood.get_current_mood_name(),
+                'valence': float(current_mood.valence),  # Ensure numeric
+                'arousal': float(current_mood.arousal)   # Ensure numeric
+            }
+            
+            behavior = self.pet.behavior_manager.current_behavior
+            behavior_data = {
+                'name': behavior.name if behavior else None,
+                'active': behavior is not None
+            }
+            
+            emotions = self.pet.memory_system.body_memory.get_recent_emotions()
+            emotions_data = [
+                {
+                    'name': str(emotion.name),
+                    'intensity': float(emotion.intensity),
+                    'timestamp': emotion.timestamp.isoformat() if hasattr(emotion, 'timestamp') else None
+                }
+                for emotion in emotions
+            ]
+            
+            needs = self.pet.needs_manager.get_needs_summary()
+            
+            return {
+                'mood': mood_data,
+                'needs': needs,
+                'behavior': behavior_data,
+                'emotions': emotions_data
+            }
+        except Exception as e:
+            print(f"DEBUG - Error in get_api_context: {str(e)}")
+            raise
 
     def get_current_mood(self):
         """
@@ -69,12 +102,5 @@ class PetContext:
             'recent_emotions': self.get_recent_emotions(),
             'needs': self.get_current_needs(),
             'current_behavior': self.get_current_behavior()
-        }
-
-    def get_visualization_context(self):
-        return {
-            'mood': self.get_current_mood(),
-            'needs': self.get_current_needs(),
-            'current_behavior': self.get_current_behavior().name if self.get_current_behavior() else None
         }
 
