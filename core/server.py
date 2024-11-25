@@ -22,8 +22,7 @@ from core.state_bridge import StateBridge
 from event_dispatcher import global_event_dispatcher, Event
 from pet.pet import Pet
 from config import Config
-from brain.environments.ui_formatter import UIFormatter
-from brain.command_preprocessor import CommandPreprocessor
+from brain.exo_processor import ExoProcessor
 from brain.environments.environment_registry import EnvironmentRegistry
 from brain.logging_utils import ExoLogger
 from api_clients import APIManager
@@ -53,15 +52,19 @@ class HephiaServer:
         self.exo_lock = asyncio.Lock()
         self.last_successful_exo = None  # Track last successful completion
 
+        # Core systems
         self.api = APIManager.from_env()
-
         self.pet = Pet()
         self.state_bridge = StateBridge(pet=self.pet)
         self.timer = TimerCoordinator()
         
-        self.command_preprocessor = CommandPreprocessor(self.api)
+        # Environment and processing systems
         self.environment_registry = EnvironmentRegistry(self.api)
-        self.exo_messages = []  # Store conversation context
+        self.exo_processor = ExoProcessor(
+            api_manager=self.api,
+            state_bridge=self.state_bridge,
+            environment_registry=self.environment_registry
+        )
 
         self.setup_routes()
         self.setup_event_handlers()
@@ -98,12 +101,12 @@ class HephiaServer:
         async def chat_completions(request: CommandRequest):
             """Handle LLM interactions and commands."""
             try:
-                response = await self.state_bridge.process_command(request.messages)
+                response = await self.exo_processor.process_command(request.messages)
                 return {
                     "id": f"chat-{id(response)}",
                     "object": "chat.completion",
                     "created": int(time.time()),
-                    "model": "hephia-1",
+                    "model": "exocortex",
                     "choices": [{
                         "index": 0,
                         "message": {
@@ -162,94 +165,11 @@ class HephiaServer:
         self.timer.add_task(
             name="exo_update",
             interval=Config.EXO_LOOP_TIMER,
-            callback=self.process_exo_loop
+            callback=self.exo_processor.process_turn
         )
         
         # Start timer
         asyncio.create_task(self.timer.run())
-
-    async def process_exo_loop(self):
-        """Process periodic exo/LLM interactions with command preprocessing."""
-        # Check if we should run based on last successful completion
-        if self.last_successful_exo and \
-           (datetime.now() - self.last_successful_exo).total_seconds() < Config.EXO_MIN_INTERVAL:
-            print("Skipping exo loop - too soon since last completion")
-            return
-        try:
-            async with asyncio.timeout(Config.EXO_TIMEOUT):
-                if self.exo_lock.locked():
-                    print("Exo loop already in progress, skipping")
-                    return
-                async with self.exo_lock:
-                    try:
-                        # Get current state
-                        state = await self.state_bridge.get_current_state()
-                        ExoLogger.log_state_update(state)  # Log state
-                        formatted_state = UIFormatter.format_terminal_view(state)
-                        
-                        # Maintain conversation context
-                        self.exo_messages.append({
-                            "role": "user",
-                            "content": f"Current state:\n{formatted_state} WELCOME TO YOUR NEW OPERATING SYSTEM. only enter 'help' to begin, then explore your available commands."
-                        })
-                        
-                        # trim after a while
-                        if len(self.exo_messages) > Config.EXO_MAX_MESSAGES: 
-                            self.exo_messages = self.exo_messages[-Config.EXO_MAX_MESSAGES:]
-                        
-                        # Get LLM response
-                        async with asyncio.timeout(Config.LLM_TIMEOUT):
-                            response = await self.api.openpipe.create_completion(
-                                model=os.getenv("OPENPIPE_MODEL"),
-                                messages=[
-                                    {"role": "system", "content": Config.SYSTEM_PROMPT},
-                                    *self.exo_messages
-                                ],
-                                temperature=Config.EXO_TEMPERATURE,
-                            )
-                        
-                        llm_response = response["choices"][0]["message"]["content"]
-                        ExoLogger.log_llm_exchange(self.exo_messages, llm_response)
-                        
-                        self.exo_messages.append({
-                            "role": "assistant",
-                            "content": llm_response
-                        })
-                        
-                        # Preprocess command
-                        command, help_text = await self.command_preprocessor.preprocess_command(
-                            llm_response,
-                            self.environment_registry.get_available_commands()
-                        )
-                        
-                        ExoLogger.log_command_processing(llm_response, command, help_text)
-
-                        if command:
-                            # Process valid command
-                            await self.state_bridge.process_command([{
-                                "role": "assistant",
-                                "content": command
-                            }])
-                        elif help_text == "Too many command errors - resetting conversation":
-                            # Reset conversation on too many errors
-                            self.exo_messages = []
-                            print("Exo loop conversation reset due to repeated errors")
-                        else:
-                            print(f"Command processing message: {help_text}")
-
-                        # Update last successful completion time
-                        self.last_successful_exo = datetime.now()
-                        
-                    except asyncio.TimeoutError:
-                        print("Timeout in LLM request")
-                        self.exo_messages = self.exo_messages[:-1] 
-                    except Exception as e:
-                        print(f"Error in exo loop: {e}")
-                        self.exo_messages = self.exo_messages[:-1]
-        except asyncio.TimeoutError:
-            print("Timeout waiting for exo lock")
-        except Exception as e:
-            print(f"Fatal error in exo loop: {e}")
     
     async def shutdown(self):
         """Clean shutdown of all systems."""
@@ -292,18 +212,24 @@ class HephiaServer:
         """
         Handle incoming WebSocket messages.
         
+        Future functionality:
+        - Command routing for direct user interactions
+        - State update requests
+        - Conversation history requests
+        - Exo loop visualization updates
+        
+        Current placeholder until terminal UI implementation.
+        
         Args:
             websocket: The WebSocket connection
             message: The message to handle
         """
-        # Process different message types
-        message_type = message.get("type")
-        if message_type == "command":
-            response = await self.state_bridge.process_command(message["data"])
-            await websocket.send_json({
-                "type": "command_response",
-                "data": response
-            })
+        # TODO: Implement full message handling for terminal UI
+        # For now, just acknowledge receipt
+        await websocket.send_json({
+            "type": "acknowledgment",
+            "content": "Message received - full functionality coming soon"
+        })
     
     async def broadcast_state_update(self, event: Event):
         """

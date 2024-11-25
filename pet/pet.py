@@ -11,7 +11,7 @@ from pet.modules.needs.needs_manager import NeedsManager
 from pet.modules.behaviors.behavior_manager import BehaviorManager
 from pet.modules.actions.action_manager import ActionManager
 from pet.modules.emotions.emotional_processor import EmotionalProcessor
-from pet.modules.cognition.cognitive_bridge import CognitiveProcessor
+from pet.modules.cognition.cognitive_bridge import CognitiveBridge
 from pet.modules.emotions.mood_synthesizer import MoodSynthesizer
 from pet.modules.memory.memory_system import MemorySystem
 from event_dispatcher import global_event_dispatcher, Event
@@ -34,10 +34,10 @@ class Pet:
         # Initialize cognitive and emotional modules
         self.memory_system = MemorySystem()
         self.mood_synthesizer = MoodSynthesizer(self.context)
-        self.cognitive_processor = CognitiveProcessor()
+        self.cognitive_bridge = CognitiveBridge()
         self.emotional_processor = EmotionalProcessor(
             self.context,
-            self.cognitive_processor,
+            self.cognitive_bridge,
             self.memory_system
         )
 

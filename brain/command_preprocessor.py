@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import re
 import logging
 import os
+from datetime import datetime
 from api_clients import APIManager
 
 logger = logging.getLogger('hephia.command_processor')
@@ -16,22 +17,24 @@ class CommandPreprocessor:
         self.error_count = 0
         self.max_errors = 3
 
-    def _detect_hallucination(self, text: str) -> bool:
-        """Detect hallucinated terminal output patterns."""
-        terminal_patterns = [
-            r'Hephia.*?:',
-            r'\[.*?\]',
-            r'\$\s*$',
-            r'>>>',
-            r'Terminal:',
-            r'Output:',
-            r'Response:',
-            r'\d{2}:\d{2}(:\d{2})?',  # Time patterns
-            r'^(>|\$|#)\s',  # Command prompts
-            r'---+'  # Horizontal rules
-        ]
-        
-        return any(re.search(pattern, text, re.IGNORECASE) for pattern in terminal_patterns)
+        # Extended patterns for better hallucination detection
+        self._terminal_patterns = {
+            'prompt': r'^(>|\$|#)\s',
+            'timestamp': r'\d{2}:\d{2}(:\d{2})?',
+            'headers': r'(Terminal|Output|Response):',
+            'decorators': r'(-{3,}|\[.*?\])',
+            'system_msg': r'Hephia.*?:',
+        }
+
+    def _detect_hallucination(self, text: str) -> Tuple[bool, Optional[str]]:
+        """
+        Enhanced hallucination detection with pattern identification.
+        Returns (is_hallucinated, pattern_type).
+        """
+        for pattern_type, pattern in self._terminal_patterns.items():
+            if re.search(pattern, text, re.IGNORECASE):
+                return True, pattern_type
+        return False, None
 
     async def preprocess_command(self, 
                                command: str, 
@@ -42,90 +45,132 @@ class CommandPreprocessor:
         """
         try:
             logger.debug(f"Processing command: {command}")
-            # Extract potential command from response
-            extracted = self._extract_command(command)
+
+            # Check for help command first
+            if command.strip().lower() == "help":
+                return "help", None
+            
+            # Extract command, noting any hallucinations
+            extracted, hallucination_type = self._extract_command_and_content(command)
             if not extracted:
-                hint = self._generate_helpful_hint(command, available_commands)
+                hint = self._generate_helpful_hint(command, available_commands, hallucination_type)
                 return None, f"Could not extract valid command. {hint}"
 
-            logger.debug(f"Extracted command: {extracted}")
-
-            # Sanitize command
+           # Sanitize and validate structure
             try:
                 sanitized = self._sanitize_command(extracted)
-                logger.debug(f"Sanitized command: {sanitized}")
+                if sanitized != extracted:
+                    logger.debug(f"Sanitized command from '{extracted}' to '{sanitized}'")
             except ValueError as e:
-                return None, f"Invalid command structure: {str(e)}"
+                detailed_error = self._format_error_message(str(e), extracted)
+                return None, detailed_error
 
             # Check if command is valid
             if self._is_valid_command(sanitized, available_commands):
                 self.error_count = 0  # Reset error count on success
                 return sanitized, None
-
-            hint = self._generate_helpful_hint(sanitized, available_commands)
-
-            # If invalid, try to correct with LLM
-            corrected = await self._correct_command(command, available_commands)
-            if corrected:
-                return corrected, f"Corrected command. Original attempt: '{sanitized}'"
             
+            # Try to correct invalid command
+            corrected, correction_type = await self._attempt_command_correction(
+                sanitized, available_commands
+            )
+
+            if corrected:
+                return corrected, f"Corrected command ({correction_type}). Original: '{sanitized}'"
+
+            # Handle repeated errors
             self.error_count += 1
             if self.error_count >= self.max_errors:
-                return None, "Too many command errors - resetting conversation"
+                return None, "Too many command errors - resetting conversation for a fresh start"
 
-            return None, f"Invalid command: '{sanitized}'. {hint}"
+            hint = self._generate_helpful_hint(sanitized, available_commands)
+            return None, f"Invalid command structure: '{sanitized}'. {hint}"
         
         except Exception as e:
             logger.error(f"Error in command preprocessing: {e}")
             return None, f"Error processing command: {str(e)}"
 
-    def _extract_command(self, text: str) -> Optional[str]:
-        """Extract actual command from potentially hallucinated output."""
-        # Handle direct commands first
-        if text.strip().lower() == "help":
-            return "help"
-
-        # Split into lines and filter out empty ones
+    def _extract_command_and_content(self, text: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Enhanced command extraction with content preservation.
+        Returns (extracted_command, hallucination_type if any).
+        """
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         if not lines:
-            return None
+            return None, "empty_input"
 
         first_line = lines[0]
         remaining_lines = lines[1:]
 
+        # Check first line for hallucinations
+        is_hallucinated, hall_type = self._detect_hallucination(first_line)
+        if is_hallucinated:
+            return None, hall_type
+
         # Handle multi-line commands for specific environments
         if first_line.startswith(('exo query', 'notes create')):
-            remaining_content = ' '.join(
-                line for line in remaining_lines 
-                if not self._detect_hallucination(line)
-            )
-            if remaining_content:
-                if '"' in first_line:
-                    # Insert additional content before closing quote
-                    last_quote = first_line.rindex('"')
-                    return f"{first_line[:last_quote]} {remaining_content}{first_line[last_quote:]}"
-                else:
-                    return f"{first_line} {remaining_content}"
-            return first_line
+            return self._handle_multiline_command(first_line, remaining_lines)
 
-        # For single-line commands
+        # Handle single line commands
         if not remaining_lines:
-            return self._sanitize_command(first_line)
+            return first_line, None
 
-        # For multi-line input
-        command = first_line
-        additional_content = ' '.join(
-            line for line in remaining_lines 
-            if not self._detect_hallucination(line)
-        )
+        # Process additional content
+        clean_content = self._clean_additional_content(remaining_lines)
+        if not clean_content:
+            return first_line, None
 
-        if additional_content:
-            if '"' in command:
-                last_quote = command.rindex('"')
-                return f"{command[:last_quote]} {additional_content}{command[last_quote:]}"
-            return f"{command} {additional_content}"
+        return self._merge_command_and_content(first_line, clean_content), None
+    
+    def _handle_multiline_command(self, command: str, extra_lines: List[str]) -> Tuple[str, Optional[str]]:
+        """Handle commands that can accept multiple lines of content."""
+        clean_content = self._clean_additional_content(extra_lines)
+        if not clean_content:
+            return command, None
 
-        return self._sanitize_command(command)
+        if '"' in command:
+            last_quote = command.rindex('"')
+            return f"{command[:last_quote]} {clean_content}{command[last_quote:]}", None
+        return f"{command} {clean_content}", None
+    
+    def _clean_additional_content(self, lines: List[str]) -> Optional[str]:
+        """Clean and combine additional content lines."""
+        clean_lines = []
+        for line in lines:
+            is_hall, _ = self._detect_hallucination(line)
+            if not is_hall:
+                clean_lines.append(line)
+        return ' '.join(clean_lines) if clean_lines else None
+    
+    def _merge_command_and_content(self, command: str, content: str) -> str:
+        """Merge command with additional content preserving structure."""
+        if '"' in command:
+            last_quote = command.rindex('"')
+            return f"{command[:last_quote]} {content}{command[last_quote:]}"
+        return f"{command} {content}"
+    
+    def _format_error_message(self, error: str, command: str) -> str:
+        """Format detailed error messages for LLM guidance."""
+        if "unsafe patterns" in error:
+            return (
+                f"Command '{command}' contains unsafe patterns. "
+                "Please use simple command structures without special characters or operators."
+            )
+        return f"Invalid command structure: {error}. Please use standard command formats."
+    
+    async def _attempt_command_correction(
+        self, command: str, available_commands: Dict[str, List[Dict]]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Attempt to correct invalid commands using multiple strategies.
+        Returns (corrected_command, correction_type) if successful.
+        """
+        # Try LLM correction
+        llm_correction = await self._correct_command(command, available_commands)
+        if llm_correction and self._is_valid_command(llm_correction, available_commands):
+            return llm_correction, "llm_correction"
+
+        return None, None
     
     def _sanitize_command(self, command: str) -> str:
         """Sanitize and validate command structure."""
@@ -155,33 +200,52 @@ class CommandPreprocessor:
             
         return command.strip()
     
-    def _generate_helpful_hint(self, command: str, available_commands: Dict) -> str:
-        """Generate helpful hints for invalid commands."""
+    def _generate_helpful_hint(
+        self, command: str, available_commands: Dict, hallucination_type: Optional[str] = None
+    ) -> str:
+        """Generate context-aware helpful hints."""
+        if hallucination_type:
+            return (
+                f"Detected terminal-like output ({hallucination_type}). "
+                "Please provide just the command without formatting."
+            )
+
         first_word = command.split(' ')[0] if command else ''
         
-        # Check for missing environment prefix
-        if first_word in ['query', 'think', 'explore']:
-            return f"Try adding 'exo' prefix: 'exo {command}'"
-            
-        if first_word in ['create', 'list', 'read', 'update', 'delete', 'tags']:
-            return f"Try adding 'notes' prefix: 'notes {command}'"
-            
-        # Check for web-like commands
+        # Environment-specific hints
+        env_hints = {
+            ('query', 'think', 'explore'): ('exo', 'exo query "your question"'),
+            ('create', 'list', 'read', 'update', 'delete', 'tags'): 
+                ('notes', 'notes create "your note"')
+        }
+        
+        for words, (env, example) in env_hints.items():
+            if first_word in words:
+                return f"Did you mean to use the '{env}' environment? Example: {example}"
+
+        # Web-specific hint
         if 'http' in command or 'www' in command:
-            return f"Try using 'web open' to visit URLs: 'web open {command}'"
-            
-        # Check for search-like queries
+            return f"To visit URLs, use: 'web open {command}'"
+
+        # Search-like query hint
         if '?' in command or len(command) > 20:
-            return f"Try using 'search query' or 'exo query': 'search query {command}'"
-            
+            return (
+                "This looks like a search query. Try:\n"
+                f"- 'search query {command}' for web search\n"
+                f"- 'exo query {command}' for thinking/analysis"
+            )
+
         # Show available commands
         example_commands = [
             f"{env} {cmd['name']}"
             for env, cmds in available_commands.items()
-            for cmd in cmds[:2]  # Just first two commands per environment
-        ][:3]  # Only show three total examples
-        
-        return f"Available command examples: {', '.join(example_commands)}"
+            for cmd in cmds[:2]
+        ][:3]
+
+        return (
+            "Available command examples:\n" + 
+            "\n".join(f"• {cmd}" for cmd in example_commands)
+        )
 
     def _is_valid_command(self, command: str, available_commands: Dict[str, List[Dict]]) -> bool:
         """Validate command against available commands."""

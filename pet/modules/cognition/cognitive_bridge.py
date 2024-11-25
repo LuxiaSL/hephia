@@ -1,8 +1,8 @@
 # modules/cognition/cognitive_processor.py
 
-class CognitiveProcessor:
+class CognitiveBridge:
     """
-    Placeholder for the CognitiveProcessor.
+    Placeholder for the CognitiveBridge.
     """
 
     def mediate_emotion(self, emotion):

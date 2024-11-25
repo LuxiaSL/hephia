@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from .base_environment import BaseEnvironment
 from event_dispatcher import global_event_dispatcher, Event
-from .ui_formatter import UIFormatter
+from .terminal_formatter import TerminalFormatter, CommandResponse, EnvironmentHelp
 
 class NotesEnvironment(BaseEnvironment):
     """
@@ -145,9 +145,9 @@ class NotesEnvironment(BaseEnvironment):
             elif action == "tags":
                 return await self._handle_tags(params)
             else:
-                return UIFormatter.format_error(f"Unknown notes command: {action}")
+                return TerminalFormatter.format_error(f"Unknown notes command: {action}")
         except Exception as e:
-            return UIFormatter.format_error(str(e))
+            return TerminalFormatter.format_error(str(e))
     
     async def _create_note(self, params: str, context: Dict[str, Any]) -> Dict[str, str]:
         """Create a new note with current cognitive context."""
@@ -210,15 +210,14 @@ class NotesEnvironment(BaseEnvironment):
                 })
             )
             
-            return UIFormatter.format_command_response(
+            return CommandResponse(
                 title="Note Created",
                 content=f"Created note with ID: {note_id}\nContent: {content}\nTags: {', '.join(tags) if tags else 'none'}",
                 suggested_commands=[
                     "'notes list' to view recent notes",
                     "'notes read {note_id}' to view this note",
                     "'notes tags add {note_id} tag1 tag2' to add more tags"
-                ],
-                context=context
+                ]
             )
             
         finally:
@@ -248,7 +247,7 @@ class NotesEnvironment(BaseEnvironment):
             notes = cursor.fetchall()
             
             if not notes:
-                return UIFormatter.format_command_response(
+                return CommandResponse(
                     title="No Notes Found",
                     content="You haven't created any notes yet. Use 'notes create \"Your note content\" --tags tag1,tag2' to get started!",
                     suggested_commands=["notes create \"My first note\" --tags example"]
@@ -259,7 +258,7 @@ class NotesEnvironment(BaseEnvironment):
             for note in notes:
                 content += f"ID: {note[0]}\nCreated: {note[2]}\nContent: {note[1][:50]}...\nTags: [{note[-1] or 'none'}]\n\n"
 
-            return UIFormatter.format_command_response(
+            return CommandResponse(
                 title="Notes List",
                 content=content,
                 suggested_commands=["notes read <note_id>", "notes search <query>"]
@@ -285,7 +284,7 @@ class NotesEnvironment(BaseEnvironment):
             
             note = cursor.fetchone()
             if not note:
-                return UIFormatter.format_error(f"Note {note_id} not found.")
+                return TerminalFormatter.format_error(f"Note {note_id} not found.")
             
             content = f"""Note {note[0]}:
 Created: {note[2]}
@@ -295,7 +294,7 @@ Tags: {note[-1] or 'none'}
 Content:
 {note[1]}"""
 
-            return UIFormatter.format_command_response(
+            return CommandResponse(
                 title=f"Note {note_id}",
                 content=content,
                 suggested_commands=[
@@ -369,7 +368,7 @@ Content:
             
             conn.commit()
             
-            return UIFormatter.format_command_response(
+            return CommandResponse(
                 title="Note Updated",
                 content=f"Updated note {note_id}\nNew content: {content}\nNew tags: {', '.join(tags) if tags else 'unchanged'}",
                 suggested_commands=[f"notes read {note_id}"],
@@ -393,7 +392,7 @@ Content:
             # Note tags are automatically deleted via foreign key constraints
             conn.commit()
             
-            return UIFormatter.format_command_response(
+            return CommandResponse(
                 title="Note Deleted",
                 content=f"Deleted note {note_id}",
                 suggested_commands=["notes list"]
@@ -423,7 +422,7 @@ Content:
             notes = cursor.fetchall()
             
             if not notes:
-                return UIFormatter.format_command_response(
+                return CommandResponse(
                     title="No Matching Notes",
                     content=f"No notes found matching '{query}'",
                     suggested_commands=["notes list"]
@@ -433,7 +432,7 @@ Content:
             for note in notes:
                 content += f"ID: {note[0]}\nContent: {note[1][:50]}...\nTags: [{note[-1] or 'none'}]\n\n"
 
-            return UIFormatter.format_command_response(
+            return CommandResponse(
                 title="Search Results",
                 content=content,
                 suggested_commands=["notes read <note_id>"]
@@ -518,17 +517,19 @@ Content:
             conn.close()
 
     def format_help(self) -> Dict[str, str]:
-        return UIFormatter.format_environment_help(
-            environment_name="Notes",
-            commands=self.get_commands(),
-            examples=[
-                "notes create \"My new note\" --tags tag1,tag2",
-                "notes list --tag important",
-                "notes search \"project ideas\""
-            ],
-            tips=[
-                "Use tags to organize your notes",
-                "Regularly review and update your notes",
-                "Use search to find notes related to a specific topic"
-            ]
+        return TerminalFormatter.format_environment_help(
+            EnvironmentHelp(
+                environment_name="Notes",
+                commands=self.get_commands(),
+                examples=[
+                    "notes create \"My new note\" --tags tag1,tag2",
+                    "notes list --tag important",
+                    "notes search \"project ideas\""
+                ],
+                tips=[
+                    "Use tags to organize your notes",
+                    "Regularly review and update your notes",
+                    "Use search to find notes related to a specific topic"
+                ]
+            )
         )

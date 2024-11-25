@@ -52,3 +52,6 @@ data/
 
 # PyTest
 .pytest_cache/
+
+# i should probably know what this is but i dont but i assume it's chill
+.coverage

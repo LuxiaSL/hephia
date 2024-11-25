@@ -130,23 +130,6 @@ class StateBridge:
                 print(f"Error updating state: {e}")
                 raise
     
-    async def process_command(self, messages: List[Dict[str, str]]) -> str:
-        """Process commands with current state context."""
-        try:
-            current_state = await self.get_current_state()
-            last_message = messages[-1]
-            command = last_message['content']
-            
-            if command.startswith('query'):
-                return self._format_state_response(current_state)
-            elif command.startswith('action'):
-                return await self._process_action_command(command, current_state)
-            else:
-                return self._format_state_response(current_state)
-        except Exception as e:
-            print(f"Error processing command: {e}")
-            raise
-    
     async def process_timer_event(self, event: Event):
         """Handle timer-triggered state updates."""
         if self.pet:
@@ -205,48 +188,6 @@ class StateBridge:
             conn.close()
         
         return None
-
-    def _format_state_response(self, state: Dict[str, Any]) -> str:
-        """Format state data into readable response."""
-        pet_state = state.get('pet_state', {})
-        mood = pet_state.get('mood', {})
-        behavior = pet_state.get('behavior', {})
-        needs = pet_state.get('needs', {})
-        emotions = pet_state.get('emotions', [])
-        
-        recent_emotions = ", ".join(
-            f"{e['name']} ({e['intensity']:.2f})" 
-            for e in emotions[:3]
-        ) if emotions else "none"
-        
-        return f"""Current State:
-Mood: {mood.get('name', 'Unknown')} (valence: {mood.get('valence', 0):.2f}, arousal: {mood.get('arousal', 0):.2f})
-Behavior: {behavior.get('name', 'Unknown')}
-Recent Emotions: {recent_emotions}
-Needs: {needs}"""
-    
-    async def _process_action_command(self, command: str, state: Dict[str, Any]) -> str:
-        """Process and execute action commands."""
-        action = command.split('action:')[1].strip()
-        
-        if self.pet:
-            try:
-                # Dispatch action event
-                global_event_dispatcher.dispatch_event(
-                    Event("pet:action", {"action": action})
-                )
-                
-                # Execute action
-                self.pet.perform_action(action)
-                
-                # Get fresh state after action
-                new_state = await self.get_current_state()
-                return f"Executed action: {action}\n\nNew State:\n{self._format_state_response(new_state)}"
-            except Exception as e:
-                print(f"Error processing action: {e}")
-                raise
-        else:
-            return f"Test Mode - Would execute action: {action}"
 
     async def _validate_state_consistency(self) -> bool:
         """

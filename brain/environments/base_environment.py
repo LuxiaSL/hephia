@@ -7,7 +7,7 @@ ensuring consistent behavior across different tools.
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
-from .ui_formatter import UIFormatter
+from .terminal_formatter import TerminalFormatter, CommandResponse, EnvironmentHelp
 
 class BaseEnvironment(ABC):
     """Base class for all environments."""
@@ -23,7 +23,7 @@ class BaseEnvironment(ABC):
         pass
     
     @abstractmethod
-    async def handle_command(self, command: str, context: Dict[str, Any]) -> str:
+    async def handle_command(self, command: str, context: Dict[str, Any]) -> CommandResponse:
         """
         Handle a command in this environment.
         
@@ -32,15 +32,17 @@ class BaseEnvironment(ABC):
             context: Current system context
         
         Returns:
-            Command response
+            Command response object
         """
         pass
     
-    def format_help(self) -> Dict[str, str]:
+    def format_help(self) -> CommandResponse:
         """Format help text for this environment."""
-        return UIFormatter.format_environment_help(
-            self.__class__.__name__,
-            self.get_commands(),
-            examples=getattr(self, 'help_examples', None),
-            tips=getattr(self, 'help_tips', None)
+        return TerminalFormatter.format_environment_help(
+            EnvironmentHelp(
+                self.__class__.__name__,
+                self.get_commands(),
+                examples=getattr(self, 'help_examples', None),
+                tips=getattr(self, 'help_tips', None)
+            )
         )

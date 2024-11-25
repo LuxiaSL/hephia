@@ -154,13 +154,13 @@ class EmotionalProcessor:
                 'decrease': {'name': 'tired', 'valence': -0.3, 'arousal': -0.4}
             },
             'loneliness':{
-                'increase': {'name': 'forlorn', 'valence': -0.3, 'arousal': 0.2},
-                'decrease': {'name': 'connected', 'valence': -0.3, 'arousal': 0.2}
+                'increase': {'name': 'forlorn', 'valence': -0.3, 'arousal': -0.5},
+                'decrease': {'name': 'connected', 'valence': 0.3, 'arousal': 0.4}
             }
         },
         'action': {
             'feed': {'name': 'sated', 'valence': 0.5, 'arousal': 0.2},
-            'give_water': {'name': 'slaked', 'valence': 0.4, 'arousal': 0.1},
+            'drink': {'name': 'slaked', 'valence': 0.4, 'arousal': 0.1},
             'play': {'name': 'joyful', 'valence': 0.7, 'arousal': 0.8},
             'rest': {'name': 'relaxed', 'valence': 0.3, 'arousal': -0.4}
         },
@@ -174,17 +174,17 @@ class EmotionalProcessor:
         }
     }
 
-    def __init__(self, pet_context, cognitive_processor, memory_system):
+    def __init__(self, pet_context, cognitive_bridge, memory_system):
         """
         Initializes the EmotionalProcessor with context access and processing capabilities.
 
         Args:
             pet_context (PetContext): internal state access
-            cognitive_processor (CognitiveProcessor): active emotional mediation & logging
+            cognitive_bridge (CognitiveBridge): active emotional mediation & logging
             memory_system (MemorySystem): access to body memory 
         """
         self.pet_context = pet_context
-        self.cognitive_processor = cognitive_processor
+        self.cognitive_bridge = cognitive_bridge
         self.memory_system = memory_system
         self.current_stimulus = EmotionalStimulus()
         self.setup_event_listeners()
@@ -347,8 +347,6 @@ class EmotionalProcessor:
             self.current_stimulus.add_vector(influenced_vector)
             # Log the influenced vector in the body memory
             self.memory_system.body_memory.log(influenced_vector)
-            # Update our working vector to the influenced version for potential further processing
-            vector = influenced_vector
 
     def _calculate_relative_influence(self, base_vector, influence_valence, influence_arousal, influence_type):
         """

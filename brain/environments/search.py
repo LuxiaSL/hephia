@@ -5,6 +5,7 @@ Simple search environment using Perplexity API.
 from typing import Dict, Any
 from api_clients import APIManager
 from brain.environments.base_environment import BaseEnvironment
+from brain.environments.terminal_formatter import TerminalFormatter, CommandResponse, EnvironmentHelp
 
 class SearchEnvironment(BaseEnvironment):
     """Basic search functionality using Perplexity."""
@@ -25,7 +26,7 @@ class SearchEnvironment(BaseEnvironment):
             }
         ]
     
-    async def handle_command(self, command: str, context: Dict[str, Any]) -> Dict[str, str]:
+    async def handle_command(self, command: str) -> CommandResponse:
         """Handle search commands."""
         parts = command.split(maxsplit=1)
         action = parts[0].lower()
@@ -35,12 +36,13 @@ class SearchEnvironment(BaseEnvironment):
         elif action == "help":
             return self.format_help()
         else:
-            return {
-                "title": "Error",
-                "content": f"Unknown search command: {action}"
-            }
+            return CommandResponse(
+                title="Error",
+                content=f"Unknown search command: {action}",
+                suggested_commands=["search help", "search query <terms>"]
+            )
     
-    async def _perform_search(self, query: str) -> Dict[str, str]:
+    async def _perform_search(self, query: str) -> CommandResponse:
         """Perform search using Perplexity API."""
         try:
             response = await self.api.perplexity.create_completion(
@@ -56,34 +58,36 @@ class SearchEnvironment(BaseEnvironment):
                 ]
             )
             
-            return {
-                "title": "Search Results",
-                "content": response["choices"][0]["message"]["content"] + "\n\n" +
-                          "Available actions:\n" +
-                          "• 'notes create' to save insights\n" +
-                          "• 'search query' to explore further"
-            }
+            return CommandResponse(
+                title="Search Results",
+                content=response["choices"][0]["message"]["content"],
+                suggested_commands=[
+                    f'notes create "Research: {query[:30]}..."',
+                    f'search query "{query} more details"'
+                ]
+            )
             
         except Exception as e:
-            return {
-                "title": "Search Error",
-                "content": f"Failed to perform search: {str(e)}"
-            }
+            return CommandResponse(
+                title="Search Error",
+                content=f"Failed to perform search: {str(e)}",
+                suggested_commands=["search help"]
+            )
     
-    def format_help(self) -> Dict[str, str]:
+    def format_help(self) -> CommandResponse:
         """Format help text."""
-        return {
-            "title": "Search Help",
-            "content": """╔══════════════════════════╗
-║     SEARCH COMMANDS     ║
-╚══════════════════════════╝
-
-• search query <terms> - Search and summarize information
-
-Example:
-search query "current weather in London"
-
-Tips:
-- Be specific in your queries
-- Use notes to save interesting findings"""
-        }
+        return TerminalFormatter.format_environment_help(
+            EnvironmentHelp(
+                name="Search",
+                commands=self.get_commands(),
+                examples=[
+                    'search query "current weather in London"',
+                    'search query "latest news about AI"'
+                ],
+                tips=[
+                    "Be specific in your queries",
+                    "Use notes to save interesting findings",
+                    "Try following up on search results with more specific queries"
+                ]
+            )
+        )
