@@ -12,6 +12,7 @@ from .notes import NotesEnvironment
 from .search import SearchEnvironment
 from .web import WebEnvironment
 from api_clients import APIManager
+from .terminal_formatter import CommandResponse
 
 class EnvironmentRegistry:
     """
@@ -30,7 +31,6 @@ class EnvironmentRegistry:
         self.register_environment("notes", NotesEnvironment())
         self.register_environment("search", SearchEnvironment(self.api_manager))
         self.register_environment("web", WebEnvironment())
-        
     
     def register_environment(self, name: str, environment: BaseEnvironment):
         """
@@ -86,3 +86,47 @@ class EnvironmentRegistry:
             return await environment.handle_command(command, context)
         except Exception as e:
             return f"Error in {env_name}: {str(e)}"
+        
+    def format_global_help(self) -> CommandResponse:
+        """
+        Format comprehensive help information for all available systems.
+        """
+        environments = self.get_available_commands()
+        
+        # Create sections for different types of interaction
+        return CommandResponse(
+            title="Hephia System Help",
+            content=(
+                "╔════════════════════════════════════════════════════════════╗\n"
+                "║                     AVAILABLE SYSTEMS                       ║\n"
+                "╠════════════════════════════════════════════════════════════╣\n"
+                "\nCore Environments:\n"
+                f"• notes - Personal memory system for recording thoughts and insights\n"
+                f"• search - Access external information and knowledge\n"
+                f"• web - Browse and analyze web content\n"
+                f"• exo - Direct interaction with cognitive processing\n"
+                "\nPet Interaction:\n"
+                "• pet feed - Satisfy hunger needs\n"
+                "• pet play - Reduce boredom and increase engagement\n"
+                "• pet status - Get detailed internal state\n"
+                "\nUsage Tips:\n"
+                "• Use '<environment> help' for detailed environment commands\n"
+                "• Monitor pet state to guide interactions\n"
+                "• Record important discoveries using notes\n"
+                "• Combine environments for complex tasks\n"
+                "\nExample Flows:\n"
+                "1. search query \"topic\" → notes create \"findings\"\n"
+                "2. web open <url> → notes create \"web summary\"\n"
+                "3. exo query \"analyze this\" → notes create \"analysis\"\n"
+                "\nRemember:\n"
+                "• Your actions influence pet state\n"
+                "• Balance different needs\n"
+                "• Build on previous interactions\n"
+            ),
+            suggested_commands=[
+                "notes help",
+                "search help",
+                "exo help",
+                "pet status"
+            ]
+        )

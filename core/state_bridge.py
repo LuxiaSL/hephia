@@ -37,7 +37,7 @@ class StateBridge:
         self.pet_context = pet.context if pet else None
         self.current_state: Optional[SystemState] = None
         self.state_lock = asyncio.Lock()
-        self.db_path = 'data/hephia_state.db'
+        self.db_path = 'data/server_state.db'
     
     async def initialize(self):
         """Initialize the state bridge and set up database."""

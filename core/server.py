@@ -48,18 +48,13 @@ class HephiaServer:
         self.setup_middleware()
         self.active_connections: List[WebSocket] = []
 
-        # Add lock for exo loop
-        self.exo_lock = asyncio.Lock()
-        self.last_successful_exo = None  # Track last successful completion
-
         # Core systems
         self.api = APIManager.from_env()
         self.pet = Pet()
         self.state_bridge = StateBridge(pet=self.pet)
         self.timer = TimerCoordinator()
-        
-        # Environment and processing systems
         self.environment_registry = EnvironmentRegistry(self.api)
+
         self.exo_processor = ExoProcessor(
             api_manager=self.api,
             state_bridge=self.state_bridge,
@@ -147,6 +142,9 @@ class HephiaServer:
         
         # Initialize bridge with existing pet
         await self.state_bridge.initialize()
+
+        # Initialize ExoProcessor
+        await self.exo_processor.initialize()
         
         # Configure timer tasks
         self.timer.add_task(

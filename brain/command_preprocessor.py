@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import re
 import logging
 import os
+import json
 from datetime import datetime
 from api_clients import APIManager
 
@@ -214,9 +215,10 @@ class CommandPreprocessor:
         
         # Environment-specific hints
         env_hints = {
-            ('query', 'think', 'explore'): ('exo', 'exo query "your question"'),
+            ('google', 'query'): ('search', 'search query "your question"'),
             ('create', 'list', 'read', 'update', 'delete', 'tags'): 
-                ('notes', 'notes create "your note"')
+                ('notes', 'notes create "your note"'),
+            ('open', 'browse'):('web', 'web open "url"')
         }
         
         for words, (env, example) in env_hints.items():
@@ -232,7 +234,6 @@ class CommandPreprocessor:
             return (
                 "This looks like a search query. Try:\n"
                 f"- 'search query {command}' for web search\n"
-                f"- 'exo query {command}' for thinking/analysis"
             )
 
         # Show available commands
@@ -270,7 +271,7 @@ class CommandPreprocessor:
                 messages=[
                     {
                         "role": "system",
-                        "content": f"""You are a command preprocessor for an OS simulator. Your task is to correct invalid commands and provide helpful feedback.
+                        "content": """You are a command preprocessor for an OS simulator. Your task is to correct invalid commands and provide helpful feedback.
 
 Rules:
 1. If a specific command is missing its environment prefix (e.g., 'create' instead of 'notes create'), add the correct prefix
@@ -285,8 +286,9 @@ Rules:
                     }
                 ],
                 model=os.getenv("OPENROUTER_MODEL"),
-                temperature=0.6
+                temperature=0.5
             )
+            
             
             corrected = response["choices"][0]["message"]["content"]
             if corrected and self._is_valid_command(corrected, available_commands):

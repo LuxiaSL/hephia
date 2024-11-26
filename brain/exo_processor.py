@@ -20,14 +20,13 @@ class ExoProcessor:
         self.environment_registry = environment_registry
         self.command_preprocessor = CommandPreprocessor(self.api)
         self.conversation_history = []
-        self._initialize_conversation()
         self.exo_lock = asyncio.Lock()
         self.last_successful_turn = None
 
-    def _initialize_conversation(self):
-        """Set up initial conversation context with welcome message."""
-        initial_state = self.state_bridge.get_current_state()
-        formatted_state = TerminalFormatter.format_terminal_view(initial_state)
+    async def initialize(self):
+        """Handle async initialization tasks."""
+        initial_state = await self.state_bridge.get_current_state()
+        formatted_state = TerminalFormatter.format_context_summary(initial_state)
         
         welcome_message = {
             "role": "system",

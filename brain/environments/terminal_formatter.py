@@ -24,14 +24,21 @@ class TerminalFormatter:
     @staticmethod
     def format_context_summary(context: Dict[str, Any]) -> str:
         """Format concise state summary"""
-        mood = context.get('mood', {})
-        needs = context.get('needs', {})
-        behavior = context.get('behavior', {})
+        pet_state = context.get('pet_state', {})
+        mood = pet_state.get('mood', {})
+        needs = pet_state.get('needs', {})
+        behavior = pet_state.get('behavior', {})
+
+        need_strings = [
+            f"{k}: {v.get('satisfaction', 0):.2f}"
+            for k, v in needs.items()
+        ]
+        needs_formatted = ', '.join(need_strings)
         
         return (
             f"Mood: {mood.get('name', 'Unknown')}\n"
             f"Behavior: {behavior.get('name', 'Unknown')}\n"
-            f"Needs: {', '.join(f'{k}: {v.get('satisfaction', 0):.2f}' for k, v in needs.items())}"
+            f"Needs: {needs_formatted}"
         )
 
     @staticmethod
