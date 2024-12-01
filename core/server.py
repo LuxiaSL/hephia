@@ -24,7 +24,6 @@ from pet.pet import Pet
 from config import Config
 from brain.exo_processor import ExoProcessor
 from brain.environments.environment_registry import EnvironmentRegistry
-from brain.logging_utils import ExoLogger
 from api_clients import APIManager
 
 class CommandRequest(BaseModel):

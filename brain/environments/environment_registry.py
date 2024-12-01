@@ -6,13 +6,17 @@ allowing the cognitive system to interact with both internal
 and external tools.
 """
 
-from typing import Dict, Type, Optional
-from .base_environment import BaseEnvironment
+from typing import Dict, List, Any, Optional
+from .base_environment import BaseEnvironment, CommandResult
 from .notes import NotesEnvironment
 from .search import SearchEnvironment
 from .web import WebEnvironment
 from api_clients import APIManager
-from .terminal_formatter import CommandResponse
+from brain.commands.model import (
+    CommandDefinition,
+    EnvironmentCommands,
+    CommandValidationError
+)
 
 class EnvironmentRegistry:
     """
@@ -33,100 +37,66 @@ class EnvironmentRegistry:
         self.register_environment("web", WebEnvironment())
     
     def register_environment(self, name: str, environment: BaseEnvironment):
-        """
-        Register a new environment.
-        
-        Args:
-            name: Environment name
-            environment: Environment instance
-        """
+        """Register a new environment."""
         self.environments[name] = environment
     
     def get_environment(self, name: str) -> Optional[BaseEnvironment]:
-        """
-        Get environment by name.
-        
-        Args:
-            name: Environment name
-        
-        Returns:
-            BaseEnvironment if found, None otherwise
-        """
+        """Get environment by name."""
         return self.environments.get(name.lower())
     
-    def get_available_commands(self) -> Dict[str, list]:
-        """
-        Get all available commands from all environments.
-        
-        Returns:
-            Dict of environment names to their commands
-        """
+    def get_available_commands(self) -> Dict[str, List[Dict[str, str]]]:
+        """Get complete command information for all environments."""
         return {
-            name: env.get_commands()
+            name: env.get_environment_info()
             for name, env in self.environments.items()
         }
-    
-    async def process_command(self, env_name: str, command: str, context: Dict):
-        """
-        Process a command in the specified environment.
+
+    def format_global_help(self) -> CommandResult:
+        """Format comprehensive help for all environments."""
+        help_sections = []
         
-        Args:
-            env_name: Environment name
-            command: Command to process
-            context: Current system context
+        # Build help text from environment info
+        for env_name, env in self.environments.items():
+            env_info = env.get_environment_info()
+            
+            # Add environment header
+            help_sections.append(f"\n{env_name.upper()} COMMANDS:")
+            help_sections.append(f"  {env_info.description}\n")
+            
+            # Group commands by category
+            categorized = {}
+            for cmd in env_info.commands.values():
+                category = cmd.category or "General"
+                if category not in categorized:
+                    categorized[category] = []
+                categorized[category].append(cmd)
+            
+            # Format each category
+            for category, commands in categorized.items():
+                help_sections.append(f"  {category}:")
+                for cmd in commands:
+                    # Format command signature
+                    params = " ".join(
+                        f"<{p.name}>" if p.required else f"[{p.name}]"
+                        for p in cmd.parameters
+                    )
+                    flags = " ".join(f"[--{f.name}]" for f in cmd.flags)
+                    signature = f"    {env_name} {cmd.name} {params} {flags}".strip()
+                    
+                    # Add command details
+                    help_sections.append(signature)
+                    help_sections.append(f"      {cmd.description}")
+                    if cmd.examples:
+                        help_sections.append("      Examples:")
+                        help_sections.extend(
+                            f"        {ex}" for ex in cmd.examples[:2]
+                        )
+                help_sections.append("")  # Spacing between categories
         
-        Returns:
-            Command response or error message
-        """
-        environment = self.get_environment(env_name)
-        if not environment:
-            return f"Unknown environment: {env_name}"
-        
-        try:
-            return await environment.handle_command(command, context)
-        except Exception as e:
-            return f"Error in {env_name}: {str(e)}"
-        
-    def format_global_help(self) -> CommandResponse:
-        """
-        Format comprehensive help information for all available systems.
-        """
-        environments = self.get_available_commands()
-        
-        # Create sections for different types of interaction
-        return CommandResponse(
-            title="Hephia System Help",
-            content=(
-                "╔════════════════════════════════════════════════════════════╗\n"
-                "║                     AVAILABLE SYSTEMS                       ║\n"
-                "╠════════════════════════════════════════════════════════════╣\n"
-                "\nCore Environments:\n"
-                f"• notes - Personal memory system for recording thoughts and insights\n"
-                f"• search - Access external information and knowledge\n"
-                f"• web - Browse and analyze web content\n"
-                f"• exo - Direct interaction with cognitive processing\n"
-                "\nPet Interaction:\n"
-                "• pet feed - Satisfy hunger needs\n"
-                "• pet play - Reduce boredom and increase engagement\n"
-                "• pet status - Get detailed internal state\n"
-                "\nUsage Tips:\n"
-                "• Use '<environment> help' for detailed environment commands\n"
-                "• Monitor pet state to guide interactions\n"
-                "• Record important discoveries using notes\n"
-                "• Combine environments for complex tasks\n"
-                "\nExample Flows:\n"
-                "1. search query \"topic\" → notes create \"findings\"\n"
-                "2. web open <url> → notes create \"web summary\"\n"
-                "3. exo query \"analyze this\" → notes create \"analysis\"\n"
-                "\nRemember:\n"
-                "• Your actions influence pet state\n"
-                "• Balance different needs\n"
-                "• Build on previous interactions\n"
-            ),
+        return CommandResult(
+            success=True,
+            message="\n".join(help_sections),
             suggested_commands=[
-                "notes help",
-                "search help",
-                "exo help",
-                "pet status"
+                f"{env} help" for env in self.environments.keys()
             ]
         )

@@ -1,9 +1,8 @@
 """
-Notes environment for Hephia's cognitive system.
+notes.py - Persistent note-taking environment for Hephia.
 
-Provides a persistent note-taking system with tagging and search capabilities.
-Direct port of the original exOS notes system to Python, with added
-context awareness for cognitive integration.
+Provides a structured note management system with tagging and search capabilities.
+Maintains SQLite database for storage while exposing a clean command interface.
 """
 
 import sqlite3
@@ -15,18 +14,264 @@ from uuid import uuid4
 
 from .base_environment import BaseEnvironment
 from event_dispatcher import global_event_dispatcher, Event
-from .terminal_formatter import TerminalFormatter, CommandResponse, EnvironmentHelp
+from brain.commands.model import (
+    CommandDefinition, 
+    Parameter, 
+    Flag, 
+    ParameterType,
+    CommandResult,
+    CommandValidationError
+)
 
 class NotesEnvironment(BaseEnvironment):
-    """
-    Notes management environment.
-    Allows the cognitive system to store and retrieve thoughts and observations.
-    """
-    
+    """Notes environment for storing and managing cognitive observations."""
+
     def __init__(self):
-        """Initialize the notes environment."""
         self.db_path = 'data/notes.db'
-        self._ensure_db()
+        self._ensure_db()  # Setup database first
+        super().__init__()  # Then initialize command structure
+        
+        self.help_text = """
+        The notes environment provides persistent storage for thoughts and observations.
+        
+        Core Features:
+        - Create and manage notes with content and tags
+        - Search notes by content or tags
+        - Track note context and metadata
+        - Organize with tagging system
+        
+        Tips:
+        - Use tags consistently for better organization
+        - Include context in searches
+        - Review and update notes regularly
+        """
+
+    def _register_commands(self) -> None:
+        """Register all notes environment commands."""
+        # Create command
+        self.register_command(
+            CommandDefinition(
+                name="create",
+                description="Create a new note with optional tags",
+                parameters=[
+                    Parameter(
+                        name="content",
+                        description="The note content",
+                        required=True,
+                        examples=['"My first note"', '"Important observation"']
+                    )
+                ],
+                flags=[
+                    Flag(
+                        name="tags",
+                        description="Comma-separated list of tags",
+                        type=ParameterType.STRING,
+                        required=False,
+                        examples=["--tags=important,todo", "--tags=project,idea"]
+                    )
+                ],
+                examples=[
+                    'notes create "My new note"',
+                    'notes create "Project idea" --tags=project,idea',
+                    'notes create "Todo item" --tags=todo,important'
+                ],
+                related_commands=['list', 'tags'],
+                failure_hints={
+                    "DatabaseError": "Failed to save note. Try again.",
+                    "ValueError": "Invalid note format. Use quotes around content."
+                }
+            )
+        )
+
+        # List command
+        self.register_command(
+            CommandDefinition(
+                name="list",
+                description="List notes with optional filtering",
+                parameters=[],
+                flags=[
+                    Flag(
+                        name="tag",
+                        description="Filter by specific tag",
+                        type=ParameterType.STRING,
+                        required=False,
+                        examples=["--tag=important", "--tag=project"]
+                    ),
+                    Flag(
+                        name="limit",
+                        description="Maximum number of notes to show",
+                        type=ParameterType.INTEGER,
+                        default=10,
+                        required=False,
+                        examples=["--limit=5", "--limit=20"]
+                    )
+                ],
+                examples=[
+                    'notes list',
+                    'notes list --tag=important',
+                    'notes list --limit=5'
+                ],
+                related_commands=['create', 'search', 'tags'],
+                failure_hints={
+                    "DatabaseError": "Failed to retrieve notes. Try again."
+                }
+            )
+        )
+
+        # Read command
+        self.register_command(
+            CommandDefinition(
+                name="read",
+                description="Read a specific note by ID",
+                parameters=[
+                    Parameter(
+                        name="note_id",
+                        description="The ID of the note to read",
+                        required=True
+                    )
+                ],
+                examples=[
+                    'notes read abc123',
+                    'notes read def456'
+                ],
+                related_commands=['update', 'delete'],
+                failure_hints={
+                    "NotFound": "Note not found. Check the ID and try again."
+                }
+            )
+        )
+
+        # Update command
+        self.register_command(
+            CommandDefinition(
+                name="update",
+                description="Update an existing note",
+                parameters=[
+                    Parameter(
+                        name="note_id",
+                        description="The ID of the note to update",
+                        required=True
+                    ),
+                    Parameter(
+                        name="content",
+                        description="The new note content",
+                        required=True,
+                        examples=['"Updated content"']
+                    )
+                ],
+                flags=[
+                    Flag(
+                        name="tags",
+                        description="New comma-separated list of tags",
+                        type=ParameterType.STRING,
+                        required=False,
+                        examples=["--tags=updated,important"]
+                    )
+                ],
+                examples=[
+                    'notes update abc123 "New content"',
+                    'notes update def456 "Updated note" --tags=revised,important'
+                ],
+                related_commands=['read', 'delete'],
+                failure_hints={
+                    "NotFound": "Note not found. Check the ID and try again.",
+                    "ValueError": "Invalid update format. Check command syntax."
+                }
+            )
+        )
+
+        # Delete command
+        self.register_command(
+            CommandDefinition(
+                name="delete",
+                description="Delete a note",
+                parameters=[
+                    Parameter(
+                        name="note_id",
+                        description="The ID of the note to delete",
+                        required=True
+                    )
+                ],
+                examples=[
+                    'notes delete abc123'
+                ],
+                related_commands=['read', 'update'],
+                failure_hints={
+                    "NotFound": "Note not found. Check the ID and try again."
+                }
+            )
+        )
+
+        # Search command
+        self.register_command(
+            CommandDefinition(
+                name="search",
+                description="Search notes by content and tags",
+                parameters=[
+                    Parameter(
+                        name="query",
+                        description="Search terms",
+                        required=True,
+                        examples=['"project ideas"', '"important tasks"']
+                    )
+                ],
+                flags=[
+                    Flag(
+                        name="limit",
+                        description="Maximum results to return",
+                        type=ParameterType.INTEGER,
+                        default=5,
+                        required=False,
+                        examples=["--limit=10"]
+                    )
+                ],
+                examples=[
+                    'notes search "project"',
+                    'notes search "important" --limit=10'
+                ],
+                related_commands=['list', 'tags'],
+                failure_hints={
+                    "DatabaseError": "Search failed. Try simpler search terms."
+                }
+            )
+        )
+
+        # Tags command
+        self.register_command(
+            CommandDefinition(
+                name="tags",
+                description="List all tags or manage note tags",
+                parameters=[
+                    Parameter(
+                        name="action",
+                        description="Tag action to perform",
+                        required=False,
+                        examples=["add", "remove"]
+                    ),
+                    Parameter(
+                        name="note_id",
+                        description="Note ID for tag operations",
+                        required=False
+                    ),
+                    Parameter(
+                        name="tags",
+                        description="Tags to add/remove",
+                        required=False,
+                        examples=["important todo", "project idea"]
+                    )
+                ],
+                examples=[
+                    'notes tags',  # List all tags
+                    'notes tags add abc123 important project',
+                    'notes tags remove def456 old-tag'
+                ],
+                related_commands=['list', 'search'],
+                failure_hints={
+                    "ValueError": "Invalid tag command. Check syntax.",
+                    "NotFound": "Note not found for tag operation."
+                }
+            )
+        )
     
     def _ensure_db(self):
         """Ensure database and tables exist."""
@@ -90,185 +335,173 @@ class NotesEnvironment(BaseEnvironment):
         
         conn.commit()
         conn.close()
-    
-    def get_commands(self) -> List[Dict[str, str]]:
-        """Get available notes commands."""
-        return [
-            {
-                "name": "create",
-                "description": "Create a new note with optional tags"
-            },
-            {
-                "name": "list",
-                "description": "List notes, optionally filtered by tags"
-            },
-            {
-                "name": "read",
-                "description": "Read a specific note by ID"
-            },
-            {
-                "name": "update",
-                "description": "Update an existing note"
-            },
-            {
-                "name": "delete",
-                "description": "Delete a note"
-            },
-            {
-                "name": "search",
-                "description": "Search notes by content and tags"
-            },
-            {
-                "name": "tags",
-                "description": "List all tags or manage note tags"
-            }
-        ]
-    
-    async def handle_command(self, command: str, context: Dict[str, Any]) -> Dict[str, str]:
-        parts = command.split(maxsplit=1)
-        action = parts[0]
-        params = parts[1] if len(parts) > 1 else ""
 
+    async def _execute_command(
+        self,
+        action: str,
+        params: List[Any],
+        flags: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> CommandResult:
+        """Execute a notes command with validated parameters."""
         try:
             if action == "create":
-                return await self._create_note(params, context)
+                return await self._create_note(params[0], flags.get("tags"), context)
             elif action == "list":
-                return await self._list_notes(params)
+                return await self._list_notes(
+                    flags.get("tag"),
+                    flags.get("limit", 10)
+                )
             elif action == "read":
-                return await self._read_note(params)
+                return await self._read_note(params[0])
             elif action == "update":
-                return await self._update_note(params, context)
+                return await self._update_note(
+                    params[0],  # note_id
+                    params[1],  # content
+                    flags.get("tags"),
+                    context
+                )
             elif action == "delete":
-                return await self._delete_note(params)
+                return await self._delete_note(params[0])
             elif action == "search":
-                return await self._search_notes(params)
+                return await self._search_notes(
+                    params[0],
+                    flags.get("limit", 5)
+                )
             elif action == "tags":
-                return await self._handle_tags(params)
-            else:
-                return TerminalFormatter.format_error(f"Unknown notes command: {action}")
+                if len(params) == 0:  # List tags
+                    return await self._list_tags()
+                else:  # Tag management
+                    return await self._handle_tags(*params)
+            
+            raise ValueError(f"Unknown action: {action}")
+            
+        except sqlite3.Error as e:
+            return CommandResult(
+                success=False,
+                message=f"Database error: {str(e)}",
+                error="DatabaseError",
+                suggested_commands=["notes help"]
+            )
         except Exception as e:
-            return TerminalFormatter.format_error(str(e))
+            return CommandResult(
+                success=False,
+                message=str(e),
+                error=type(e).__name__,
+                suggested_commands=["notes help"]
+            )
     
-    async def _create_note(self, params: str, context: Dict[str, Any]) -> Dict[str, str]:
-        """Create a new note with current cognitive context."""
-        # Parse content and tags
-        tags = []
-        content = params
+    async def _create_note(
+        self, 
+        content: str, 
+        context: Dict[str, Any],
+        tags: Optional[str] = None,
+    ) -> CommandResult:
+        """
+        Create a new note with context awareness.
         
-        # Extract tags if specified
-        if "--tags" in params:
-            content, tag_str = params.split("--tags", 1)
-            tags = [t.strip() for t in tag_str.strip().split(',')]
-        
-        # Create note
+        The note creation ripples through the system:
+        - Stores the current cognitive context
+        - Updates tag relationships
+        - Suggests natural next actions
+        """
         note_id = str(uuid4())
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # Get current cognitive state for context
+            # Capture current cognitive state
             note_context = {
                 'mood': context.get('pet_state', {}).get('mood', {}),
                 'needs': context.get('pet_state', {}).get('needs', {}),
                 'timestamp': datetime.now().isoformat()
             }
             
-            # Insert note
+            # Store the note
             cursor.execute(
                 """INSERT INTO notes (id, content, context) 
                    VALUES (?, ?, ?)""",
                 (note_id, content.strip(), json.dumps(note_context))
             )
             
-            # Handle tags
-            for tag in tags:
-                # Insert tag if new
-                cursor.execute(
-                    "INSERT OR IGNORE INTO tags (name) VALUES (?)",
-                    (tag,)
-                )
-                
-                # Get tag id
-                cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))
-                tag_id = cursor.fetchone()[0]
-                
-                # Link tag to note
-                cursor.execute(
-                    "INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)",
-                    (note_id, tag_id)
-                )
+            # Handle tags if provided
+            tag_list = []
+            if tags:
+                tag_list = [t.strip() for t in tags.split(',')]
+                for tag in tag_list:
+                    # Insert or get tag
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO tags (name) VALUES (?)",
+                        (tag,)
+                    )
+                    cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))
+                    tag_id = cursor.fetchone()[0]
+                    
+                    # Link to note
+                    cursor.execute(
+                        "INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)",
+                        (note_id, tag_id)
+                    )
             
             conn.commit()
             
-            # Notify system of new note
+            # Notify system
             global_event_dispatcher.dispatch_event(
                 Event("notes:created", {
                     "note_id": note_id,
                     "content": content,
-                    "tags": tags,
+                    "tags": tag_list,
                     "context": note_context
                 })
             )
             
-            return CommandResponse(
-                title="Note Created",
-                content=f"Created note with ID: {note_id}\nContent: {content}\nTags: {', '.join(tags) if tags else 'none'}",
-                suggested_commands=[
-                    "'notes list' to view recent notes",
-                    "'notes read {note_id}' to view this note",
-                    "'notes tags add {note_id} tag1 tag2' to add more tags"
-                ]
-            )
+            # Generate contextual next steps
+            suggested_next = [
+                f"notes read {note_id}",  # View the note
+                "notes list"  # See in context
+            ]
             
-        finally:
-            conn.close()
-    
-    async def _list_notes(self, params: str) -> Dict[str, str]:        
-        """List notes with optional tag filtering."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            query = """
-                SELECT n.*, GROUP_CONCAT(t.name) as tags
-                FROM notes n
-                LEFT JOIN note_tags nt ON n.id = nt.note_id
-                LEFT JOIN tags t ON nt.tag_id = t.id
-            """
-            
-            # Handle tag filtering
-            if params and "--tag" in params:
-                tag = params.split("--tag", 1)[1].strip()
-                query += f" WHERE t.name = ?"
-                cursor.execute(query + " GROUP BY n.id ORDER BY n.created_at DESC LIMIT 10", (tag,))
+            # Add tag-based suggestions
+            if tags:
+                suggested_next.append(f"notes list --tag={tag_list[0]}")  # View similar notes
             else:
-                cursor.execute(query + " GROUP BY n.id ORDER BY n.created_at DESC LIMIT 10")
+                suggested_next.append(f'notes tags add {note_id} <tag>')  # Suggest tagging
             
-            notes = cursor.fetchall()
+            return CommandResult(
+                success=True,
+                message=f"Created note {note_id}\nContent: {content}\nTags: {', '.join(tag_list) if tag_list else 'none'}",
+                suggested_commands=suggested_next,
+                data={
+                    "note_id": note_id,
+                    "content": content,
+                    "tags": tag_list,
+                    "context": note_context
+                }
+            )
             
-            if not notes:
-                return CommandResponse(
-                    title="No Notes Found",
-                    content="You haven't created any notes yet. Use 'notes create \"Your note content\" --tags tag1,tag2' to get started!",
-                    suggested_commands=["notes create \"My first note\" --tags example"]
-                )
-            
-            # Format notes list
-            content = "Recent Notes:\n\n"
-            for note in notes:
-                content += f"ID: {note[0]}\nCreated: {note[2]}\nContent: {note[1][:50]}...\nTags: [{note[-1] or 'none'}]\n\n"
-
-            return CommandResponse(
-                title="Notes List",
-                content=content,
-                suggested_commands=["notes read <note_id>", "notes search <query>"]
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to create note: {str(e)}",
+                suggested_commands=[
+                    'notes create "Try again"',
+                    "notes list"
+                ],
+                error=str(e)
             )
             
         finally:
             conn.close()
-    
-    async def _read_note(self, note_id: str) -> Dict[str, str]:
-        """Read a specific note."""
+
+    async def _read_note(self, note_id: str) -> CommandResult:
+        """
+        Read a specific note with its full context.
+        
+        Reading flows naturally into:
+        - Updating the note
+        - Exploring related notes
+        - Managing tags
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -284,82 +517,190 @@ class NotesEnvironment(BaseEnvironment):
             
             note = cursor.fetchone()
             if not note:
-                return TerminalFormatter.format_error(f"Note {note_id} not found.")
+                return CommandResult(
+                    success=False,
+                    message=f"Note {note_id} not found",
+                    suggested_commands=[
+                        "notes list",  # Browse existing notes
+                        f'notes create "New note"'  # Create instead
+                    ],
+                    error="NotFound"
+                )
             
-            content = f"""Note {note[0]}:
-Created: {note[2]}
-Updated: {note[3]}
-Tags: {note[-1] or 'none'}
+            # Parse stored context
+            context = json.loads(note[4]) if note[4] else {}
+            
+            # Format note display
+            content = [
+                f"Note {note[0]}:",
+                f"Created: {note[2]}",
+                f"Updated: {note[3]}",
+                f"Tags: {note[-1] or 'none'}",
+                "",
+                "Content:",
+                note[1]
+            ]
+            
+            if context.get('mood'):
+                content.extend([
+                    "",
+                    "Created while:",
+                    f"Mood: {context['mood'].get('name', 'unknown')}",
+                    f"Needs: {', '.join(f'{k}: {v}' for k, v in context.get('needs', {}).items())}"
+                ])
 
-Content:
-{note[1]}"""
+            # Generate contextual suggestions
+            suggested = [
+                f"notes update {note_id} \"New content\"",  # Update
+                f"notes tags add {note_id} <tag>"  # Add tags
+            ]
+            
+            # Add tag-based suggestions
+            if note[-1]:  # Has tags
+                tags = note[-1].split(',')
+                suggested.append(f"notes list --tag={tags[0]}")  # View similar notes
+            
+            return CommandResult(
+                success=True,
+                message="\n".join(content),
+                suggested_commands=suggested,
+                data={
+                    "note_id": note_id,
+                    "content": note[1],
+                    "created": note[2],
+                    "updated": note[3],
+                    "tags": note[-1].split(',') if note[-1] else [],
+                    "context": context
+                }
+            )
+            
+        finally:
+            conn.close()
 
-            return CommandResponse(
-                title=f"Note {note_id}",
-                content=content,
+    
+    async def _list_notes(self, tag: Optional[str] = None, limit: int = 10) -> CommandResult:
+        """List notes with optional tag filtering."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            query = """
+                SELECT n.*, GROUP_CONCAT(t.name) as tags
+                FROM notes n
+                LEFT JOIN note_tags nt ON n.id = nt.note_id
+                LEFT JOIN tags t ON nt.tag_id = t.id
+            """
+            
+            # Handle tag filtering
+            if tag:
+                query += " WHERE t.name = ?"
+                cursor.execute(query + f" GROUP BY n.id ORDER BY n.created_at DESC LIMIT {limit}", (tag,))
+            else:
+                cursor.execute(query + f" GROUP BY n.id ORDER BY n.created_at DESC LIMIT {limit}")
+            
+            notes = cursor.fetchall()
+            
+            if not notes:
+                return CommandResult(
+                success=True,  # Still successful, just empty!
+                message="No notes found.",
                 suggested_commands=[
-                    f"notes update {note_id} \"New content\" --tags tag1,tag2",
-                    f"notes delete {note_id}"
-                ]
+                    'notes create "My first note" --tags=example',
+                    'notes create "Getting started"'
+                ],
+                data={"count": 0}  # Include metadata
+            )
+            
+            # Format notes list
+            content = ["Recent Notes:\n"]
+            for note in notes:
+                content.append(
+                    f"ID: {note[0]}\n"
+                    f"Created: {note[2]}\n"
+                    f"Content: {note[1][:50]}...\n"
+                    f"Tags: {note[-1] or 'none'}\n"
+                )
+
+            return CommandResult(
+                success=True,
+                message="\n".join(content),
+                suggested_commands=[
+                    "notes read <note_id>",
+                    "notes search <query>",
+                    f"notes list --limit={limit + 5}"  # Suggest viewing more
+                ],
+                data={
+                    "count": len(notes),
+                    "has_more": len(notes) == limit,
+                    "filter_tag": tag
+                }
             )
             
         finally:
             conn.close()
     
-    async def _update_note(self, params: str, context: Dict[str, Any]) -> Dict[str, str]:
-        """Update an existing note."""
-        parts = params.split(maxsplit=1)
-        if len(parts) != 2:
-            return "Usage: update <note_id> <new_content> [--tags tag1,tag2,...]"
-            
-        note_id, content = parts
+    async def _update_note(
+        self,
+        note_id: str,
+        content: str,
+        context: Dict[str, Any],
+        tags: Optional[str] = None,
+    ) -> CommandResult:
+        """
+        Update a note's content and metadata.
         
-        # Extract tags if specified
-        tags = []
-        if "--tags" in content:
-            content, tag_str = content.split("--tags", 1)
-            tags = [t.strip() for t in tag_str.strip().split(',')]
-        
+        Updates ripple through:
+        - Note relationships (through tags)
+        - Context history
+        - Cognitive state tracking
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # Update note
+            # First check note exists
+            cursor.execute("SELECT 1 FROM notes WHERE id = ?", (note_id,))
+            if not cursor.fetchone():
+                return CommandResult(
+                    success=False,
+                    message=f"Note {note_id} not found",
+                    suggested_commands=[
+                        "notes list",
+                        f'notes create "{content}"'  # Suggest creating instead
+                    ],
+                    error="NotFound"
+                )
+
+            # Update note with new content and context
+            new_context = {
+                'mood': context.get('pet_state', {}).get('mood', {}),
+                'needs': context.get('pet_state', {}).get('needs', {}),
+                'timestamp': datetime.now().isoformat()
+            }
+            
             cursor.execute(
                 """UPDATE notes 
                    SET content = ?, 
                        updated_at = CURRENT_TIMESTAMP,
                        context = ?
                    WHERE id = ?""",
-                (
-                    content.strip(),
-                    json.dumps({
-                        'mood': context.get('pet_state', {}).get('mood', {}),
-                        'needs': context.get('pet_state', {}).get('needs', {}),
-                        'timestamp': datetime.now().isoformat()
-                    }),
-                    note_id
-                )
+                (content.strip(), json.dumps(new_context), note_id)
             )
-            
-            if cursor.rowcount == 0:
-                return f"Note {note_id} not found."
-            
-            # Update tags if specified
-            if tags:
-                # Remove old tags
+
+            # Handle tag updates if provided
+            tag_list = []
+            if tags is not None:  # Explicitly check None to allow empty string (remove all tags)
+                # Remove existing tags
                 cursor.execute("DELETE FROM note_tags WHERE note_id = ?", (note_id,))
                 
                 # Add new tags
-                for tag in tags:
+                tag_list = [t.strip() for t in tags.split(',') if t.strip()]
+                for tag in tag_list:
                     cursor.execute(
-                        "INSERT OR IGNORE INTO tags (name) VALUES (?)",
+                        "INSERT OR IGNORE INTO tags (name) VALUES (?",
                         (tag,)
                     )
-                    cursor.execute(
-                        "SELECT id FROM tags WHERE name = ?",
-                        (tag,)
-                    )
+                    cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))
                     tag_id = cursor.fetchone()[0]
                     cursor.execute(
                         "INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)",
@@ -368,40 +709,77 @@ Content:
             
             conn.commit()
             
-            return CommandResponse(
-                title="Note Updated",
-                content=f"Updated note {note_id}\nNew content: {content}\nNew tags: {', '.join(tags) if tags else 'unchanged'}",
-                suggested_commands=[f"notes read {note_id}"],
-                context=context
+            # Generate natural next steps
+            suggested = [
+                f"notes read {note_id}",  # View changes
+                "notes list"  # See in context
+            ]
+            
+            if tag_list:
+                suggested.append(f"notes list --tag={tag_list[0]}")  # View similar
+            
+            return CommandResult(
+                success=True,
+                message=f"Updated note {note_id}\nNew content: {content}\nTags: {', '.join(tag_list) if tag_list else 'unchanged'}",
+                suggested_commands=suggested,
+                data={
+                    "note_id": note_id,
+                    "content": content,
+                    "tags": tag_list,
+                    "context": new_context
+                }
             )
             
         finally:
             conn.close()
     
-    async def _delete_note(self, note_id: str) -> Dict[str, str]:
-        """Delete a note."""
+    async def _delete_note(self, note_id: str) -> CommandResult:
+        """
+        Delete a note and its associated data.
+        
+        Deletion ripples through:
+        - Note content and metadata
+        - Tag relationships 
+        - Search index
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
+            # First check if note exists
+            cursor.execute("SELECT 1 FROM notes WHERE id = ?", (note_id.strip(),))
+            if not cursor.fetchone():
+                return CommandResult(
+                    success=False,
+                    message=f"Note {note_id} not found",
+                    suggested_commands=[
+                        "notes list",  # Browse existing notes
+                        "notes search <query>"  # Search for similar notes
+                    ],
+                    error="NotFound"
+                )
+
+            # Delete note - tags are handled by foreign key constraints
             cursor.execute("DELETE FROM notes WHERE id = ?", (note_id.strip(),))
-            
-            if cursor.rowcount == 0:
-                return f"Note {note_id} not found."
-                
-            # Note tags are automatically deleted via foreign key constraints
             conn.commit()
             
-            return CommandResponse(
-                title="Note Deleted",
-                content=f"Deleted note {note_id}",
-                suggested_commands=["notes list"]
+            return CommandResult(
+                success=True,
+                message=f"Successfully deleted note {note_id}",
+                suggested_commands=[
+                    "notes list",  # View remaining notes
+                    "notes create \"New note\"",  # Create new note
+                    "notes tags"  # Review available tags
+                ],
+                data={
+                    "deleted_id": note_id
+                }
             )
             
         finally:
             conn.close()
     
-    async def _search_notes(self, query: str) -> Dict[str, str]:
+    async def _search_notes(self, query: str, limit: int = 5) -> CommandResult:
         """Search notes using full-text search."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -417,74 +795,101 @@ Content:
                 GROUP BY notes.id
                 ORDER BY rank
                 LIMIT 5
-            """, (query,))
+            """, (query, limit))
             
             notes = cursor.fetchall()
             
             if not notes:
-                return CommandResponse(
-                    title="No Matching Notes",
-                    content=f"No notes found matching '{query}'",
-                    suggested_commands=["notes list"]
+                return CommandResult(
+                    success=True,  # Still a successful search, just no results
+                    message=f"No notes found matching '{query}'",
+                    suggested_commands=[
+                        "notes list",  # View all notes instead
+                        f'notes search "{query}" --limit={limit + 5}',  # Try more results
+                        f'notes create "New note about {query}"'  # Create new note
+                    ],
+                    data={
+                        "query": query,
+                        "count": 0
+                    }
                 )
             
-            content = f"Search results for '{query}':\n\n"
+            # Format search results
+            content = [f"Search results for '{query}':\n"]
             for note in notes:
-                content += f"ID: {note[0]}\nContent: {note[1][:50]}...\nTags: [{note[-1] or 'none'}]\n\n"
+                content.append(
+                    f"ID: {note[0]}\n"
+                    f"Content: {note[1][:50]}...\n"
+                    f"Tags: {note[-1] or 'none'}\n"
+                )
 
-            return CommandResponse(
-                title="Search Results",
-                content=content,
-                suggested_commands=["notes read <note_id>"]
+            return CommandResult(
+                success=True,
+                message="\n".join(content),
+                suggested_commands=[
+                    "notes read <note_id>",
+                    f'notes search "{query}" --limit={limit + 5}',
+                    f'notes create "Note about {query}"'
+                ],
+                data={
+                    "query": query,
+                    "count": len(notes),
+                    "has_more": len(notes) == limit
+                }
             )
             
         finally:
             conn.close()
     
-    async def _handle_tags(self, params: str) -> str:
-        """Handle tag listing and management."""
-        if not params:
-            # List all tags
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            try:
-                cursor.execute("""
-                    SELECT t.name, COUNT(nt.note_id) as count
-                    FROM tags t
-                    LEFT JOIN note_tags nt ON t.id = nt.tag_id
-                    GROUP BY t.name
-                    ORDER BY count DESC
-                """)
-                
-                tags = cursor.fetchall()
-                
-                if not tags:
-                    return "No tags found."
-                
-                response = "Available Tags:\n"
-                for tag, count in tags:
-                    response += f"{tag} ({count} note{'s' if count != 1 else ''})\n"
-                    
-                return response
-                
-            finally:
-                conn.close()
+    async def _handle_tags(
+        self,
+        action: str,
+        note_id: str,
+        *tags: str
+    ) -> CommandResult:
+        """
+        Manage tags for a note.
         
-        # Handle tag commands (add/remove)
-        parts = params.split()
-        if len(parts) < 3:
-            return "Usage: tags add <note_id> <tag1> [tag2...] or tags remove <note_id> <tag1> [tag2...]"
-            
-        action, note_id, *tags = parts
-        
+        Tag changes ripple through:
+        - Note relationships
+        - Search capabilities
+        - Organization structures
+        """
         if action not in ['add', 'remove']:
-            return f"Unknown tag action: {action}"
+            return CommandResult(
+                success=False,
+                message=f"Unknown tag action: {action}",
+                suggested_commands=[
+                    "notes tags add <note_id> tag1 tag2",
+                    "notes tags remove <note_id> tag1 tag2"
+                ],
+                error="InvalidAction"
+            )
             
+        if not tags:
+            return CommandResult(
+                success=False,
+                message="No tags specified",
+                suggested_commands=[
+                    f"notes tags {action} {note_id} tag1 tag2"
+                ],
+                error="NoTags"
+            )
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
+            # Verify note exists
+            cursor.execute("SELECT 1 FROM notes WHERE id = ?", (note_id,))
+            if not cursor.fetchone():
+                return CommandResult(
+                    success=False,
+                    message=f"Note {note_id} not found",
+                    suggested_commands=["notes list"],
+                    error="NotFound"
+                )
+
             if action == 'add':
                 for tag in tags:
                     cursor.execute(
@@ -511,25 +916,20 @@ Content:
             
             conn.commit()
             
-            return f"{action.capitalize()}ed tags {', '.join(tags)} {'to' if action == 'add' else 'from'} note {note_id}"
+            return CommandResult(
+                success=True,
+                message=f"{action.capitalize()}ed tags {', '.join(tags)} {'to' if action == 'add' else 'from'} note {note_id}",
+                suggested_commands=[
+                    f"notes read {note_id}",  # View updated note
+                    "notes tags",  # View all tags
+                    f"notes list --tag={tags[0]}"  # View notes with this tag
+                ],
+                data={
+                    "note_id": note_id,
+                    "action": action,
+                    "tags": list(tags)
+                }
+            )
             
         finally:
             conn.close()
-
-    def format_help(self) -> Dict[str, str]:
-        return TerminalFormatter.format_environment_help(
-            EnvironmentHelp(
-                environment_name="Notes",
-                commands=self.get_commands(),
-                examples=[
-                    "notes create \"My new note\" --tags tag1,tag2",
-                    "notes list --tag important",
-                    "notes search \"project ideas\""
-                ],
-                tips=[
-                    "Use tags to organize your notes",
-                    "Regularly review and update your notes",
-                    "Use search to find notes related to a specific topic"
-                ]
-            )
-        )

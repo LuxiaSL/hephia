@@ -12,10 +12,8 @@ from pathlib import Path
 
 from core.server import HephiaServer
 from config import Config
-from brain.logging_utils import setup_logging
-
-# Setup logging
-logger = setup_logging()
+from loggers import LogManager
+LogManager.setup_logging()
 
 def setup_data_directory():
     """Ensure data directory exists."""
@@ -95,7 +93,6 @@ Press Ctrl+C to shutdown gracefully
         await server.shutdown()
         print("Goodbye! Thank you for witnessing the emergence.\n")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
         print(f"\n❌ Fatal error occurred: {e}")
         raise
 

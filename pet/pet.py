@@ -15,6 +15,8 @@ from pet.modules.cognition.cognitive_bridge import CognitiveBridge
 from pet.modules.emotions.mood_synthesizer import MoodSynthesizer
 from pet.modules.memory.memory_system import MemorySystem
 from event_dispatcher import global_event_dispatcher, Event
+from loggers import PetLogger  
+
 
 class Pet:
     """
@@ -88,31 +90,51 @@ class Pet:
         """Handle need change events."""
         if not self.is_active:
             return
-        print(f"Pet: Need '{event.data['need_name']}' changed to {event.data['new_value']}")
+        PetLogger.log_state_change(
+            f"need '{event.data['need_name']}'",
+            event.data.get('old_value', 'unknown'),
+            event.data['new_value']
+        )
 
     def on_behavior_change(self, event):
         """Handle behavior change events."""
         if not self.is_active:
             return
-        print(f"Pet: Behavior changed to {event.data['new_behavior']}")
+        PetLogger.log_state_change(
+            'behavior',
+            event.data.get('old_behavior', 'unknown'),
+            event.data['new_behavior']
+        )
 
     def on_action_performed(self, event):
         """Handle action performed events."""
         if not self.is_active:
             return
-        print(f"Pet: Action '{event.data['action_name']}' performed")
+        PetLogger.log_behavior(
+            event.data['action_name'],
+            event.data.get('context')
+        )
 
     def on_mood_change(self, event):
         """Handle mood change events."""
         if not self.is_active:
             return
-        print(f"Pet: Mood changed to {event.data.get('new_name')}")
+        PetLogger.log_state_change(
+            'mood',
+            event.data.get('old_name', 'unknown'),
+            event.data['new_name']
+        )
 
     def on_new_emotion(self, event):
         """Handle new emotion events."""
         if not self.is_active:
             return
-        print(f"Pet: Emotion experienced: {event.data.get('emotion').name}")
+        emotion = event.data.get('emotion')
+        PetLogger.log_state_change(
+            'emotion',
+            'none',
+            f"{emotion.name} (v:{emotion.valence:.2f}, a:{emotion.arousal:.2f})"
+        )
 
     def perform_action(self, action_name: str):
         """Perform a pet action."""

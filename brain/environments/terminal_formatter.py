@@ -1,29 +1,32 @@
 """
-Terminal output formatting for Hephia's CLI interface.
+terminal_formatter.py - Terminal output formatting for Hephia's CLI interface.
+
+Handles the presentation of command results, help information, and system state
+in a consistent and informative format that guides LLM interaction.
 """
+
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-@dataclass
-class CommandResponse:
-    """Standard response object from command execution"""
-    title: str
-    content: str
-    suggested_commands: Optional[List[str]] = None
-
-@dataclass
-class EnvironmentHelp:
-    """Help information for an environment"""
-    name: str
-    commands: List[Dict[str, str]]
-    examples: Optional[List[str]] = None
-    tips: Optional[List[str]] = None
+from brain.commands.model import (
+    CommandResult,
+    CommandDefinition,
+    Parameter,
+    Flag,
+    EnvironmentCommands,
+    CommandValidationError
+)
 
 class TerminalFormatter:
+    """Formats system output in a consistent, terminal-like format."""
+
+    BOX_WIDTH = 80
+    INNER_WIDTH = BOX_WIDTH - 4  # Accounting for margins
+
     @staticmethod
     def format_context_summary(context: Dict[str, Any]) -> str:
-        """Format concise state summary"""
+        """Format concise state summary."""
         pet_state = context.get('pet_state', {})
         mood = pet_state.get('mood', {})
         needs = pet_state.get('needs', {})
@@ -42,74 +45,187 @@ class TerminalFormatter:
         )
 
     @staticmethod
-    def format_response(response: CommandResponse, state: Dict[str, Any]) -> str:
-        """Format complete CLI response with command output and state"""
+    def format_command_result(result: CommandResult, state: Dict[str, Any]) -> str:
+        """Format command execution result with state context."""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        output = (
-            "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-            f"║ Command Response: {response.title:<54} ║\n"
-            f"║ Time: {timestamp:<63} ║\n"
-            "╠══════════════════════════════════════════════════════════════════════════════╣\n"
-            f"\n{response.content}\n"
-        )
+        # Start with header
+        output = [
+            "╔" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╗",
+            f"║ Status: {'Success' if result.success else 'Error':<71} ║",
+            f"║ Time: {timestamp:<73} ║",
+            "╠" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╣",
+            ""
+        ]
 
-        if response.suggested_commands:
-            output += "\n║ Available Actions:\n"
-            for cmd in response.suggested_commands:
-                output += f"║ • {cmd}\n"
+        # Add main content
+        output.extend([result.message, ""])
 
-        output += (
-            "\n╠══════════════════════════════════════════════════════════════════════════════╣\n"
-            "║ Current State:\n"
-            f"{TerminalFormatter.format_context_summary(state)}\n"
-            "╚══════════════════════════════════════════════════════════════════════════════╝"
-        )
-        
-        return output
-    
+        # Add error information if present
+        if not result.success and result.error:
+            output.extend([
+                "Error Details:",
+                f"- Type: {result.error}",
+                "- Suggested Fixes:",
+                *[f"  • {fix}" for fix in result.error.suggested_fixes],
+                ""
+            ])
+
+        # Add command suggestions
+        if result.suggested_commands:
+            output.extend([
+                "║ Available Actions:",
+                *[f"║ • {cmd}" for cmd in result.suggested_commands],
+                ""
+            ])
+
+        # Add state information
+        output.extend([
+            "╠" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╣",
+            "║ Current State:",
+            TerminalFormatter.format_context_summary(state),
+            "╚" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╝"
+        ])
+
+        return "\n".join(output)
+
     @staticmethod
-    def format_environment_help(help_info: EnvironmentHelp) -> CommandResponse:
-        """Format help text for a specific environment."""
-        header = f"╔{'═' * 50}╗\n"
-        header += f"║ {help_info.name.upper():^48} ║\n"
-        header += f"╚{'═' * 50}╝\n\n"
-        
-        content = "Available Commands:\n"
-        for cmd in help_info.commands:
-            content += f"{cmd['name']} - {cmd['description']}\n"
-        
-        if help_info.examples:
-            content += "\nExamples:\n"
-            for example in help_info.examples:
-                content += f"• {example}\n"
+    def format_environment_help(env: EnvironmentCommands) -> CommandResult:
+        """Format comprehensive environment help."""
+        # Header with environment info
+        sections = [
+            "╔" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╗",
+            f"║ {env.environment.upper():^{TerminalFormatter.BOX_WIDTH-4}} ║",
+            "╠" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╣",
+            "",
+            env.description.strip() if env.description else "",
+            ""
+        ]
+
+        # Group commands by category
+        categorized: Dict[str, List[CommandDefinition]] = {}
+        for cmd in env.commands.values():
+            category = cmd.category or "General"
+            if category not in categorized:
+                categorized[category] = []
+            categorized[category].append(cmd)
+
+        # Format each category
+        for category, commands in categorized.items():
+            sections.extend([
+                f"{category}:",
+                "-------------------"
+            ])
+
+            for cmd in commands:
+                # Command signature
+                params = " ".join(
+                    f"<{p.name}>" if p.required else f"[{p.name}]"
+                    for p in cmd.parameters
+                )
+                flags = " ".join(
+                    f"[--{f.name}]" for f in cmd.flags
+                )
+                signature = f"{env.environment} {cmd.name} {params} {flags}".strip()
                 
-        if help_info.tips:
-            content += "\nTips:\n"
-            for tip in help_info.tips:
-                content += f"- {tip}\n"
-        
-        return CommandResponse(
-            title=f"{help_info.name} Help",
-            content=header + content,
-            suggested_commands=help_info.examples if help_info.examples else None
+                sections.extend([
+                    signature,
+                    f"  {cmd.description}",
+                    ""
+                ])
+
+                # Parameter details if any
+                if cmd.parameters:
+                    sections.append("  Parameters:")
+                    for param in cmd.parameters:
+                        sections.append(
+                            f"    {param.name}: {param.description}"
+                            f"{' (required)' if param.required else ''}"
+                        )
+                    sections.append("")
+
+                # Flag details if any
+                if cmd.flags:
+                    sections.append("  Flags:")
+                    for flag in cmd.flags:
+                        sections.append(
+                            f"    --{flag.name}: {flag.description}"
+                            f" (default: {flag.default})" if flag.default is not None else ""
+                        )
+                    sections.append("")
+
+                # Examples if any
+                if cmd.examples:
+                    sections.append("  Examples:")
+                    sections.extend(f"    {ex}" for ex in cmd.examples)
+                    sections.append("")
+
+            sections.append("")  # Space between categories
+
+        # Generate suggested commands
+        suggested = [f"{env.environment} help"]  # Always include help
+        for cmd in env.commands.values():
+            if cmd.examples:
+                suggested.append(cmd.examples[0])  # Add first example from each command
+                if len(suggested) >= 5:  # Limit to 5 suggestions
+                    break
+
+        return CommandResult(
+            success=True,
+            message="\n".join(sections),
+            suggested_commands=suggested,
+            data={"environment": env.environment}
         )
 
     @staticmethod
-    def format_error(error_msg: str) -> CommandResponse:
-        """Format error messages consistently"""
-        return CommandResponse(
-            title="Error",
-            content=f"[ERROR] {error_msg}\n\nUse 'help' for available commands."
-        )
+    def format_error(error: CommandValidationError) -> str:
+        """Format error messages consistently."""
+        sections = [
+            "╔" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╗",
+            f"║ Error: {error.message:<{TerminalFormatter.BOX_WIDTH-10}} ║",
+            "╠" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╣",
+            ""
+        ]
+
+        if error.suggested_fixes:
+            sections.extend([
+                "Suggested Fixes:",
+                *[f"• {fix}" for fix in error.suggested_fixes],
+                ""
+            ])
+
+        if error.examples:
+            sections.extend([
+                "Examples:",
+                *[f"• {ex}" for ex in error.examples],
+                ""
+            ])
+
+        if error.related_commands:
+            sections.extend([
+                "Related Commands:",
+                *[f"• {cmd}" for cmd in error.related_commands],
+                ""
+            ])
+
+        sections.extend([
+            "╠" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╣",
+            "║ Use 'help' for available commands",
+            "╚" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╝"
+        ])
+
+        return "\n".join(sections)
 
     @staticmethod
     def format_welcome() -> str:
-        """Format welcome message"""
+        """Format welcome message."""
         return (
-            "╔══════════════════════════════════════════════════════════════════════════════╗\n"
-            "║                         Welcome to Hephia OS                                  ║\n"
-            "╠══════════════════════════════════════════════════════════════════════════════╣\n"
-            "║ Type 'help' to see available commands                                        ║\n"
-            "╚══════════════════════════════════════════════════════════════════════════════╝"
+            "╔" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╗\n"
+            "║" + " " * ((TerminalFormatter.BOX_WIDTH - 24) // 2) +
+            "Welcome to Hephia OS" +
+            " " * ((TerminalFormatter.BOX_WIDTH - 24) // 2) + "║\n"
+            "╠" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╣\n"
+            "║ Type 'help' to see available commands" +
+            " " * (TerminalFormatter.BOX_WIDTH - 39) + "║\n"
+            "╚" + "═" * (TerminalFormatter.BOX_WIDTH - 2) + "╝"
         )

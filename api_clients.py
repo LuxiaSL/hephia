@@ -7,11 +7,9 @@ from typing import Dict, Any, List, Optional
 import json
 import asyncio
 from datetime import datetime
-import logging
 from abc import ABC, abstractmethod
 from config import Config
-
-logger = logging.getLogger('hephia.api')
+from loggers import SystemLogger  # New import
 
 class BaseAPIClient(ABC):
     """Base class for API clients with common functionality."""
@@ -50,24 +48,52 @@ class BaseAPIClient(ABC):
                         json=payload
                     ) as response:
                         if response.status == 200:
+                            SystemLogger.log_api_request(
+                                self.service_name,
+                                endpoint,
+                                response.status
+                            )
                             return await response.json()
                         
                         error_text = await response.text()
-                        logger.error(f"{self.service_name} API error (Status {response.status})")
+                        SystemLogger.log_api_request(
+                            self.service_name,
+                            endpoint,
+                            response.status,
+                            error_text
+                        )
                         
                         if response.status == 429:  # Rate limit
                             retry_after = int(response.headers.get('Retry-After', self.retry_delay))
+                            SystemLogger.log_api_retry(
+                                self.service_name,
+                                attempt + 1,
+                                self.max_retries,
+                                f"Rate limited, waiting {retry_after}s"
+                            )
                             await asyncio.sleep(retry_after)
                             continue
                             
                         if response.status >= 500:  # Server error, retry
-                            await asyncio.sleep(self.retry_delay * (attempt + 1))
+                            delay = self.retry_delay * (attempt + 1)
+                            SystemLogger.log_api_retry(
+                                self.service_name,
+                                attempt + 1,
+                                self.max_retries,
+                                f"Server error, waiting {delay}s"
+                            )
+                            await asyncio.sleep(delay)
                             continue
                             
                         raise Exception(f"API error ({self.service_name}): Status {response.status}")
                         
             except Exception as e:
-                logger.error(f"{self.service_name} request failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
+                SystemLogger.log_api_retry(
+                    self.service_name,
+                    attempt + 1,
+                    self.max_retries,
+                    str(e)
+                )
                 if attempt == self.max_retries - 1:
                     raise
                 await asyncio.sleep(self.retry_delay * (attempt + 1))
