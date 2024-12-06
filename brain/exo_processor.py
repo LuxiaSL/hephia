@@ -83,12 +83,6 @@ class ExoProcessor:
                         llm_response = response["choices"][0]["message"]["content"]
                         BrainLogger.log_llm_exchange(self.conversation_history, llm_response)
 
-                        #possibly swap this below and log the command instead into history; but in future, can have thinking tags maybe? unsure. would need advanced filtering.
-                        self.conversation_history.append({
-                            "role": "assistant",
-                            "content": llm_response
-                        })
-
                         # Process into command
                         command, error = await self.command_preprocessor.preprocess_command(
                             llm_response,

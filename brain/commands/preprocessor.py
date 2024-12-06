@@ -17,7 +17,8 @@ from .model import (
     CommandDefinition,
     CommandValidationError,
     GlobalCommands,
-    EnvironmentCommands
+    EnvironmentCommands,
+    ParameterType
 )
 
 class CommandPreprocessor:
@@ -136,11 +137,6 @@ class CommandPreprocessor:
             
         first_line = lines[0]
         remaining_lines = lines[1:]
-        
-        # Handle multi-line commands for specific environments
-        if any(first_line.startswith(prefix) for prefix in ('exo query', 'notes create')):
-            remaining_content = ' '.join(remaining_lines)
-            return f"{first_line} {remaining_content}"
             
         # For single-line commands
         if len(lines) == 1:
@@ -230,14 +226,117 @@ class CommandPreprocessor:
         available_commands: Dict[str, EnvironmentCommands]
     ) -> bool:
         """Validate parsed command against available commands."""
-        if not command.environment:  # Global command
+        # First check basic environment/command validity
+        if not command.environment:
             return GlobalCommands.is_global_command(command.action)
-            
+        
         if command.environment not in available_commands:
             return False
+        
+        env_info = available_commands[command.environment]
+        if command.action not in env_info.commands:
+            return False
+        
+        cmd_def = env_info.commands[command.action]
+
+        required_params = [p for p in cmd_def.parameters if p.required]
+        if len(command.parameters) < len(required_params):
+            return False
+        
+        # Check parameter types (even optional ones if provided)
+        for i, param in enumerate(command.parameters):
+            if i >= len(cmd_def.parameters):  # Too many parameters
+                return False
+            try:
+                # Just try conversion - don't need the result
+                self._convert_parameter(param, cmd_def.parameters[i].type)
+            except ValueError:
+                return False
+
+        flag_specs = {f.name: f for f in cmd_def.flags}
+        for flag_name, flag_value in command.flags.items():
+            if flag_name not in flag_specs:
+                return False
+            try:
+                # Validate flag type
+                self._convert_parameter(flag_value, flag_specs[flag_name].type)
+            except ValueError:
+                return False
+    
+        # Check for required flags
+        required_flags = [f.name for f in cmd_def.flags if f.required]
+        if not all(flag in command.flags for flag in required_flags):
+            return False
+        
+        return True
+
+    def _convert_parameter(self, value: str, param_type: ParameterType) -> Any:
+        """
+        Convert parameter string to specified type with robust error handling.
+        
+        Args:
+            value: String value to convert
+            param_type: Target parameter type
             
-        env_commands = available_commands[command.environment].commands
-        return command.action in env_commands
+        Returns:
+            Converted value
+            
+        Raises:
+            ValueError: If conversion fails
+        """
+        if not isinstance(value, str):
+            # If we somehow got a non-string, convert it to string first
+            value = str(value)
+        
+        value = value.strip()
+        
+        try:
+            if param_type == ParameterType.STRING:
+                # Remove enclosing quotes if present
+                if value.startswith('"') and value.endswith('"'):
+                    return value[1:-1]
+                if value.startswith("'") and value.endswith("'"):
+                    return value[1:-1]
+                return value
+                
+            elif param_type == ParameterType.NUMBER:
+                # Handle both integers and floats
+                try:
+                    float_val = float(value)
+                    # Check if it's actually an integer
+                    int_val = int(float_val)
+                    if float_val == int_val:
+                        return int_val
+                    return float_val
+                except ValueError:
+                    raise ValueError(f"'{value}' is not a valid number")
+                    
+            elif param_type == ParameterType.INTEGER:
+                try:
+                    # Handle float strings that are actually integers
+                    float_val = float(value)
+                    int_val = int(float_val)
+                    if float_val == int_val:
+                        return int_val
+                    raise ValueError(f"'{value}' is not an integer (contains decimal)")
+                except ValueError:
+                    raise ValueError(f"'{value}' is not a valid integer")
+                    
+            elif param_type == ParameterType.BOOLEAN:
+                # Handle various boolean string representations
+                lower_value = value.lower()
+                if lower_value in ('true', 't', 'yes', 'y', '1', 'on'):
+                    return True
+                if lower_value in ('false', 'f', 'no', 'n', '0', 'off'):
+                    return False
+                raise ValueError(f"'{value}' is not a valid boolean")
+            
+            else:
+                raise ValueError(f"Unknown parameter type: {param_type}")
+                
+        except Exception as e:
+            # Convert any other exceptions to ValueError with clear message
+            raise ValueError(f"Failed to convert '{value}' to {param_type.value}: {str(e)}")
     
     async def _attempt_command_correction(
         self, 
@@ -273,7 +372,8 @@ Rules:
 1. If a command is missing its environment prefix (e.g., 'create' instead of 'notes create'), add the correct prefix
 2. If the syntax is incorrect, correct it (e.g., 'notes --"this is an example"' becomes 'notes create "this is an example"')
 3. Return a JSON object with two fields: "command" (the corrected command) and "explanation" (what was fixed)
-4. Keep the command clean, but maintain any necessary information"""
+4. Keep the command clean, but maintain any necessary information
+5. Make sure parameters and flags match the command definition exactly"""
                     },
                     {
                         "role": "user",
@@ -292,8 +392,21 @@ Rules:
                 
                 # Parse and validate the corrected command
                 parsed = self._parse_command(corrected_command)
+                
+                # Full validation including parameters and flags
                 if self._validate_command(parsed, available_commands):
+                    BrainLogger.log_command_processing(
+                        command.raw_input,
+                        corrected_command,
+                        f"Command corrected: {correction.get('explanation', 'No explanation provided')}"
+                    )
                     return parsed
+                else:
+                    BrainLogger.log_command_processing(
+                        command.raw_input,
+                        None,
+                        "LLM correction failed validation"
+                    )
                     
             except (json.JSONDecodeError, KeyError):
                 BrainLogger.log_command_processing(command, None, "Invalid correction format from LLM")
