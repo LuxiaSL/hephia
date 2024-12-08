@@ -14,13 +14,13 @@ class Config:
     EMOTION_UPDATE_TIMER = 0.05
 
     # ExoProcessor settings
-    EXO_TEMPERATURE = 0.7
-    EXO_MAX_TOKENS = 150 
+    EXO_TEMPERATURE = 0.75
+    EXO_MAX_TOKENS = 250 
     EXO_LOOP_TIMER = 5.0  
     EXO_MIN_INTERVAL = 5.0  
     EXO_TIMEOUT = 30.0     
     LLM_TIMEOUT = 15.0     
-    EXO_MAX_MESSAGES = 10
+    EXO_MAX_MESSAGES = 20
     
     # UI settings
     TERMINAL_WIDTH = 50

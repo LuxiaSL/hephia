@@ -52,7 +52,7 @@ class CorePetState:
     memory: MemoryState
     timestamp: datetime
     metadata: Dict[str, Any] = field(default_factory=dict)
-    version: str = "1.0.0"  # For future state format changes
+    version: str = "1.0.0"  
 
 class PetStateManager:
     """Manages saving and loading of pet internal state."""

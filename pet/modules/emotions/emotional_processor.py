@@ -338,7 +338,7 @@ class EmotionalProcessor:
         # Cognitive processing placeholder
         # Note: Will integrate with future cognitive module for higher-level processing,
         # emotion regulation, and memory formation
-        influenced_vector = self.cognitive_processor.mediate_emotion(vector)
+        influenced_vector = self.cognitive_bridge.mediate_emotion(vector)
         if influenced_vector:
             new_category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
             if new_category != category:

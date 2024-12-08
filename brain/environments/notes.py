@@ -346,7 +346,7 @@ class NotesEnvironment(BaseEnvironment):
         """Execute a notes command with validated parameters."""
         try:
             if action == "create":
-                return await self._create_note(params[0], flags.get("tags"), context)
+                return await self._create_note(params[0], context, flags.get("tags"))
             elif action == "list":
                 return await self._list_notes(
                     flags.get("tag"),
@@ -355,12 +355,7 @@ class NotesEnvironment(BaseEnvironment):
             elif action == "read":
                 return await self._read_note(params[0])
             elif action == "update":
-                return await self._update_note(
-                    params[0],  # note_id
-                    params[1],  # content
-                    flags.get("tags"),
-                    context
-                )
+                return await self._update_note(params[0], params[1], context, flags.get("tags"))
             elif action == "delete":
                 return await self._delete_note(params[0])
             elif action == "search":
@@ -697,7 +692,7 @@ class NotesEnvironment(BaseEnvironment):
                 tag_list = [t.strip() for t in tags.split(',') if t.strip()]
                 for tag in tag_list:
                     cursor.execute(
-                        "INSERT OR IGNORE INTO tags (name) VALUES (?",
+                        "INSERT OR IGNORE INTO tags (name) VALUES (?)",
                         (tag,)
                     )
                     cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))

@@ -7,6 +7,7 @@ from typing import List, Optional
 import asyncio
 
 from pet.pet_context import PetContext
+from pet.state_persistence import PetStateManager
 from pet.modules.needs.needs_manager import NeedsManager
 from pet.modules.behaviors.behavior_manager import BehaviorManager
 from pet.modules.actions.action_manager import ActionManager
@@ -25,9 +26,10 @@ class Pet:
 
     def __init__(self):
         """Initialize pet systems."""
-        # Initialize context first
+        # Initialize context & state control
         self.context = PetContext(self)
-        
+        #self.state_persistence = PetStateManager(self)
+
         # Initialize managers
         self.needs_manager = NeedsManager()
         self.behavior_manager = BehaviorManager(self.context, self.needs_manager)
