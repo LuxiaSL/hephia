@@ -14,7 +14,7 @@ class Config:
     EMOTION_UPDATE_TIMER = 0.05
 
     # ExoProcessor settings
-    EXO_TEMPERATURE = 0.75
+    EXO_TEMPERATURE = 0.8
     EXO_MAX_TOKENS = 250 
     EXO_LOOP_TIMER = 5.0  
     EXO_MIN_INTERVAL = 5.0  

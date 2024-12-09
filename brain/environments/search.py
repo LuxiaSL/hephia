@@ -126,7 +126,6 @@ class SearchEnvironment(BaseEnvironment):
                 
                 # Generate suggested follow-ups
                 suggested = [
-                    f'search query "{search_terms} more details" --detail=high',
                     f'notes create "Research: {search_terms[:30]}..."',
                 ]
                 

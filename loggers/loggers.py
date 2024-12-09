@@ -80,8 +80,8 @@ class BrainLogger:
         logger = logging.getLogger('hephia.brain')
         logger.debug(
             "LLM EXCHANGE\n"
-            f"Context (last 3 messages):\n"
-            f"{json.dumps(messages[-3:], indent=2)}\n"
+            f"Context (last 5 messages):\n"
+            f"{json.dumps(messages[-5:], indent=2)}\n"
             f"Response:\n{response}"
         )
         # Clean version for console
