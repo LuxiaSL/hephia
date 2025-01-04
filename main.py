@@ -43,7 +43,7 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     
     missing = [f"{var} ({desc})" for var, desc in required_vars.items() if not os.getenv(var)]
     if missing:
-        print("\n❌ Missing required environment variables:")
+        print("\nMissing required environment variables:")
         for var in missing:
             print(f"  • {var}")
         return
@@ -51,27 +51,14 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     # Setup directory structure
     setup_data_directory()
     
-    print("\n🔧 Initializing systems...")
+    print("\nInitializing systems...")
     
     try:
         # Initialize server
         server = HephiaServer()
-        await server.startup()
         
         print("""
-✨ Hephia is now active! 
-   Watch as consciousness emerges in the space between ones and zeros...
-   
-Pet systems running:
-- Needs monitoring active
-- Emotional processing online
-- Cognitive bridge established
-- Exo loop initialized
-
-Available environments:
-- notes: Extended memory system
-- search: Information gathering
-- self: Internal state queries
+Hephia is now active! 
 
 Press Ctrl+C to shutdown gracefully
         """)

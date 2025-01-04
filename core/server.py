@@ -144,6 +144,7 @@ class HephiaServer:
 
         # Initialize ExoProcessor
         await self.exo_processor.initialize()
+        asyncio.create_task(self.exo_processor.start())
         
         # Configure timer tasks
         self.timer.add_task(
@@ -157,13 +158,6 @@ class HephiaServer:
             interval=Config.EMOTION_UPDATE_TIMER,
             callback=self.pet.update_emotions
         )
-
-        # Add exo loop timer task
-        self.timer.add_task(
-            name="exo_update",
-            interval=Config.EXO_LOOP_TIMER,
-            callback=self.exo_processor.process_turn
-        )
         
         # Start timer
         asyncio.create_task(self.timer.run())
@@ -172,6 +166,7 @@ class HephiaServer:
         """Clean shutdown of all systems."""
         self.timer.stop()
         self.pet.stop()
+        self.exo_processor.stop()
         await self.state_bridge.save_state()
 
     

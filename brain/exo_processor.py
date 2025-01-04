@@ -7,7 +7,7 @@ smooth flow between components.
 """
 
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import os
 import json
@@ -33,6 +33,12 @@ class ExoProcessor:
         self.conversation_history = []
         self.exo_lock = asyncio.Lock()
         self.last_successful_turn = None
+        self.is_running = False
+        
+        # timing convert
+        self.min_interval = timedelta(seconds=Config.EXO_MIN_INTERVAL)
+        self.exo_timeout = timedelta(seconds=Config.EXO_TIMEOUT)
+        self.llm_timeout = timedelta(seconds=Config.LLM_TIMEOUT)
 
     async def initialize(self):
         """Handle async initialization tasks."""
@@ -51,6 +57,27 @@ class ExoProcessor:
         
         self.conversation_history = [welcome_message, initial_message]
 
+    async def start(self):
+        """Run the exo loop continuously."""
+        self.is_running = True
+
+        while self.is_running:
+            try:
+                async with asyncio.timeout(self.exo_timeout.total_seconds()):
+                    async with self.exo_lock:
+                        await self.process_turn()
+                await asyncio.sleep(self.min_interval.total_seconds())
+
+            except asyncio.TimeoutError:
+                BrainLogger.log_turn_end(False, "Exo loop timeout")
+                await asyncio.sleep(self.min_interval.total_seconds())
+            except Exception as e:
+                BrainLogger.log_turn_end(False, str(e))
+                await asyncio.sleep(self.min_interval.total_seconds())
+
+    async def stop(self):
+        self.is_running = False
+
     async def process_turn(self) -> Optional[str]:
         """
         Process one turn of the exo-LLM loop.
@@ -64,74 +91,56 @@ class ExoProcessor:
         """
         BrainLogger.log_turn_start()
 
-        if self.last_successful_turn and \
-           (datetime.now() - self.last_successful_turn).total_seconds() < Config.EXO_MIN_INTERVAL:
-            BrainLogger.log_turn_end(False, "Too soon since last completion")
-            return None
-
         try:
-            async with asyncio.timeout(Config.EXO_TIMEOUT):
-                if self.exo_lock.locked():
-                    BrainLogger.log_turn_end(False, "Lock held")
-                    return None
-                    
-                async with self.exo_lock:
-                    try:
-                        # Get LLM response
-                        response = await self._get_llm_response()
+            async with asyncio.timeout(self.llm_timeout.total_seconds()):
+                # Get LLM response
+                response = await self._get_llm_response()
+                llm_response = response["choices"][0]["message"]["content"]
+                BrainLogger.log_llm_exchange(self.conversation_history, llm_response)
 
-                        llm_response = response["choices"][0]["message"]["content"]
-                        BrainLogger.log_llm_exchange(self.conversation_history, llm_response)
+                # Process into command
+                command, error = await self.command_preprocessor.preprocess_command(
+                    llm_response,
+                    self.environment_registry.get_available_commands()
+                )
 
-                        # Process into command
-                        command, error = await self.command_preprocessor.preprocess_command(
-                            llm_response,
-                            self.environment_registry.get_available_commands()
-                        )
+                BrainLogger.log_command_processing(
+                    response,
+                    command.raw_input if command else None,
+                    str(error) if error else None
+                )
 
-                        BrainLogger.log_command_processing(
-                            response,
-                            command.raw_input if command else None,
-                            str(error) if error else None
-                        )
+                # Handle preprocessing errors
+                if not command:
+                    error_message = TerminalFormatter.format_error(error)
+                    self._add_to_history("assistant", llm_response)
+                    self._add_to_history("user", error_message)
+                    return error_message
+                
+                self._add_to_history("assistant", llm_response)
+                
+                # Execute command
+                current_state = await self.state_bridge.get_current_state()
+                result = await self._execute_command(command, current_state)
 
-                        # Handle preprocessing errors
-                        if not command:
-                            error_message = TerminalFormatter.format_error(error)
-                            self._add_to_history("assistant", llm_response)
-                            self._add_to_history("user", error_message)
-                            return error_message
-                        
-                        self._add_to_history("assistant", llm_response)
-                        
-                        # Execute command
-                        current_state = await self.state_bridge.get_current_state()
-                        result = await self._execute_command(command, current_state)
+                # Format response
+                formatted_response = TerminalFormatter.format_command_result(
+                    result,
+                    current_state
+                )
 
-                        # Format response
-                        formatted_response = TerminalFormatter.format_command_result(
-                            result,
-                            current_state
-                        )
-
-                        # Update conversation
-                        self._add_to_history("user", formatted_response)
-                        self.last_successful_turn = datetime.now()
-                        
-                        BrainLogger.log_turn_end(True)
-                        return formatted_response
-                    
-                    except asyncio.TimeoutError:
-                        BrainLogger.log_turn_end(False, "Exo loop run timeout")
-                        return None
-                    except Exception as e:
-                        BrainLogger.log_turn_end(False, str(e))
-                        return None
+                # Update conversation
+                self._add_to_history("user", formatted_response)
+                self.last_successful_turn = datetime.now()
+                
+                BrainLogger.log_turn_end(True)
+                return formatted_response
+        
         except asyncio.TimeoutError:
-            BrainLogger.log_turn_end(False, "Exo loop lock timeout")
+            BrainLogger.log_turn_end(False, "LLM interaction timeout")
             return None
         except Exception as e:
-            BrainLogger.log_turn_end(False, f"Fatal error: {str(e)}")
+            BrainLogger.log_turn_end(False, str(e))
             return None
 
     async def _get_llm_response(self) -> Dict:

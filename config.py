@@ -16,8 +16,7 @@ class Config:
     # ExoProcessor settings
     EXO_TEMPERATURE = 0.8
     EXO_MAX_TOKENS = 250 
-    EXO_LOOP_TIMER = 5.0  
-    EXO_MIN_INTERVAL = 5.0  
+    EXO_MIN_INTERVAL = 30.0  
     EXO_TIMEOUT = 30.0     
     LLM_TIMEOUT = 15.0     
     EXO_MAX_MESSAGES = 20
