@@ -2,7 +2,7 @@
 Core server implementation for Hephia.
 
 This server acts as the central nervous system, coordinating communication
-between the pet's internal systems, LLM brain, and external interfaces.
+between the internal systems, LLM brain, and external interfaces.
 It manages both HTTP endpoints for commands and WebSocket connections
 for real-time state updates.
 """
@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from core.timer import TimerCoordinator
 from core.state_bridge import StateBridge
 from event_dispatcher import global_event_dispatcher, Event
-from pet.pet import Pet
+from internal.internal import Internal
 from config import Config
 from brain.exo_processor import ExoProcessor
 from brain.environments.environment_registry import EnvironmentRegistry
@@ -49,8 +49,8 @@ class HephiaServer:
 
         # Core systems
         self.api = APIManager.from_env()
-        self.pet = Pet()
-        self.state_bridge = StateBridge(pet=self.pet)
+        self.internal = Internal()
+        self.state_bridge = StateBridge(internal=self.internal)
         self.timer = TimerCoordinator()
         self.environment_registry = EnvironmentRegistry(self.api)
 
@@ -116,7 +116,7 @@ class HephiaServer:
         @self.app.get("/state")
         async def get_state():
             """Get current system state."""
-            return await self.state_bridge.get_current_state()
+            return await self.state_bridge.get_api_context()
     
     def setup_event_handlers(self):
         """Set up handlers for system events."""
@@ -126,7 +126,7 @@ class HephiaServer:
             lambda event: asyncio.create_task(self.broadcast_state_update(event))
         )
         global_event_dispatcher.add_listener(
-            "pet:action",
+            "internal:action",
             lambda event: asyncio.create_task(self.broadcast_state_update(event))
         )
         global_event_dispatcher.add_listener(
@@ -136,27 +136,27 @@ class HephiaServer:
     
     async def startup(self):
         """Initialize all systems in correct order."""
-        # Start pet systems
-        await self.pet.start()
-        
-        # Initialize bridge with existing pet
+        # retrieve & apply prior state first
         await self.state_bridge.initialize()
 
-        # Initialize ExoProcessor
+        # init internals
+        await self.internal.start()
+        
+        # init exo
         await self.exo_processor.initialize()
         asyncio.create_task(self.exo_processor.start())
         
-        # Configure timer tasks
+        # simple periodic internal timers
         self.timer.add_task(
             name="needs_update",
             interval=Config.NEED_UPDATE_TIMER,
-            callback=self.pet.update_needs
+            callback=self.internal.update_needs
         )
         
         self.timer.add_task(
             name="emotions_update",
             interval=Config.EMOTION_UPDATE_TIMER,
-            callback=self.pet.update_emotions
+            callback=self.internal.update_emotions
         )
         
         # Start timer
@@ -165,9 +165,9 @@ class HephiaServer:
     async def shutdown(self):
         """Clean shutdown of all systems."""
         self.timer.stop()
-        self.pet.stop()
-        self.exo_processor.stop()
-        await self.state_bridge.save_state()
+        self.internal.stop()
+        await self.exo_processor.stop()
+        await self.state_bridge._save_session()
 
     
     async def handle_websocket_connection(self, websocket: WebSocket):
@@ -182,7 +182,7 @@ class HephiaServer:
         
         try:
             # Send initial state
-            initial_state = await self.state_bridge.get_current_state()
+            initial_state = await self.state_bridge.get_api_context()
             await websocket.send_json({
                 "type": "initial_state",
                 "data": initial_state

@@ -1,6 +1,6 @@
 """
 State management and synchronization for Hephia.
-Handles state persistence, updates, and synchronization across all systems.
+Manages both persistent session state and API context distribution.
 """
 
 import asyncio
@@ -12,37 +12,141 @@ import os
 import sqlite3
 
 from event_dispatcher import global_event_dispatcher, Event
-from pet.pet import Pet
+from internal.internal import Internal
 
 @dataclass
-class SystemState:
-    """Represents the complete system state."""
-    pet_state: Dict[str, Any]
-    brain_state: Dict[str, Any]
-    last_updated: datetime
+class PersistentState:
+    """
+    Complete system state for persistence between sessions.
+    Contains detailed state data needed for full system reconstruction.
+    """
+    session_state: Dict[str, Any]  # Full internal module states
+    brain_state: Dict[str, Any]    # Brain/cognitive state
+    timestamp: datetime
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert state to dictionary format."""
+        """Convert state to database-friendly format."""
         return {
-            'pet_state': self.pet_state,
+            'session_state': self.session_state,
             'brain_state': self.brain_state,
-            'last_updated': self.last_updated.isoformat()
+            'timestamp': self.timestamp.isoformat()
         }
 
 class StateBridge:
-    """Manages state synchronization between all system components."""
+    """
+    Manages both session persistence and real-time state distribution.
     
-    def __init__(self, pet: Optional[Pet] = None):
-        self.pet = pet
-        self.pet_context = pet.context if pet else None
-        self.current_state: Optional[SystemState] = None
+    Handles two distinct types of state:
+    1. Session State: Detailed state for system reconstruction between sessions
+    2. API Context: Processed state for real-time system communication
+    """
+    
+    def __init__(self, internal: Optional[Internal] = None):
+        self.internal = internal
+        self.internal_context = internal.context if internal else None
+        self.persistent_state: Optional[PersistentState] = None
         self.state_lock = asyncio.Lock()
         self.db_path = 'data/server_state.db'
     
     async def initialize(self):
-        """Initialize the state bridge and set up database."""
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        """Initialize state management and restore previous session if available."""
+        await self._init_database()
+        await self._cleanup_old_states()
         
+        if self.internal:
+            try:
+                # Restore previous session if available
+                loaded_state = await self._load_last_session()
+                if loaded_state:
+                    # Extract module states for restoration
+                    session_state = {
+                        'needs': loaded_state.session_state.get('needs', {}),
+                        'behavior': loaded_state.session_state.get('behavior', {}),
+                        'emotions': loaded_state.session_state.get('emotions', {}),
+                        'mood': loaded_state.session_state.get('mood', {}),
+                        'memory': loaded_state.session_state.get('memory', {})
+                    }
+                    
+                    # Restore and stabilize internal state
+                    await self.internal.restore_state(session_state)
+                    await self.internal.shake()
+                
+                # Start internal systems
+                await self.internal.start()
+                
+                # Initialize current persistent state
+                self.persistent_state = PersistentState(
+                    session_state=self._collect_session_state(),
+                    brain_state=loaded_state.brain_state if loaded_state else {},
+                    timestamp=datetime.now()
+                )
+                
+                # Save initial state
+                await self._save_session()
+                
+                # Notify system with API context
+                global_event_dispatcher.dispatch_event(
+                    Event("state:initialized", {
+                        "context": self.internal_context.get_api_context()
+                    })
+                )
+            except Exception as e:
+                print(f"Error initializing state management: {e}")
+                raise
+
+    def _collect_session_state(self) -> Dict[str, Any]:
+        """Collect complete session state from all internal modules."""
+        return {
+            'needs': self.internal.needs_manager.get_needs_state(),
+            'behavior': self.internal.behavior_manager.get_behavior_state(),
+            'emotions': self.internal.emotional_processor.get_emotional_state(),
+            'mood': self.internal.mood_synthesizer.get_mood_state(),
+            'memory': self.internal.memory_system.get_memory_state()
+        }
+
+    async def get_api_context(self) -> Dict[str, Any]:
+        """Get current processed state for API consumption."""
+        async with self.state_lock:
+            if self.internal:
+                return self.internal_context.get_api_context()
+            return {}
+
+    async def update_state(self):
+        """Update both persistent state and broadcast API context."""
+        async with self.state_lock:
+            try:
+                # Update persistent state
+                self.persistent_state = PersistentState(
+                    session_state=self._collect_session_state(),
+                    brain_state=self.persistent_state.brain_state if self.persistent_state else {},
+                    timestamp=datetime.now()
+                )
+                
+                # Save to database
+                await self._save_session()
+                
+                # Broadcast API context
+                global_event_dispatcher.dispatch_event(
+                    Event("state:changed", {
+                        "context": self.internal_context.get_api_context()
+                    })
+                )
+            except Exception as e:
+                print(f"Error updating state: {e}")
+                raise
+    
+    async def process_timer_event(self, event: Event):
+        """Handle timer-triggered state updates."""
+        if self.internal:
+            try:
+                await self.update_state()
+            except Exception as e:
+                print(f"Error processing timer event: {e}")
+    
+    # Database operations
+    async def _init_database(self):
+        """Initialize the state database."""
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -50,98 +154,16 @@ class StateBridge:
             CREATE TABLE IF NOT EXISTS system_state (
                 id INTEGER PRIMARY KEY,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                pet_state TEXT,
+                session_state TEXT,
                 brain_state TEXT
             )
         """)
         conn.commit()
         conn.close()
-        
-        # Clean up old states
-        await self._periodic_state_cleanup()
-        
-        # Initialize with fresh API context
-        if self.pet_context:
-            try:
-                self.current_state = SystemState(
-                    pet_state=self.pet_context.get_api_context(),
-                    brain_state={},
-                    last_updated=datetime.now()
-                )
-                
-                # Validate initial state
-                if not await self._validate_state_consistency():
-                    await self._handle_state_inconsistency()
-                else:
-                    global_event_dispatcher.dispatch_event(
-                        Event("state:initialized", self.current_state.to_dict())
-                    )
-                    
-            except Exception as e:
-                print(f"Error initializing state: {e}")
-    
-    async def get_current_state(self) -> Dict[str, Any]:
-        """Get current state in API-friendly format."""
-        async with self.state_lock:
-            try:
-                if self.pet:
-                    current_state = {
-                        'pet_state': self.pet_context.get_api_context(),
-                        'brain_state': {},
-                        'last_updated': datetime.now().isoformat()
-                    }
-                    return current_state
-                else:
-                    return self.current_state.to_dict() if self.current_state else {
-                        'pet_state': {},
-                        'brain_state': {},
-                        'last_updated': datetime.now().isoformat()
-                    }
-            except Exception as e:
-                print(f"Error getting current state: {e}")
-                raise
-    
-    async def update_state(self, pet_state: Optional[Dict] = None, brain_state: Optional[Dict] = None):
-        """Update system state and notify listeners."""
-        async with self.state_lock:
-            try:
-                if not self.current_state:
-                    return
-                
-                # Always get fresh API context if we have a pet
-                if self.pet_context:
-                    self.current_state.pet_state = self.pet_context.get_api_context()
-                elif pet_state:
-                    self.current_state.pet_state.update(pet_state)
-                
-                if brain_state:
-                    self.current_state.brain_state.update(brain_state)
-                
-                self.current_state.last_updated = datetime.now()
-                
-                # Notify state change
-                state_dict = self.current_state.to_dict()
-                global_event_dispatcher.dispatch_event(
-                    Event("state:changed", state_dict)
-                )
-                
-                await self.save_state()
-            except Exception as e:
-                print(f"Error updating state: {e}")
-                raise
-    
-    async def process_timer_event(self, event: Event):
-        """Handle timer-triggered state updates."""
-        if self.pet:
-            try:
-                # Always use fresh API context for timer updates
-                await self.update_state()
-            except Exception as e:
-                print(f"Error processing timer event: {e}")
-    
-    async def save_state(self):
-        """Save current state to database."""
-        if not self.current_state:
+
+    async def _save_session(self):
+        """Save current session state to database."""
+        if not self.persistent_state:
             return
             
         conn = sqlite3.connect(self.db_path)
@@ -149,28 +171,25 @@ class StateBridge:
         
         try:
             cursor.execute("""
-                INSERT INTO system_state (timestamp, pet_state, brain_state)
+                INSERT INTO system_state (timestamp, session_state, brain_state)
                 VALUES (?, ?, ?)
             """, (
-                self.current_state.last_updated.isoformat(),
-                json.dumps(self.current_state.pet_state),
-                json.dumps(self.current_state.brain_state)
+                self.persistent_state.timestamp.isoformat(),
+                json.dumps(self.persistent_state.session_state),
+                json.dumps(self.persistent_state.brain_state)
             ))
             conn.commit()
-        except Exception as e:
-            print(f"Error saving state: {e}")
-            raise
         finally:
             conn.close()
-    
-    async def load_last_state(self) -> Optional[SystemState]:
-        """Load most recent state from database."""
+
+    async def _load_last_session(self) -> Optional[PersistentState]:
+        """Load most recent session state."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
             cursor.execute("""
-                SELECT timestamp, pet_state, brain_state
+                SELECT timestamp, session_state, brain_state
                 FROM system_state
                 ORDER BY timestamp DESC
                 LIMIT 1
@@ -178,96 +197,23 @@ class StateBridge:
             
             row = cursor.fetchone()
             if row:
-                timestamp, pet_state, brain_state = row
-                return SystemState(
-                    pet_state=json.loads(pet_state),
+                timestamp, session_state, brain_state = row
+                return PersistentState(
+                    session_state=json.loads(session_state),
                     brain_state=json.loads(brain_state),
-                    last_updated=datetime.fromisoformat(timestamp)
+                    timestamp=datetime.fromisoformat(timestamp)
                 )
         finally:
             conn.close()
         
         return None
 
-    async def _validate_state_consistency(self) -> bool:
-        """
-        Validate that stored state matches current pet state.
-        Used for debugging and ensuring state synchronization.
-        
-        Returns:
-            bool: True if states match, False otherwise
-        """
-        if not self.pet:
-            return True
-            
-        try:
-            current_pet_state = self.pet_context.get_api_context()
-            stored_pet_state = self.current_state.pet_state if self.current_state else {}
-            
-            # Basic structure check
-            if not stored_pet_state:
-                return False
-                
-            # Check core state components exist and match format
-            required_keys = ['mood', 'needs', 'behavior', 'emotions']
-            for key in required_keys:
-                if key not in stored_pet_state or key not in current_pet_state:
-                    print(f"Missing required key: {key}")
-                    return False
-                
-                # Check basic structure of each component
-                if type(stored_pet_state[key]) != type(current_pet_state[key]):
-                    print(f"Type mismatch for {key}")
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error validating state consistency: {e}")
-            return False
-        
-    async def _handle_state_inconsistency(self):
-        """
-        Handle cases where stored state doesn't match current pet state.
-        Attempts to reconcile differences or triggers a state reset if necessary.
-        """
-        if not await self._validate_state_consistency():
-            try:
-                print("State inconsistency detected, attempting reset...")
-                
-                # Get fresh state from pet
-                new_state = SystemState(
-                    pet_state=self.pet_context.get_api_context(),
-                    brain_state=self.current_state.brain_state if self.current_state else {},
-                    last_updated=datetime.now()
-                )
-                
-                self.current_state = new_state
-                await self.save_state()
-                
-                # Notify system of state reset
-                global_event_dispatcher.dispatch_event(
-                    Event("state:reset", {
-                        "reason": "inconsistency_detected",
-                        "new_state": self.current_state.to_dict()
-                    })
-                )
-                
-                print("State reset complete")
-                
-            except Exception as e:
-                print(f"Error handling state inconsistency: {e}")
-            
-    async def _periodic_state_cleanup(self):
-        """
-        Periodically clean up old state entries from the database.
-        Keeps the most recent states and removes older ones.
-        """
+    async def _cleanup_old_states(self):
+        """Clean up old state entries from database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # Keep only the last 100 states
             cursor.execute("""
                 DELETE FROM system_state 
                 WHERE id NOT IN (
@@ -278,13 +224,8 @@ class StateBridge:
                 )
             """)
             
-            rows_deleted = cursor.rowcount
+            if cursor.rowcount > 0:
+                print(f"Cleaned up {cursor.rowcount} old state entries")
             conn.commit()
-            
-            if rows_deleted > 0:
-                print(f"Cleaned up {rows_deleted} old state entries")
-                
-        except Exception as e:
-            print(f"Error during state cleanup: {e}")
         finally:
             conn.close()

@@ -23,10 +23,10 @@ class TerminalFormatter:
 
     @staticmethod    
     def format_context_summary(context: Dict[str, Any]) -> str:
-        pet_state = context.get('pet_state', {})
-        mood = pet_state.get('mood', {})
-        needs = pet_state.get('needs', {})
-        behavior = pet_state.get('behavior', {})
+        internal_state = context.get('internal_state', {})
+        mood = internal_state.get('mood', {})
+        needs = internal_state.get('needs', {})
+        behavior = internal_state.get('behavior', {})
 
         needs_str = ", ".join(f"{k}: {v.get('satisfaction', 0):.2f}" for k,v in needs.items())
         return f"Mood: {mood.get('name','Unknown')}\nBehavior: {behavior.get('name','Unknown')}\nNeeds: {needs_str}"

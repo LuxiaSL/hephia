@@ -1,34 +1,32 @@
 """
-Pet core implementation.
+Internal core implementation.
 Modified to work with server-based architecture.
 """
 
 from typing import List, Optional
 import asyncio
 
-from pet.pet_context import PetContext
-from pet.state_persistence import PetStateManager
-from pet.modules.needs.needs_manager import NeedsManager
-from pet.modules.behaviors.behavior_manager import BehaviorManager
-from pet.modules.actions.action_manager import ActionManager
-from pet.modules.emotions.emotional_processor import EmotionalProcessor
-from pet.modules.cognition.cognitive_bridge import CognitiveBridge
-from pet.modules.emotions.mood_synthesizer import MoodSynthesizer
-from pet.modules.memory.memory_system import MemorySystem
+from internal.internal_context import InternalContext
+from internal.modules.needs.needs_manager import NeedsManager
+from internal.modules.behaviors.behavior_manager import BehaviorManager
+from internal.modules.actions.action_manager import ActionManager
+from internal.modules.emotions.emotional_processor import EmotionalProcessor
+from internal.modules.cognition.cognitive_bridge import CognitiveBridge
+from internal.modules.emotions.mood_synthesizer import MoodSynthesizer
+from internal.modules.memory.memory_system import MemorySystem
 from event_dispatcher import global_event_dispatcher, Event
-from loggers import PetLogger  
+from loggers import InternalLogger  
 
 
-class Pet:
+class Internal:
     """
-    Core pet class, now designed to work with server architecture.
+    Core internal class, now designed to work with server architecture.
     """
 
     def __init__(self):
-        """Initialize pet systems."""
+        """Initialize internal systems."""
         # Initialize context & state control
-        self.context = PetContext(self)
-        #self.state_persistence = PetStateManager(self)
+        self.context = InternalContext(self)
 
         # Initialize managers
         self.needs_manager = NeedsManager()
@@ -53,38 +51,70 @@ class Pet:
         self._update_tasks: List[asyncio.Task] = []
 
     def setup_event_listeners(self):
-        """Set up event listeners for pet systems."""
+        """Set up event listeners for internal systems."""
         global_event_dispatcher.add_listener("need:changed", self.on_need_change)
         global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_change)
         global_event_dispatcher.add_listener("action:performed", self.on_action_performed)
         global_event_dispatcher.add_listener("mood:changed", self.on_mood_change)
         global_event_dispatcher.add_listener("emotion:new", self.on_new_emotion)
 
+    async def restore_state(self, state_data: dict):
+        """
+        Restore internal state from persistence data.
+        This happens before start() during initialization.
+        """
+        # Set state in each manager
+        self.needs_manager.set_needs_state(state_data.get('needs', {}))
+        self.behavior_manager.set_behavior_state(state_data.get('behavior', {}))
+        self.emotional_processor.set_emotional_state(state_data.get('emotions', {}))
+        self.mood_synthesizer.set_mood_state(state_data.get('mood', {}))
+        self.memory_system.set_memory_state(state_data.get('memory', {}))
+
+    async def shake(self):
+        """
+        perform a shake to ensure all state data is propagated
+        """
+        # First update needs which will trigger need events
+        await self.update_needs()
+        
+        # Process emotional state which will absorb need events
+        await self.update_emotions()
+        
+        # Force behavior system to reevaluate with new need states
+        current_behavior = self.behavior_manager.current_behavior.name
+        self.behavior_manager.determine_behavior(Event("shake", {
+            "current_needs": self.context.get_current_needs(),
+            "current_mood": self.context.get_current_mood(),
+            "recent_emotions": self.context.get_recent_emotions()
+        }))
+        
+        # Let one event processing cycle complete
+        await asyncio.sleep(0.5)
+        
+        # Verify state consistency
+        if self.behavior_manager.current_behavior.name != current_behavior:
+            # Log that shake caused behavior change
+            print(f"Shake caused behavior change: {current_behavior} -> {self.behavior_manager.current_behavior.name}")
+
     async def start(self):
-        """
-        Start pet systems.
-        Now handled by server's timer coordinator instead of internal timer.
-        """
+        """Start internal systems."""
         self.is_active = True
-        # Notify system that pet is ready
-        global_event_dispatcher.dispatch_event(Event("pet:started", None))
+        global_event_dispatcher.dispatch_event(Event("internal:started", None))
 
     def stop(self):
-        """Stop pet systems."""
+        """Stop internal systems."""
         self.is_active = False
         if self.behavior_manager.current_behavior:
             self.behavior_manager.current_behavior.stop()
         
         # Notify system of shutdown
-        global_event_dispatcher.dispatch_event(Event("pet:stopped", None))
+        global_event_dispatcher.dispatch_event(Event("internal:stopped", None))
 
     async def update_needs(self):
-        """Update needs - now called by timer coordinator."""
         if self.is_active:
             self.needs_manager.update_needs()
 
     async def update_emotions(self):
-        """Update emotions - now called by timer coordinator."""
         if self.is_active:
             self.emotional_processor.update()
 
@@ -92,7 +122,7 @@ class Pet:
         """Handle need change events."""
         if not self.is_active:
             return
-        PetLogger.log_state_change(
+        InternalLogger.log_state_change(
             f"need '{event.data['need_name']}'",
             event.data.get('old_value', 'unknown'),
             event.data['new_value']
@@ -102,7 +132,7 @@ class Pet:
         """Handle behavior change events."""
         if not self.is_active:
             return
-        PetLogger.log_state_change(
+        InternalLogger.log_state_change(
             'behavior',
             event.data.get('old_behavior', 'unknown'),
             event.data['new_behavior']
@@ -112,7 +142,7 @@ class Pet:
         """Handle action performed events."""
         if not self.is_active:
             return
-        PetLogger.log_behavior(
+        InternalLogger.log_behavior(
             event.data['action_name'],
             event.data.get('context')
         )
@@ -121,7 +151,7 @@ class Pet:
         """Handle mood change events."""
         if not self.is_active:
             return
-        PetLogger.log_state_change(
+        InternalLogger.log_state_change(
             'mood',
             event.data.get('old_name', 'unknown'),
             event.data['new_name']
@@ -132,13 +162,13 @@ class Pet:
         if not self.is_active:
             return
         emotion = event.data.get('emotion')
-        PetLogger.log_state_change(
+        InternalLogger.log_state_change(
             'emotion',
             'none',
             f"{emotion.name} (v:{emotion.valence:.2f}, a:{emotion.arousal:.2f})"
         )
 
     def perform_action(self, action_name: str):
-        """Perform a pet action."""
+        """Perform a internal action."""
         if self.is_active:
             self.action_manager.perform_action(action_name)

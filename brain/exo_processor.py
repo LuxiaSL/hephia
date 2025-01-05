@@ -42,7 +42,7 @@ class ExoProcessor:
 
     async def initialize(self):
         """Handle async initialization tasks."""
-        initial_state = await self.state_bridge.get_current_state()
+        initial_state = await self.state_bridge.get_api_context()
         formatted_state = TerminalFormatter.format_context_summary(initial_state)
         
         welcome_message = {
@@ -120,7 +120,7 @@ class ExoProcessor:
                 self._add_to_history("assistant", llm_response)
                 
                 # Execute command
-                current_state = await self.state_bridge.get_current_state()
+                current_state = await self.state_bridge.get_api_context()
                 result = await self._execute_command(command, current_state)
 
                 # Format response
@@ -224,19 +224,19 @@ class ExoProcessor:
                 *self.conversation_history[-(max_length-1):]  # Recent messages
             ]
 
-    async def _handle_pet_command(self, action: str) -> str:
+    async def _handle_internal_command(self, action: str) -> str:
         """
-        Handle commands that interact with pet's internal systems.
-        This could be split into a separate PetCommandHandler class if it grows complex.
+        Handle commands that interact with internal systems.
+        This will be split into a separate Internal environment when it grows complex.
         """
-        # Example implementation - would need to be expanded based on available pet interactions
+        # Example implementation - would need to be expanded based on available internal interactions
         parts = action.split(maxsplit=1)
         if not parts:
-            return "Invalid pet command"
+            return "Invalid internal command"
 
         action_type = parts[0]
         if action_type == "feed":
-            # Interface with pet's needs system
+            # Interface with internal needs system
             pass
         elif action_type == "play":
             # Interface with behavior system
@@ -244,9 +244,9 @@ class ExoProcessor:
         elif action_type == "status":
             # Get detailed internal state
             pass
-        # ... other pet interactions
+        # ... other internal interactions
 
-        return "Pet command handling not yet implemented"
+        return "internal command handling not yet implemented"
 
     def trim_conversation(self, max_length: int = Config.EXO_MAX_MESSAGES):
         """Trim conversation history while maintaining context."""

@@ -4,7 +4,7 @@ from .action import Action
 
 class DrinkAction(Action):
     """
-    Action to give drink to the pet.
+    Action to give drink.
     """
 
     def __init__(self, action_manager, needs_manager, drink_value=20.0):

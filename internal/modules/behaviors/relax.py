@@ -1,21 +1,21 @@
-# modules/behaviors/chase.py
+# modules/behaviors/relax.py
 
 from .behavior import Behavior
 from config import Config
 from event_dispatcher import global_event_dispatcher, Event
 
-class ChaseBehavior(Behavior):
+class RelaxBehavior(Behavior):
     """
-    Represents the pet's chasing state, where it actively follows the user's cursor.
+    Represents the relaxing state, catching breath after activity or plain zoning out
     """
 
     def __init__(self, behavior_manager):
         super().__init__(behavior_manager)
-        self.name = "chase"
+        self.name = "relax"
 
     def start(self):
         super().start()
-        print("ChaseBehavior started.")
+        print("RelaxBehavior started.")
         self.apply_need_modifiers()
 
     def update(self):
@@ -24,22 +24,22 @@ class ChaseBehavior(Behavior):
             return
         
     def stop(self):
-        print("ChaseBehavior stopped.")
+        print("RelaxBehavior stopped.")
         self.remove_need_modifiers()
         super().stop()
 
     def apply_need_modifiers(self):
         needs_manager = self.behavior_manager.needs_manager
         
-        for need, modifier in Config.CHASE_NEED_MODIFIERS.items():
+        for need, modifier in Config.RELAX_NEED_MODIFIERS.items():
             needs_manager.alter_base_rate(need, modifier)
         
-        global_event_dispatcher.dispatch_event_sync(Event("behavior:chase:modifiers_applied", Config.CHASE_NEED_MODIFIERS))
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:relax:modifiers_applied", Config.RELAX_NEED_MODIFIERS))
 
     def remove_need_modifiers(self):
         needs_manager = self.behavior_manager.needs_manager
         
-        for need, modifier in Config.CHASE_NEED_MODIFIERS.items():
+        for need, modifier in Config.RELAX_NEED_MODIFIERS.items():
             needs_manager.alter_base_rate(need, -modifier)
         
-        global_event_dispatcher.dispatch_event_sync(Event("behavior:chase:modifiers_removed", Config.CHASE_NEED_MODIFIERS))
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:relax:modifiers_removed", Config.RELAX_NEED_MODIFIERS))

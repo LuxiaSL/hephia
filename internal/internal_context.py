@@ -1,27 +1,27 @@
-# pet/pet_context.py
+# internal/internal_context.py
 """
-PetContext module.
+InternalContext module.
 
-Provides an access layer to retrieve the pet's current internal state, such as mood,
+Provides an access layer to retrieve the internal's current internal state, such as mood,
 behavior, and needs. It acts as a snapshot provider without managing or storing
 the actual state values.
 """
 
-class PetContext:
+class InternalContext:
 
-    def __init__(self, pet):
+    def __init__(self, internal):
         """
-        Initializes the PetContext with a reference to the pet instance.
+        Initializes the InternalContext with a reference to the internal instance.
 
         Args:
-            pet (Pet): The pet instance.
+            internal (Internal): The internal instance.
         """
-        self.pet = pet
+        self.internal = internal
 
     def get_api_context(self):
         """Gets complete JSON-serializable context with type verification."""
         try:
-            mood = self.pet.mood_synthesizer
+            mood = self.internal.mood_synthesizer
             current_mood = mood.get_current_mood()
             mood_data = {
                 'name': mood.get_current_mood_name(),
@@ -29,23 +29,23 @@ class PetContext:
                 'arousal': float(current_mood.arousal)   # Ensure numeric
             }
             
-            behavior = self.pet.behavior_manager.current_behavior
+            behavior = self.internal.behavior_manager.current_behavior
             behavior_data = {
                 'name': behavior.name if behavior else None,
                 'active': behavior is not None
             }
             
-            emotions = self.pet.memory_system.body_memory.get_recent_emotions()
+            emotions = self.internal.memory_system.body_memory.get_recent_emotions()
             emotions_data = [
                 {
                     'name': str(emotion.name),
                     'intensity': float(emotion.intensity),
-                    'timestamp': emotion.timestamp.isoformat() if hasattr(emotion, 'timestamp') else None
+                    'timestamp': emotion.timestamp if hasattr(emotion, 'timestamp') else None
                 }
                 for emotion in emotions
             ]
             
-            needs = self.pet.needs_manager.get_needs_summary()
+            needs = self.internal.needs_manager.get_needs_summary()
             
             return {
                 'mood': mood_data,
@@ -59,33 +59,33 @@ class PetContext:
 
     def get_current_mood(self):
         """
-        Retrieves the pet's current mood from the MoodSynthesizer in a structured format.
+        Retrieves the internal's current mood from the MoodSynthesizer in a structured format.
 
         Returns:
             dict: A dictionary with the mood name and mood object.
         """
         return {
-            "name": self.pet.mood_synthesizer.get_current_mood_name(),
-            "mood_object": self.pet.mood_synthesizer.get_current_mood()
+            "name": self.internal.mood_synthesizer.get_current_mood_name(),
+            "mood_object": self.internal.mood_synthesizer.get_current_mood()
         }
 
     def get_current_behavior(self):
         """
-        Retrieves the pet's current behavior from the BehaviorManager.
+        Retrieves the internal's current behavior from the BehaviorManager.
 
         Returns:
-            Behavior: The current behavior of the pet.
+            Behavior: The current behavior of the internal.
         """
-        return self.pet.behavior_manager.get_current_behavior()
+        return self.internal.behavior_manager.get_current_behavior()
 
     def get_current_needs(self):
         """
-        Retrieves the pet's current needs from the NeedsManager.
+        Retrieves the internal's current needs from the NeedsManager.
 
         Returns:
             dict: A dictionary of need names to their current values and satisfaction levels
         """
-        return self.pet.needs_manager.get_needs_summary()
+        return self.internal.needs_manager.get_needs_summary()
 
     def get_recent_emotions(self):
         """
@@ -94,7 +94,7 @@ class PetContext:
         Returns:
             list: A list of recent Emotion instances.
         """
-        return self.pet.memory_system.body_memory.get_recent_emotions()
+        return self.internal.memory_system.body_memory.get_recent_emotions()
 
     def get_full_context(self):
         return {

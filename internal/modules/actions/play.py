@@ -4,7 +4,7 @@ from .action import Action
 
 class PlayAction(Action):
     """
-    Action to play with the pet.
+    Action to play.
     """
 
     def __init__(self, action_manager, needs_manager, play_value=15.0, stamina_cost=10.0, companionship_value=15.0):

@@ -407,8 +407,8 @@ class NotesEnvironment(BaseEnvironment):
         try:
             # Capture current cognitive state
             note_context = {
-                'mood': context.get('pet_state', {}).get('mood', {}),
-                'needs': context.get('pet_state', {}).get('needs', {}),
+                'mood': context.get('internal_state', {}).get('mood', {}),
+                'needs': context.get('internal_state', {}).get('needs', {}),
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -668,8 +668,8 @@ class NotesEnvironment(BaseEnvironment):
 
             # Update note with new content and context
             new_context = {
-                'mood': context.get('pet_state', {}).get('mood', {}),
-                'needs': context.get('pet_state', {}).get('needs', {}),
+                'mood': context.get('internal_state', {}).get('mood', {}),
+                'needs': context.get('internal_state', {}).get('needs', {}),
                 'timestamp': datetime.now().isoformat()
             }
             

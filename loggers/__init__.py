@@ -4,6 +4,6 @@ Provides structured logging for different subsystems.
 """
 
 from .manager import LogManager
-from .loggers import PetLogger, BrainLogger, SystemLogger
+from .loggers import InternalLogger, BrainLogger, SystemLogger
 
-__all__ = ['LogManager', 'PetLogger', 'BrainLogger', 'SystemLogger']
+__all__ = ['LogManager', 'InternalLogger', 'BrainLogger', 'SystemLogger']

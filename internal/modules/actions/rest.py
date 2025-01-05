@@ -4,7 +4,7 @@ from .action import Action
 
 class RestAction(Action):
     """
-    Action to let the pet rest.
+    Action to rest.
     """
 
     def __init__(self, action_manager, needs_manager, stamina_gain=20.0):

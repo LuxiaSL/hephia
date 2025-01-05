@@ -44,24 +44,24 @@ class SystemLogger:
             f"  Reason: {reason}"
         )
 
-class PetLogger:
-    """Logger for pet internal state changes."""
+class InternalLogger:
+    """Logger for internal state changes."""
     
     @staticmethod
     def log_state_change(component: str, old_value: Any, new_value: Any):
         """Log a state change with before/after values."""
-        logger = logging.getLogger('hephia.pet')
+        logger = logging.getLogger('hephia.internal')
         logger.debug(
             f"State Change: {component}\n"
             f"  From: {old_value}\n"
             f"  To:   {new_value}"
         )
-        logger.info(f"Pet: {component} changed to {new_value}")
+        logger.info(f"Internal: {component} changed to {new_value}")
     
     @staticmethod
     def log_behavior(behavior: str, context: Optional[Dict] = None):
         """Log behavior execution with context."""
-        logger = logging.getLogger('hephia.pet')
+        logger = logging.getLogger('hephia.internal')
         if context:
             logger.debug(
                 f"Behavior: {behavior}\n"
@@ -69,7 +69,7 @@ class PetLogger:
             )
         else:
             logger.debug(f"Behavior: {behavior}")
-        logger.info(f"Pet: Performed {behavior}")
+        logger.info(f"Internal: Performed {behavior}")
 
 class BrainLogger:
     """Enhanced logger for cognitive operations."""

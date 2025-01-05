@@ -6,7 +6,7 @@ Handles consistent formatting across different logging streams.
 import logging
 
 class InternalFormatter(logging.Formatter):
-    """Formatter for internal pet and system events."""
+    """Formatter for internal and system events."""
     
     def format(self, record):
         timestamp = self.formatTime(record)

@@ -1,45 +1,45 @@
-# modules/behaviors/relax.py
+# modules/behaviors/walk.py
 
 from .behavior import Behavior
 from config import Config
 from event_dispatcher import global_event_dispatcher, Event
 
-class RelaxBehavior(Behavior):
+class WalkBehavior(Behavior):
     """
-    Represents the pet's relaxing state, catching breath after activity or plain zoning out
+    Represents the walking state.
     """
 
     def __init__(self, behavior_manager):
         super().__init__(behavior_manager)
-        self.name = "relax"
+        self.name = "walk"
 
     def start(self):
         super().start()
-        print("RelaxBehavior started.")
+        print("WalkBehavior started.")
         self.apply_need_modifiers()
 
     def update(self):
         super().update()
         if not self.active:
             return
-        
+
     def stop(self):
-        print("RelaxBehavior stopped.")
+        print("WalkBehavior stopped.")
         self.remove_need_modifiers()
         super().stop()
 
     def apply_need_modifiers(self):
         needs_manager = self.behavior_manager.needs_manager
         
-        for need, modifier in Config.RELAX_NEED_MODIFIERS.items():
+        for need, modifier in Config.WALK_NEED_MODIFIERS.items():
             needs_manager.alter_base_rate(need, modifier)
         
-        global_event_dispatcher.dispatch_event_sync(Event("behavior:relax:modifiers_applied", Config.RELAX_NEED_MODIFIERS))
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:walk:modifiers_applied", Config.WALK_NEED_MODIFIERS))
 
     def remove_need_modifiers(self):
         needs_manager = self.behavior_manager.needs_manager
         
-        for need, modifier in Config.RELAX_NEED_MODIFIERS.items():
+        for need, modifier in Config.WALK_NEED_MODIFIERS.items():
             needs_manager.alter_base_rate(need, -modifier)
         
-        global_event_dispatcher.dispatch_event_sync(Event("behavior:relax:modifiers_removed", Config.RELAX_NEED_MODIFIERS))
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:walk:modifiers_removed", Config.WALK_NEED_MODIFIERS))

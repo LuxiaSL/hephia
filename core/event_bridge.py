@@ -1,6 +1,6 @@
 """
 Simplified event bridge for MVP state updates.
-Handles core state changes between pet systems and external interfaces.
+Handles core state changes between internal systems and external interfaces.
 """
 
 from typing import Dict, Any
@@ -8,7 +8,7 @@ from event_dispatcher import global_event_dispatcher, Event
 
 class EventBridge:
     """
-    Manages essential event flow between pet systems and external interfaces.
+    Manages essential event flow between internal systems and external interfaces.
     Focused on state updates and basic command processing for MVP.
     """
     
@@ -30,10 +30,10 @@ class EventBridge:
         Handle core state changes, updating state bridge as needed.
         
         Args:
-            event: State change event from pet systems
+            event: State change event from internal systems
         """
         # Update state bridge with new state information
-        await self.state_bridge.update_state(pet_state={
+        await self.state_bridge.update_state(internal_state={
             "type": event.event_type,
             "data": event.data
         })

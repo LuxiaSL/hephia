@@ -25,14 +25,14 @@ class LogManager:
         # Setup specific loggers
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # Pet/System Logger
-        pet_logger = logging.getLogger('hephia.pet')
-        pet_logger.setLevel(logging.DEBUG)
-        pet_handler = logging.FileHandler(
-            internal_dir / f"pet_{timestamp}.log"
+        # Internal/System Logger
+        internal_logger = logging.getLogger('hephia.internal')
+        internal_logger.setLevel(logging.DEBUG)
+        internal_handler = logging.FileHandler(
+            internal_dir / f"internal_{timestamp}.log"
         )
-        pet_handler.setFormatter(InternalFormatter())
-        pet_logger.addHandler(pet_handler)
+        internal_handler.setFormatter(InternalFormatter())
+        internal_logger.addHandler(internal_handler)
         
         system_logger = logging.getLogger('hephia.system')
         system_logger.setLevel(logging.DEBUG)
@@ -57,5 +57,5 @@ class LogManager:
         console.setFormatter(ConsoleFormatter())
         
         # Add console handler to all loggers
-        for logger in [pet_logger, system_logger, brain_logger]:
+        for logger in [internal_logger, system_logger, brain_logger]:
             logger.addHandler(console)

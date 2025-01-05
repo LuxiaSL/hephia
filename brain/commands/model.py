@@ -102,7 +102,7 @@ class CommandResult:
     data: Optional[Dict[str, Any]] = None
     suggested_commands: List[str] = field(default_factory=list)
     error: Optional[CommandValidationError] = None
-    state_changes: Optional[Dict[str, Any]] = None  # Any pet state changes caused
+    state_changes: Optional[Dict[str, Any]] = None
 
 @dataclass
 class EnvironmentCommands:

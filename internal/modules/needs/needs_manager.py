@@ -6,7 +6,7 @@ from event_dispatcher import global_event_dispatcher, Event
 
 class NeedsManager:
     """
-    Manages all of the pet's needs.
+    Manages all needs.
     """
 
     def __init__(self):
@@ -145,6 +145,49 @@ class NeedsManager:
             }))
         else:
             raise ValueError(f"Need '{need_name}' does not exist.")
+
+    def get_needs_state(self):
+        """
+        retrieves info needed to persist and propogate state
+        only info that can't be derived otherwise
+        """
+        return {
+            name: {
+                "value": need.value,
+                **({"base_rate": need.base_rate} 
+                   if need.base_rate != getattr(Config, f"{name.upper()}_BASE_RATE")
+                   else {}),
+                **({"rate_multiplier": need.base_rate_multiplier}
+                   if need.base_rate_multiplier != 1.0
+                   else {})
+            }
+            for name, need in self.needs.items()
+        }
+
+    def set_needs_state(self, needs_state):
+        """
+        sets the state of needs from provided state data.
+        """
+        for need_name, state in needs_state.items():
+            if need_name not in self.needs:
+                raise ValueError(f"Need '{need_name}' does not exist")
+            
+            need = self.needs[need_name]
+            old_value = need.value
+            
+            if "value" in state:
+                need.value = state["value"]
+            if "base_rate" in state:
+                need.base_rate = state["base_rate"]
+            if "rate_multiplier" in state:
+                need.base_rate_multiplier = state["rate_multiplier"]
+            
+            if need.value != old_value:
+                global_event_dispatcher.dispatch_event_sync(Event("need:changed", {
+                    "need_name": need_name,
+                    "old_value": old_value,
+                    "new_value": need.value
+                }))
         
     def get_needs_summary(self):
         """

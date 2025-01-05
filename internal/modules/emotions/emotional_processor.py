@@ -174,16 +174,16 @@ class EmotionalProcessor:
         }
     }
 
-    def __init__(self, pet_context, cognitive_bridge, memory_system):
+    def __init__(self, internal_context, cognitive_bridge, memory_system):
         """
         Initializes the EmotionalProcessor with context access and processing capabilities.
 
         Args:
-            pet_context (PetContext): internal state access
+            internal_context (InternalContext): internal state access
             cognitive_bridge (CognitiveBridge): active emotional mediation & logging
             memory_system (MemorySystem): access to body memory 
         """
-        self.pet_context = pet_context
+        self.internal_context = internal_context
         self.cognitive_bridge = cognitive_bridge
         self.memory_system = memory_system
         self.current_stimulus = EmotionalStimulus()
@@ -453,7 +453,7 @@ class EmotionalProcessor:
 
     def _calculate_dampening(self, category):
         """Calculates dampening based on recent similar emotions."""
-        recent_emotions = self.pet_context.get_recent_emotions()
+        recent_emotions = self.internal_context.get_recent_emotions()
         similar_count = sum(
             1 for e in recent_emotions
             if self._categorize_vector(e.valence, e.arousal) == category
@@ -462,7 +462,7 @@ class EmotionalProcessor:
 
     def _get_mood_influence_vector(self):
         """Generates a vector representing the mood influence."""
-        current_mood = self.pet_context.get_current_mood()
+        current_mood = self.internal_context.get_current_mood()
         if current_mood:
             return {
                 'valence': current_mood['mood_object'].valence * 0.5,  # Adjust scaling factor as needed
@@ -472,7 +472,7 @@ class EmotionalProcessor:
 
     def _get_behavior_influence_vector(self):
         """Generates a vector representing the behavior influence."""
-        current_behavior = self.pet_context.get_current_behavior()
+        current_behavior = self.internal_context.get_current_behavior()
         behavior_name = current_behavior.name
         mapping = self.EMOTION_MAPPINGS['behavior'].get(behavior_name)
 
@@ -506,3 +506,53 @@ class EmotionalProcessor:
             # Add more mappings as needed
         }
         return category_to_emotion.get(category, 'neutral')
+
+    def get_emotional_state(self):
+        """
+        retrieve the exact bare minimum info to maintain continuity between sessions for this module
+        i.e. the active vectors
+        """
+        return {
+            "active_vectors": [
+                {
+                    "valence": vector.valence,
+                    "arousal": vector.arousal,
+                    "intensity": vector.intensity,
+                    "name": vector.name,
+                    "source_type": vector.source_type,
+                    "timestamp": vector.timestamp,
+                    **({"source_data": vector.source_data} 
+                       if isinstance(vector.source_data, (dict, str, int, float, bool)) 
+                       else {})
+                }
+                for vector in self.current_stimulus.active_vectors
+                if (abs(vector.valence) >= 0.001 or 
+                    abs(vector.arousal) >= 0.001 or 
+                    vector.intensity >= 0.001)
+            ]
+        }
+
+    def set_emotional_state(self, state):
+        """
+        restore from prior session
+        """
+        if not state:
+            return
+            
+        self.current_stimulus = EmotionalStimulus()
+        
+        for vector_data in state.get("active_vectors", []):
+            vector = EmotionalVector(
+                valence=vector_data["valence"],
+                arousal=vector_data["arousal"],
+                intensity=vector_data["intensity"],
+                name=vector_data.get("name"),
+                source_type=vector_data.get("source_type")
+            )
+            if "timestamp" in vector_data:
+                vector.timestamp = float(vector_data["timestamp"])
+            if "source_data" in vector_data:
+                vector.source_data = vector_data["source_data"]
+            
+            self.current_stimulus.add_vector(vector)
+

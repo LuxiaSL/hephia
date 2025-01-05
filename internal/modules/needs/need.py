@@ -2,7 +2,7 @@
 
 class Need:
     """
-    Represents a single need of the pet.
+    Represents a single need.
     """
 
     def __init__(self, name, type="physical", value=50.0, base_rate=0.2, min_value=0.0, max_value=100.0):

@@ -3,13 +3,13 @@
 """
 Mood Synthesis System:
 
-Generates the pet's ongoing emotional state by integrating:
+Generates the ongoing emotional state by integrating:
 - Recent emotional experiences {immediate feelings} -> {short-term impact}
 - Need satisfaction levels {physical state} -> {baseline mood}
 - Current behavior {activity influence} -> {embodied state}
 
 Unlike emotions which respond to specific events, mood represents a more
-stable emotional baseline that colors the pet's perception of events and
+stable emotional baseline that colors perception of events and
 influences its behavioral tendencies.
 
 Future integrations:
@@ -22,7 +22,7 @@ import time
 
 class Mood:
     """
-    Represents the pet's current mood.
+    Represents the current mood.
     """
 
     def __init__(self, valence=0.0, arousal=0.0):
@@ -38,17 +38,17 @@ class Mood:
 
 class MoodSynthesizer:
     """
-    Synthesizes the pet's mood based on recent emotions, needs, and behavior.
+    Synthesizes the internal's mood based on recent emotions, needs, and behavior.
     """
 
-    def __init__(self, pet_context):
+    def __init__(self, internal_context):
         """
         Initializes the MoodSynthesizer.
 
         Args:
-            pet_context (PetContext): methods to access info from other modules
+            internal_context (InternalContext): methods to access info from other modules
         """
-        self.context = pet_context
+        self.context = internal_context
         self.current_mood = Mood()
         self.current_mood_name = 'neutral'
         self.decay_half_life = 300  # 5 minutes in seconds
@@ -115,7 +115,6 @@ class MoodSynthesizer:
                     "new_name": new_name,
                     "mood_object": new_mood  # Include full object if deeper access is required
                 }))
-
 
     def _calculate_mood(self, current_needs, recent_emotions, current_behavior):
         weighted_valence = 0.0
@@ -209,3 +208,25 @@ class MoodSynthesizer:
     def get_current_mood_name(self):
         # relevant string
         return self.current_mood_name
+
+    def get_mood_state(self):
+        """Gets the persistent state of the mood system."""
+        return {
+            "mood": {
+                "valence": self.current_mood.valence,
+                "arousal": self.current_mood.arousal,
+                "name": self.current_mood_name
+            }
+        }
+
+    def set_mood_state(self, state):
+        """Sets the mood system state."""
+        if not state:
+            return
+            
+        mood_data = state.get("mood", {})
+        self.current_mood = Mood(
+            valence=mood_data.get("valence", 0.0),
+            arousal=mood_data.get("arousal", 0.0)
+        )
+        self.current_mood_name = mood_data.get("name", "neutral")

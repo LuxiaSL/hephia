@@ -25,11 +25,7 @@ class Config:
     TERMINAL_WIDTH = 50
     MAX_RECENT_EMOTIONS = 3
 
-    # Pet appearance settings
-    PET_WIDTH = 250
-    PET_HEIGHT = 250
-
-    # Initial pet needs
+    # Initial needs
     INITIAL_HUNGER = 0
     INITIAL_THIRST = 0
     INITIAL_BOREDOM = 0

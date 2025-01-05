@@ -1,21 +1,21 @@
-# modules/behaviors/idle.py
+# modules/behaviors/sleep.py
 
 from .behavior import Behavior
 from config import Config
 from event_dispatcher import global_event_dispatcher, Event
 
-class IdleBehavior(Behavior):
+class SleepBehavior(Behavior):
     """
-    Represents the pet's idle/default state.
+    Represents the sleeping state, triggered when stamina hits 0 or by user clicking rest
     """
 
     def __init__(self, behavior_manager):
         super().__init__(behavior_manager)
-        self.name = "idle"
+        self.name = "sleep"
 
     def start(self):
         super().start()
-        print("IdleBehavior started.")
+        print("SleepBehavior started.")
         self.apply_need_modifiers()
 
     def update(self):
@@ -24,22 +24,22 @@ class IdleBehavior(Behavior):
             return
         
     def stop(self):
-        print("IdleBehavior stopped.")
+        print("SleepBehavior stopped.")
         self.remove_need_modifiers()
         super().stop()
 
     def apply_need_modifiers(self):
         needs_manager = self.behavior_manager.needs_manager
         
-        for need, modifier in Config.IDLE_NEED_MODIFIERS.items():
+        for need, modifier in Config.SLEEP_NEED_MODIFIERS.items():
             needs_manager.alter_base_rate(need, modifier)
         
-        global_event_dispatcher.dispatch_event_sync(Event("behavior:idle:modifiers_applied", Config.IDLE_NEED_MODIFIERS))
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:sleep:modifiers_applied", Config.SLEEP_NEED_MODIFIERS))
 
     def remove_need_modifiers(self):
         needs_manager = self.behavior_manager.needs_manager
         
-        for need, modifier in Config.IDLE_NEED_MODIFIERS.items():
+        for need, modifier in Config.SLEEP_NEED_MODIFIERS.items():
             needs_manager.alter_base_rate(need, -modifier)
         
-        global_event_dispatcher.dispatch_event_sync(Event("behavior:idle:modifiers_removed", Config.IDLE_NEED_MODIFIERS))
+        global_event_dispatcher.dispatch_event_sync(Event("behavior:sleep:modifiers_removed", Config.SLEEP_NEED_MODIFIERS))

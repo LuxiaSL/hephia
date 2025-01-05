@@ -11,7 +11,7 @@ import random
 
 class BehaviorManager:
     """
-    Manages the pet's behaviors through a probabilistic state transition system.
+    Manages behaviors through a probabilistic state transition system.
 
     The behavior system models natural activity patterns by:
     {immediate reactions} -> {needs drive behavior changes}
@@ -92,19 +92,16 @@ class BehaviorManager:
             }
         }
     }
-
-
-
     
-    def __init__(self, pet_context, needs_manager):
+    def __init__(self, internal_context, needs_manager):
         """
         Initializes the BehaviorManager.
 
         Args:
-            pet_context (PetContext): methods to retrieve pet's current internal state
+            internal_context (InternalContext): methods to retrieve current internal state
             needs_manager (NeedsManager): The NeedsManager instance (used by behaviors to manage rates)
         """
-        self.pet_context = pet_context
+        self.internal_context = internal_context
         self.needs_manager = needs_manager
         self.current_behavior = None
         self.locked_until = 0
@@ -191,9 +188,9 @@ class BehaviorManager:
         event_type = event.event_type
         event_data = event.data
 
-        current_needs = self.pet_context.get_current_needs()
-        current_mood = self.pet_context.get_current_mood()
-        recent_emotions = self.pet_context.get_recent_emotions()
+        current_needs = self.internal_context.get_current_needs()
+        current_mood = self.internal_context.get_current_mood()
+        recent_emotions = self.internal_context.get_recent_emotions()
         
         new_behavior = self._calculate_behavior(event_type, event_data, current_needs, current_mood, recent_emotions)
 
@@ -207,8 +204,8 @@ class BehaviorManager:
         Args:
             event_type (str): The type of event that triggered the behavior calculation.
             event_data (dict): Additional data associated with the event.
-            current_needs (dict): The current state of the pet's needs.
-            current_mood (dict): The current mood info of the pet.
+            current_needs (dict): The current state of the internal's needs.
+            current_mood (dict): The current mood info of the internal.
             recent_emotions (list): A list of recent EmotionalVector objects.
 
         Returns:
@@ -264,3 +261,34 @@ class BehaviorManager:
             Behavior: The current behavior instance.
         """
         return self.current_behavior
+
+    def get_behavior_state(self):
+        """
+        Gets the persistent state of the behavior system.
+        """
+        return {
+            "current_behavior": self.current_behavior.name if self.current_behavior else None,
+            **({"locked_until": self.locked_until, "locked_by": self.locked_by} 
+               if self.is_locked() else {})
+        }
+
+    def set_behavior_state(self, state):
+        """
+        Sets the state of the behavior system.
+        """
+        if not state:
+            return
+
+        # Set lock state first if present
+        if "locked_until" in state and "locked_by" in state:
+            self.locked_until = state["locked_until"]
+            self.locked_by = state["locked_by"]
+        else:
+            self.locked_until = 0
+            self.locked_by = None
+
+        # Change to specified behavior if provided
+        if "current_behavior" in state and state["current_behavior"] in self.behaviors:
+            self.change_behavior(state["current_behavior"])
+        else:
+            self.change_behavior("idle")
