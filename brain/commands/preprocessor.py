@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import re
 import json
 import os
+from config import Config
 from dataclasses import dataclass
 from loggers import BrainLogger
 from api_clients import APIManager
@@ -344,6 +345,8 @@ class CommandPreprocessor:
         available_commands: Dict[str, EnvironmentCommands]
     ) -> Optional[ParsedCommand]:
         """Attempt to correct invalid command using LLM."""
+        model_name = Config.get_validation_model()
+        model_config = Config.AVAILABLE_MODELS[model_name]
         try:
             # Format available commands for LLM
             command_help = {}
@@ -361,7 +364,7 @@ class CommandPreprocessor:
                     }
                 }
             
-            response = await self.api.openrouter.create_completion(
+            result = await self.api.create_completion(
                 messages=[
                     {
                         "role": "system",
@@ -380,11 +383,12 @@ Rules:
                         "content": f'Command: "{command.raw_input}"'
                     }
                 ],
-                model=os.getenv("OPENROUTER_MODEL"),
-                temperature=0.2
+                provider=model_config.provider.value,
+                model=model_config.model_id,
+                temperature=0.2,
+                return_content_only=True
             )
 
-            result = response["choices"][0]["message"]["content"]
             try:
                 # Parse JSON response
                 correction = json.loads(result)

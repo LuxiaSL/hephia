@@ -11,13 +11,49 @@ from datetime import datetime
 from pathlib import Path
 
 from core.server import HephiaServer
-from config import Config
+from config import Config, ProviderType
 from loggers import LogManager
 LogManager.setup_logging()
 
 def setup_data_directory():
     """Ensure data directory exists."""
     Path('data').mkdir(exist_ok=True)
+
+def validate_configuration():
+    """Validate LLM configuration and environment variables."""
+    errors = []
+    
+    # Map providers to their environment variable names
+    provider_env_vars = {
+        ProviderType.OPENPIPE: "OPENPIPE_API_KEY",
+        ProviderType.OPENAI: "OPENAI_API_KEY",
+        ProviderType.ANTHROPIC: "ANTHROPIC_API_KEY",
+        ProviderType.GOOGLE: "GOOGLE_API_KEY",
+        ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
+        ProviderType.PERPLEXITY: "PERPLEXITY_API_KEY"
+    }
+    
+    # Validate model configurations
+    for role in ['cognitive', 'validation', 'fallback']:
+        model_name = getattr(Config, f'get_{role}_model')()
+        
+        if model_name not in Config.AVAILABLE_MODELS:
+            errors.append(f"Invalid {role} model configuration: {model_name}")
+            continue
+            
+        model_config = Config.AVAILABLE_MODELS[model_name]
+        env_var = provider_env_vars[model_config.provider]
+        
+        if not os.getenv(env_var):
+            errors.append(f"Missing {env_var} for {role} model ({model_name})")
+    
+    if errors:
+        print("\nConfiguration errors:")
+        for error in errors:
+            print(f"  • {error}")
+        return False
+    
+    return True
 
 async def main():
     """Initialize and run the complete Hephia system."""
@@ -32,20 +68,7 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     # Load environment variables
     load_dotenv()
     
-    # Verify required environment variables and their purposes
-    required_vars = {
-        'OPENROUTER_API_KEY': 'OpenRouter API key for command validation',
-        'PERPLEXITY_API_KEY': 'Perplexity API key for search functionality',
-        'OPENPIPE_API_KEY': 'OpenPipe API key for cognitive LLM',
-        'OPENPIPE_MODEL': 'Model ID for cognitive LLM',
-        'OPENROUTER_MODEL': 'Model ID for command validation'
-    }
-    
-    missing = [f"{var} ({desc})" for var, desc in required_vars.items() if not os.getenv(var)]
-    if missing:
-        print("\nMissing required environment variables:")
-        for var in missing:
-            print(f"  • {var}")
+    if not validate_configuration():
         return
     
     # Setup directory structure

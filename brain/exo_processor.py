@@ -94,8 +94,7 @@ class ExoProcessor:
         try:
             async with asyncio.timeout(self.llm_timeout.total_seconds()):
                 # Get LLM response
-                response = await self._get_llm_response()
-                llm_response = response["choices"][0]["message"]["content"]
+                llm_response = await self._get_llm_response()
                 BrainLogger.log_llm_exchange(self.conversation_history, llm_response)
 
                 # Process into command
@@ -105,7 +104,7 @@ class ExoProcessor:
                 )
 
                 BrainLogger.log_command_processing(
-                    response,
+                    llm_response,
                     command.raw_input if command else None,
                     str(error) if error else None
                 )
@@ -145,10 +144,16 @@ class ExoProcessor:
 
     async def _get_llm_response(self) -> Dict:
         """Get next action from LLM."""
-        return await self.api.openpipe.create_completion(
-            model=os.getenv("OPENPIPE_MODEL"),
+        model_name = Config.get_cognitive_model()
+        model_config = Config.AVAILABLE_MODELS[model_name]
+        
+        return await self.api.create_completion(
+            provider=model_config.provider.value,
+            model=model_config.model_id,
             messages=self.conversation_history,
-            temperature=Config.EXO_TEMPERATURE
+            temperature=model_config.temperature,
+            max_tokens=model_config.max_tokens,
+            return_content_only=True
         )
 
     async def _execute_command(

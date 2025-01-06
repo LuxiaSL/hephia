@@ -89,7 +89,7 @@ class BrainLogger:
     
     @staticmethod
     def log_command_processing(
-        raw_input: Dict,
+        raw_input: str,
         processed: Optional[str],
         validation_result: Optional[str]
     ):
@@ -97,7 +97,7 @@ class BrainLogger:
         logger = logging.getLogger('hephia.brain')
         logger.debug(
             "COMMAND PROCESSING\n"
-            f"Raw Input:\n{json.dumps(raw_input, indent=2)}\n"
+            f"Raw Input:\n{raw_input}\n"
             f"Processed Command: {processed}\n"
             f"Validation: {validation_result or 'Success'}"
         )

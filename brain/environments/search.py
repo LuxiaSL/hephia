@@ -109,20 +109,31 @@ class SearchEnvironment(BaseEnvironment):
                     "high": "Provide a comprehensive summary with detailed explanations."
                 }
                 
-                response = await self.api.perplexity.create_completion(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": f"{detail_prompts[detail]} Limit to {limit} key points."
-                        },
-                        {
-                            "role": "user",
-                            "content": search_terms.strip()
-                        }
-                    ]
-                )
+                if detail not in detail_prompts:
+                    detail = "medium"  
                 
-                content = response["choices"][0]["message"]["content"]
+                messages = [
+                    {
+                        "role": "system",
+                        "content": f"{detail_prompts[detail]} Limit to {limit} key points."
+                    },
+                    {
+                        "role": "user",
+                        "content": search_terms.strip()
+                    }
+                ]
+                
+                model_config = Config.AVAILABLE_MODELS["perplexity"]
+
+                # Call Perplexity API via APIManager
+                content = await self.api.create_completion(
+                    provider=model_config.provider.value,
+                    model=model_config.model_id,
+                    messages=messages,
+                    temperature=model_config.temperature,
+                    max_tokens=model_config.max_tokens,
+                    return_content_only=True 
+                )
                 
                 # Generate suggested follow-ups
                 suggested = [
