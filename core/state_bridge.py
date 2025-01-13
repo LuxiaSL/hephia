@@ -63,8 +63,7 @@ class StateBridge:
                         'needs': loaded_state.session_state.get('needs', {}),
                         'behavior': loaded_state.session_state.get('behavior', {}),
                         'emotions': loaded_state.session_state.get('emotions', {}),
-                        'mood': loaded_state.session_state.get('mood', {}),
-                        'memory': loaded_state.session_state.get('memory', {})
+                        'mood': loaded_state.session_state.get('mood', {})
                     }
                     
                     # Restore and stabilize internal state
@@ -83,6 +82,8 @@ class StateBridge:
                 
                 # Save initial state
                 await self._save_session()
+
+                self.setup_event_listeners()
                 
                 # Notify system with API context
                 global_event_dispatcher.dispatch_event(
@@ -94,14 +95,47 @@ class StateBridge:
                 print(f"Error initializing state management: {e}")
                 raise
 
+    def setup_event_listeners(self):
+        """Set up event listeners for cognitive state update"""
+        global_event_dispatcher.add_listener(
+            "cognitive:context_update",
+            lambda event: asyncio.create_task(self.update_cognitive_state(event))
+        )
+
+    async def update_cognitive_state(self, event: Event):
+        """Update cognitive state and broadcast API context."""
+        async with self.state_lock:
+            try:
+                # Update cognitive state
+                self.persistent_state.brain_state = event.data.get('raw_state', {})
+                await self.update_state()
+            except Exception as e:
+                print(f"Error updating cognitive state: {e}")
+                raise
+
+    def _validate_brain_state(self, state: Any) -> Optional[List[Dict[str, str]]]:
+        """Validate and normalize brain state structure."""
+        if not isinstance(state, list):
+            return None
+            
+        # Check each message has required structure
+        for msg in state:
+            if not isinstance(msg, dict):
+                return None
+            if 'role' not in msg or 'content' not in msg:
+                return None
+            if msg['role'] not in ['system', 'user', 'assistant']:
+                return None
+                
+        return state
+
     def _collect_session_state(self) -> Dict[str, Any]:
         """Collect complete session state from all internal modules."""
         return {
             'needs': self.internal.needs_manager.get_needs_state(),
             'behavior': self.internal.behavior_manager.get_behavior_state(),
             'emotions': self.internal.emotional_processor.get_emotional_state(),
-            'mood': self.internal.mood_synthesizer.get_mood_state(),
-            'memory': self.internal.memory_system.get_memory_state()
+            'mood': self.internal.mood_synthesizer.get_mood_state()
         }
 
     async def get_api_context(self) -> Dict[str, Any]:
@@ -198,9 +232,14 @@ class StateBridge:
             row = cursor.fetchone()
             if row:
                 timestamp, session_state, brain_state = row
+                brain_state = json.loads(brain_state)
+                
+                # Validate brain state structure
+                validated_brain_state = self._validate_brain_state(brain_state)
+                
                 return PersistentState(
                     session_state=json.loads(session_state),
-                    brain_state=json.loads(brain_state),
+                    brain_state=validated_brain_state or [], 
                     timestamp=datetime.fromisoformat(timestamp)
                 )
         finally:

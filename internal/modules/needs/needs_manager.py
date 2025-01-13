@@ -46,6 +46,36 @@ class NeedsManager:
             base_rate=Config.STAMINA_BASE_RATE
         )
 
+        self.setup_event_listeners()
+
+    def setup_event_listeners(self):
+        """
+        Sets up event listeners for needs-related events.
+        """
+        global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
+
+    def _handle_memory_echo(self, event):
+        """
+        Handles memory echo events by adjusting needs based on remembered states.
+        """
+        echo_data = event.data
+        if not echo_data or 'metadata' not in echo_data:
+            return
+            
+        remembered_needs = echo_data['metadata'].get('needs', {})
+        if not remembered_needs:
+            return
+            
+        # Process mental needs directly
+        for need_name in ['boredom', 'loneliness']:
+            if need_name in remembered_needs:
+                current = self.needs[need_name].value
+                remembered = remembered_needs[need_name]['current_value']
+                
+                # Calculate moderate shift toward remembered state
+                shift = (remembered - current) * echo_data.get('intensity', 0.3) * 0.4
+                self.alter_need(need_name, shift)
+
     def update_needs(self, needs_to_update=None):
         """
         Updates specified needs.

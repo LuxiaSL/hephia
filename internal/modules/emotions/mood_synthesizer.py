@@ -86,6 +86,9 @@ class MoodSynthesizer:
         global_event_dispatcher.add_listener("behavior:changed", self.update_mood)
         global_event_dispatcher.add_listener("emotion:new", self.update_mood)
 
+        global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
+        global_event_dispatcher.add_listener("cognitive:mood:meditation", self.process_meditation)
+
     def update_mood(self, event):
         # Retrieve current needs, emotions, and behavior from the context
         current_needs = self.context.get_current_needs()
@@ -122,8 +125,8 @@ class MoodSynthesizer:
 
         # emotion contribution
         if recent_emotions:
-            emotion_valence = sum(e.valence * e.intensity for e in recent_emotions) / len(recent_emotions)
-            emotion_arousal = sum(e.arousal * e.intensity for e in recent_emotions) / len(recent_emotions)
+            emotion_valence = sum(e['valence'] * e['intensity'] for e in recent_emotions) / len(recent_emotions)
+            emotion_arousal = sum(e['arousal'] * e['intensity'] for e in recent_emotions) / len(recent_emotions)
             weighted_valence += self.weights['emotions'] * emotion_valence
             weighted_arousal += self.weights['emotions'] * emotion_arousal
 
@@ -151,7 +154,7 @@ class MoodSynthesizer:
             weighted_arousal += self.weights['behavior'] * influence['arousal']
 
         # eventually below, calculate the memory influence based on sentiment analysis via cognitive processing of non-body memory
-        # when considering episodic memory; gradient scaling
+        # cognitive shaping of mood over time, indirectly via emotion influence & direct via mood influence
         # done, send it
         return Mood(
             valence=max(-1.0, min(1.0, weighted_valence)),
@@ -230,3 +233,109 @@ class MoodSynthesizer:
             arousal=mood_data.get("arousal", 0.0)
         )
         self.current_mood_name = mood_data.get("name", "neutral")
+
+    def _handle_memory_echo(self, event):
+        """
+        Handle memory echo effects on mood by creating a subtle resonance influence
+        based on the remembered emotional state.
+        """
+        echo_data = event.data
+        if not echo_data or 'metadata' not in echo_data:
+            return
+
+        metadata = echo_data['metadata']
+        if not metadata.get('emotional'):
+            return
+
+        # Get the primary emotional state from the echo
+        primary_emotion = metadata['emotional'][0]
+
+        # Scale echo influence by the echo intensity and mood system weights
+        echo_intensity = echo_data.get('intensity', 0.3) * 0.4  # Reduced influence vs direct emotions
+        echo_valence = primary_emotion['valence'] * echo_intensity
+        echo_arousal = primary_emotion['arousal'] * echo_intensity
+
+        # Create temporary mood nudge from echo
+        echo_mood = Mood(
+            valence=self.current_mood.valence + (echo_valence * self.weights['emotions']),
+            arousal=self.current_mood.arousal + (echo_arousal * self.weights['emotions'])  
+        )
+
+        # Update mood if the echo influence is significant
+        if abs(echo_mood.valence - self.current_mood.valence) > 0.1 or \
+           abs(echo_mood.arousal - self.current_mood.arousal) > 0.1:
+            
+            # Clamp values
+            echo_mood.valence = max(-1.0, min(1.0, echo_mood.valence))
+            echo_mood.arousal = max(-1.0, min(1.0, echo_mood.arousal))
+            
+            # Apply the echo-influenced mood
+            old_name = self.current_mood_name
+            self.current_mood = echo_mood
+            new_name = self._map_mood_to_name(echo_mood)
+            
+            if new_name != old_name:
+                self.current_mood_name = new_name
+                global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
+                    "old_name": old_name,
+                    "new_name": new_name,
+                    "mood_object": echo_mood,
+                    "source": "memory_echo"
+                }))
+
+    def process_meditation(self, event):
+        """
+        Process meditation effects on mood by creating a directed mood shift based on 
+        meditation type and intensity.
+        """
+        try:
+            meditation_data = event.data
+            meditation_type = meditation_data.get('type')
+            intensity = meditation_data.get('intensity', 0.5)
+            duration = meditation_data.get('duration', 1)
+
+            # Map meditation types to mood influences
+            meditation_influences = {
+                'elevation': {'valence': 0.3, 'arousal': 0.2},
+                'calming': {'valence': 0.1, 'arousal': -0.4},
+                'deepening': {'valence': -0.2, 'arousal': -0.3},
+                'focusing': {'valence': 0.2, 'arousal': 0.3},
+                'activation': {'valence': 0.3, 'arousal': 0.4}
+            }
+
+            if meditation_type in meditation_influences:
+                influence = meditation_influences[meditation_type]
+                
+                # Scale influence by intensity and duration
+                scaled_valence = influence['valence'] * intensity * (1 + 0.2 * duration)
+                scaled_arousal = influence['arousal'] * intensity * (1 + 0.2 * duration)
+                
+                # Create meditation-influenced mood
+                meditation_mood = Mood(
+                    valence=self.current_mood.valence + (scaled_valence * self.weights['emotions']),
+                    arousal=self.current_mood.arousal + (scaled_arousal * self.weights['emotions'])
+                )
+                
+                # Clamp values
+                meditation_mood.valence = max(-1.0, min(1.0, meditation_mood.valence))
+                meditation_mood.arousal = max(-1.0, min(1.0, meditation_mood.arousal))
+                
+                # Update mood if change is significant
+                if abs(meditation_mood.valence - self.current_mood.valence) > 0.1 or \
+                   abs(meditation_mood.arousal - self.current_mood.arousal) > 0.1:
+                    
+                    old_name = self.current_mood_name
+                    self.current_mood = meditation_mood
+                    new_name = self._map_mood_to_name(meditation_mood)
+                    
+                    if new_name != old_name:
+                        self.current_mood_name = new_name
+                        global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
+                            "old_name": old_name,
+                            "new_name": new_name,
+                            "mood_object": meditation_mood,
+                            "source": "meditation"
+                        }))
+
+        except Exception as e:
+            print(f"Error processing meditation effect: {str(e)}")

@@ -124,6 +124,35 @@ class BehaviorManager:
         global_event_dispatcher.add_listener("mood:changed", self.determine_behavior)
         global_event_dispatcher.add_listener("emotion:new", self.determine_behavior)
 
+        global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
+
+    def _handle_memory_echo(self, event):
+        """
+        Handle memory echo effects on behavior by creating a light behavioral resonance
+        based on remembered states.
+        """
+        echo_data = event.data
+        if not echo_data or 'metadata' not in echo_data:
+            return
+
+        # Extract remembered behavior state if present
+        remembered_behavior = echo_data['metadata'].get('behavior', {})
+        if not remembered_behavior:
+            return
+
+        # Calculate echo intensity factoring system-wide echo intensity
+        behavior_intensity = echo_data.get('intensity', 0.3) * 0.4  # Reduced impact vs direct needs/emotions
+        
+        # If behavior matches current, temporarily lock it
+        if remembered_behavior.get('name') == self.current_behavior.name:
+            # Brief lock to reinforce behavior
+            lock_duration = 1.5 * behavior_intensity
+            self.locked_until = time.time() + lock_duration
+            self.locked_by = 'memory_echo'
+        else:
+            # Force behavior recheck with current context
+            self.determine_behavior(event)
+
     def update(self):
         """
         Updates the current behavior.
@@ -218,7 +247,6 @@ class BehaviorManager:
         
         current = self.current_behavior.name
         pattern = self.BEHAVIOR_PATTERNS[current]
-
 
         # Step 1: Check force_threshold conditions
         for behavior, data in self.BEHAVIOR_PATTERNS.items():

@@ -57,7 +57,8 @@ class HephiaServer:
         self.exo_processor = ExoProcessor(
             api_manager=self.api,
             state_bridge=self.state_bridge,
-            environment_registry=self.environment_registry
+            environment_registry=self.environment_registry,
+            internal=self.internal
         )
 
         self.setup_routes()

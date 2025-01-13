@@ -174,18 +174,16 @@ class EmotionalProcessor:
         }
     }
 
-    def __init__(self, internal_context, cognitive_bridge, memory_system):
+    def __init__(self, internal_context, cognitive_bridge):
         """
         Initializes the EmotionalProcessor with context access and processing capabilities.
 
         Args:
             internal_context (InternalContext): internal state access
             cognitive_bridge (CognitiveBridge): active emotional mediation & logging
-            memory_system (MemorySystem): access to body memory 
         """
         self.internal_context = internal_context
         self.cognitive_bridge = cognitive_bridge
-        self.memory_system = memory_system
         self.current_stimulus = EmotionalStimulus()
         self.setup_event_listeners()
 
@@ -195,6 +193,9 @@ class EmotionalProcessor:
         global_event_dispatcher.add_listener("action:completed", self.process_event)
         global_event_dispatcher.add_listener("behavior:changed", self.process_event)
 
+        global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
+        global_event_dispatcher.add_listener("cognitive:emotional:meditation", self.process_meditation)
+
     def update(self):
         """Updates the emotional state when ticked."""
         self.current_stimulus.update(
@@ -203,7 +204,7 @@ class EmotionalProcessor:
         )
 
         # Dispatch event if state has changed significantly
-        # probably need to do strict testing to determine what "significant" means. 
+        # probably need to do strict testing to determine what "significant" means. (2025 luxia: oh if only you knew...)
         # number testing here will be important; gonna need users and people to play around with everything to give me feedback.
         if (abs(self.current_stimulus.valence) > 0.01 or
             abs(self.current_stimulus.arousal) > 0.01 or
@@ -223,7 +224,6 @@ class EmotionalProcessor:
             source_type='aggregate'
         )
 
-        self.memory_system.body_memory.log(aggregate_vector)
         global_event_dispatcher.dispatch_event_sync(Event("emotion:updated", {
             "emotion": aggregate_vector
         }))
@@ -261,14 +261,32 @@ class EmotionalProcessor:
         # Add initial vector to stimulus
         self.current_stimulus.add_vector(initial_vector)
 
-        # Log and dispatch the initial vector
-        self.memory_system.body_memory.log(initial_vector)
+        # Dispatch the initial vector
         global_event_dispatcher.dispatch_event_sync(Event("emotion:new", {
             "emotion": initial_vector
         }))
 
         # Process sequential influences on the same vector
         self._process_influences(initial_vector)
+
+        # After processing all influences, dispatch final aggregate state
+        # Recalculate overall emotional state 
+        category = self._categorize_stimulus(self.current_stimulus)
+        emotion_name = self._get_emotion_name_by_category(category)
+        
+        final_state = EmotionalVector(
+            valence=self.current_stimulus.valence,
+            arousal=self.current_stimulus.arousal,
+            intensity=self.current_stimulus.intensity,
+            name=emotion_name,
+            source_type='aggregate',
+            source_data={'initial_trigger': initial_vector.source_data}
+        )
+
+        global_event_dispatcher.dispatch_event_sync(Event("emotion:finished", {
+            "emotion": final_state,
+            "initial": initial_vector
+        }))
 
     
     def _process_influences(self, vector):
@@ -307,7 +325,6 @@ class EmotionalProcessor:
                
             # Add to stimulus and log
             self.current_stimulus.add_vector(influenced_vector)
-            self.memory_system.body_memory.log(influenced_vector)
             vector = influenced_vector  # Continue with influenced vector
 
         # Apply behavior influence similarly
@@ -333,20 +350,12 @@ class EmotionalProcessor:
                influenced_vector.name = self._get_emotion_name_by_category(new_category)
                
             self.current_stimulus.add_vector(influenced_vector)
-            self.memory_system.body_memory.log(influenced_vector)
 
-        # Cognitive processing placeholder
-        # Note: Will integrate with future cognitive module for higher-level processing,
-        # emotion regulation, and memory formation
-        influenced_vector = self.cognitive_bridge.mediate_emotion(vector)
-        if influenced_vector:
-            new_category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
-            if new_category != category:
-               influenced_vector.name = self._get_emotion_name_by_category(new_category)
-            # Add the cognitively influenced vector to the current stimulus
-            self.current_stimulus.add_vector(influenced_vector)
-            # Log the influenced vector in the body memory
-            self.memory_system.body_memory.log(influenced_vector)
+        
+        # apply memory content influence
+        # to come: query across memory nodes for average network emotional resonance to influence vector by
+
+        # just as well, the direct cognitive influence via mediate_emotion and one_turn call. could be done via an event which then gets listened to here and files back in after.
 
     def _calculate_relative_influence(self, base_vector, influence_valence, influence_arousal, influence_type):
         """
@@ -452,13 +461,30 @@ class EmotionalProcessor:
         return 0.1  # Default minimal intensity
 
     def _calculate_dampening(self, category):
-        """Calculates dampening based on recent similar emotions."""
+        """
+        Calculates dampening based on recent similar emotions.
+        
+        Higher counts of similar recent emotions result in stronger dampening,
+        simulating emotional fatigue/adaptation.
+        
+        Args:
+            category (str): Emotional category to check for repetition
+            
+        Returns:
+            float: Dampening factor between 0.0 and 1.0
+        """
         recent_emotions = self.internal_context.get_recent_emotions()
         similar_count = sum(
-            1 for e in recent_emotions
-            if self._categorize_vector(e.valence, e.arousal) == category
+            1 for emotion in recent_emotions
+            if emotion and 'valence' in emotion and 'arousal' in emotion and
+            self._categorize_vector(
+                float(emotion['valence']),
+                float(emotion['arousal'])
+            ) == category
         )
-        return 1.0 / (1.0 + similar_count * 0.2)  # Example dampening formula
+        
+        # Same dampening formula, validated with strong emotions
+        return 1.0 / (1.0 + similar_count * 0.2)  # Returns 1.0 to 0.2 range
 
     def _get_mood_influence_vector(self):
         """Generates a vector representing the mood influence."""
@@ -556,3 +582,98 @@ class EmotionalProcessor:
             
             self.current_stimulus.add_vector(vector)
 
+    def _handle_memory_echo(self, event):
+        """
+        Processes memory echo events into emotional influences.
+        Memory echoes are resonance effects from recalled emotional states.
+        
+        Args:
+            event (Event): The memory echo event containing emotional metadata
+        """
+        echo_data = event.data
+        if not echo_data or 'metadata' not in echo_data:
+            return
+            
+        # Extract core emotional data from echo
+        metadata = echo_data['metadata']
+        intensity = echo_data.get('intensity', 0.3)  # Default moderate intensity if not specified
+        
+        # Process the primary emotional state (first vector)
+        if 'emotional' in metadata and metadata['emotional']:
+            primary_emotion = metadata['emotional'][0]
+            
+            # Create echo vector from primary emotion
+            echo_vector = EmotionalVector(
+                valence=primary_emotion['valence'],
+                arousal=primary_emotion['arousal'],
+                intensity=intensity * primary_emotion.get('intensity', 1.0),
+                source_type='memory_echo',
+                source_data={'echo_source': echo_data.get('source_node')},
+                name=primary_emotion.get('name', 'echo')
+            )
+            
+            # Apply echo-specific dampening
+            category = self._categorize_vector(echo_vector.valence, echo_vector.arousal)
+            echo_dampening = self._calculate_dampening(category) * 0.7  # Echo specific reduction
+            echo_vector.intensity *= echo_dampening
+            
+            # Add echo vector to current stimulus
+            self.current_stimulus.add_vector(echo_vector)
+            
+            # Log and dispatch the echo vector
+            global_event_dispatcher.dispatch_event_sync(Event("emotion:echo", {
+                "emotion": echo_vector,
+                "source": echo_data.get('source_node')
+            }))
+            
+            # Process influences on echo vector
+            self._process_influences(echo_vector)
+
+    def process_meditation(self, event):
+        """Processes meditation events for emotional influence."""
+        try:
+            meditation_data = event.data
+            meditation_type = meditation_data.get('type')
+            intensity = meditation_data.get('intensity', 0.5)
+            duration = meditation_data.get('duration', 1)
+
+            # Map meditation types to emotional vectors
+            meditation_mappings = {
+                'calming': {'valence': 0.3, 'arousal': -0.6, 'name': 'peaceful'},
+                'focusing': {'valence': 0.2, 'arousal': 0.4, 'name': 'focused'},
+                'satisfaction': {'valence': 0.4, 'arousal': -0.2, 'name': 'content'},
+                'activation': {'valence': 0.3, 'arousal': 0.5, 'name': 'energized'}
+            }
+
+            if meditation_type in meditation_mappings:
+                mapping = meditation_mappings[meditation_type]
+                
+                # Create meditation vector
+                meditation_vector = EmotionalVector(
+                    valence=mapping['valence'],
+                    arousal=mapping['arousal'],
+                    intensity=intensity * (1 + 0.2 * duration),  # Intensity increases with duration
+                    source_type='meditation',
+                    source_data={'type': meditation_type, 'duration': duration},
+                    name=mapping['name']
+                )
+
+                # Apply meditation-specific dampening
+                category = self._categorize_vector(meditation_vector.valence, meditation_vector.arousal)
+                meditation_dampening = self._calculate_dampening(category) * 0.8
+                meditation_vector.intensity *= meditation_dampening
+
+                # Add meditation vector to current stimulus
+                self.current_stimulus.add_vector(meditation_vector)
+
+                # Log and dispatch meditation effect
+                global_event_dispatcher.dispatch_event_sync(Event("emotion:meditation", {
+                    "emotion": meditation_vector,
+                    "duration": duration
+                }))
+
+                # Process influences on meditation vector
+                self._process_influences(meditation_vector)
+
+        except Exception as e:
+            print(f"Error processing meditation: {str(e)}")

@@ -121,3 +121,81 @@ class BrainLogger:
             logger.debug(f"Exo loop turn {status}: {reason}")
         else:
             logger.debug(f"Exo loop turn {status}")
+
+class MemoryLogger:
+    """Logger for memory system operations."""
+
+    @staticmethod
+    def log_error(message: str):
+        self.error(message)
+
+    @staticmethod
+    def error(message: str):
+        """Log error-level memory system events."""
+        logger = logging.getLogger('hephia.memory')
+        logger.error(f"Memory Error: {message}")
+
+    @staticmethod
+    def warning(message: str):
+        """Log warning-level memory system events."""
+        logger = logging.getLogger('hephia.memory')
+        logger.warning(f"Memory Warning: {message}")
+
+    @staticmethod
+    def debug(message: str):
+        """Log debug-level memory system events."""
+        logger = logging.getLogger('hephia.memory')
+        logger.debug(f"Memory Debug: {message}")
+
+    @staticmethod
+    def info(message: str):
+        """Log info-level memory system events."""
+        logger = logging.getLogger('hephia.memory')
+        logger.info(f"Memory Info: {message}")
+
+    @staticmethod
+    def log_memory_formation(memory_type: str, memory_id: str, details: Dict[str, Any]):
+        """Log the formation of a new memory node."""
+        logger = logging.getLogger('hephia.memory')
+        logger.info(
+            f"Memory Formation ({memory_type}):\n"
+            f"  Memory ID: {memory_id}\n"
+            f"  Details: {json.dumps(details, indent=2)}"
+        )
+
+    @staticmethod
+    def log_memory_retrieval(memory_type: str, memory_id: str, success: bool, query: Optional[str] = None):
+        """Log retrieval attempts of a memory node."""
+        logger = logging.getLogger('hephia.memory')
+        if success:
+            logger.debug(
+                f"Memory Retrieval Success ({memory_type}):\n"
+                f"  Memory ID: {memory_id}\n"
+                f"  Query: {query}"
+            )
+        else:
+            logger.warning(
+                f"Memory Retrieval Failure ({memory_type}):\n"
+                f"  Memory ID: {memory_id}\n"
+                f"  Query: {query}"
+            )
+
+    @staticmethod
+    def log_memory_decay(memory_type: str, memory_id: str, new_strength: float):
+        """Log the decay of a memory node."""
+        logger = logging.getLogger('hephia.memory')
+        logger.info(
+            f"Memory Decay ({memory_type}):\n"
+            f"  Memory ID: {memory_id}\n"
+            f"  New Strength: {new_strength}"
+        )
+
+    @staticmethod
+    def log_memory_merge(memory_type: str, from_memory_id: str, to_memory_id: str):
+        """Log the merging of two memory nodes."""
+        logger = logging.getLogger('hephia.memory')
+        logger.info(
+            f"Memory Merge ({memory_type}):\n"
+            f"  From Memory ID: {from_memory_id}\n"
+            f"  To Memory ID: {to_memory_id}"
+        )

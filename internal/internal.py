@@ -15,7 +15,7 @@ from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 from internal.modules.emotions.mood_synthesizer import MoodSynthesizer
 from internal.modules.memory.memory_system import MemorySystem
 from event_dispatcher import global_event_dispatcher, Event
-from loggers import InternalLogger  
+from loggers import InternalLogger, MemoryLogger  
 
 
 class Internal:
@@ -34,13 +34,16 @@ class Internal:
         self.action_manager = ActionManager(self.needs_manager)
 
         # Initialize cognitive and emotional modules
-        self.memory_system = MemorySystem()
+        self.memory_system = MemorySystem(self.context)
         self.mood_synthesizer = MoodSynthesizer(self.context)
-        self.cognitive_bridge = CognitiveBridge()
+        self.cognitive_bridge = CognitiveBridge(
+            self.context, 
+            self.memory_system.cognitive_memory, 
+            self.memory_system.body_memory
+        )
         self.emotional_processor = EmotionalProcessor(
             self.context,
-            self.cognitive_bridge,
-            self.memory_system
+            self.cognitive_bridge
         )
 
         # Set up event listeners
@@ -57,6 +60,7 @@ class Internal:
         global_event_dispatcher.add_listener("action:performed", self.on_action_performed)
         global_event_dispatcher.add_listener("mood:changed", self.on_mood_change)
         global_event_dispatcher.add_listener("emotion:new", self.on_new_emotion)
+        global_event_dispatcher.add_listener("memory:node_created", self.on_node_created)
 
     async def restore_state(self, state_data: dict):
         """
@@ -68,7 +72,6 @@ class Internal:
         self.behavior_manager.set_behavior_state(state_data.get('behavior', {}))
         self.emotional_processor.set_emotional_state(state_data.get('emotions', {}))
         self.mood_synthesizer.set_mood_state(state_data.get('mood', {}))
-        self.memory_system.set_memory_state(state_data.get('memory', {}))
 
     async def shake(self):
         """
@@ -79,6 +82,9 @@ class Internal:
         
         # Process emotional state which will absorb need events
         await self.update_emotions()
+
+        # and now memories
+        await self.update_memories()
         
         # Force behavior system to reevaluate with new need states
         current_behavior = self.behavior_manager.current_behavior.name
@@ -117,6 +123,10 @@ class Internal:
     async def update_emotions(self):
         if self.is_active:
             self.emotional_processor.update()
+    
+    async def update_memories(self):
+        if self.is_active:
+            self.memory_system.update()
 
     def on_need_change(self, event):
         """Handle need change events."""
@@ -167,6 +177,12 @@ class Internal:
             'none',
             f"{emotion.name} (v:{emotion.valence:.2f}, a:{emotion.arousal:.2f})"
         )
+
+    def on_node_created(self, event):
+        """Handle new memory node events."""
+        if not self.is_active:
+            return
+        MemoryLogger.info(f"Memory node created: {event.data['node'].node_id}")
 
     def perform_action(self, action_name: str):
         """Perform a internal action."""

@@ -30,6 +30,14 @@ class ExoLoopFormatter(logging.Formatter):
         else:
             return f"{timestamp} - {msg}"
 
+class MemoryFormatter(logging.Formatter):
+    """Formatter for memory system events."""
+    
+    def format(self, record):
+        timestamp = self.formatTime(record)
+        msg = record.getMessage()
+        return f"[{timestamp}] {record.levelname:8} MEMORY | {msg}"
+
 class ConsoleFormatter(logging.Formatter):
     """Minimal formatter for console output."""
     

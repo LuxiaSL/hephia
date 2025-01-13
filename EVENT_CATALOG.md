@@ -2,6 +2,8 @@
 
 This document lists all events used in the Hephia project.
 
+(horribly out of date: need to use this idea in the future, but don't trust this file to be whole)
+
 ## Needs Module
 
 ### need:changed
@@ -90,22 +92,3 @@ This document lists all events used in the Hephia project.
 - **Data**:
   - `emotion`: Emotion
 - **Description**: Dispatched when a significant new emotion is generated.
-
-## Pet Module
-
-### pet:updated
-- **Source**: Pet (pet/pet.py)
-- **Data**:
-  - `pet`: Pet
-- **Description**: Dispatched when the pet's state is updated.
-
-### pet:emotional_state_changed
-- **Source**: Pet (pet/pet.py)
-- **Data**:
-  - `old_state`: str
-  - `new_state`: str
-- **Description**: Dispatched when the pet's emotional state changes.
-
-### pet:shutdown
-- **Source**: Pet (pet/pet.py)
-- **Description**: Dispatched when the pet is shutting down.

@@ -55,7 +55,7 @@ class Config:
         "oldsonnet": ModelConfig(
             provider=ProviderType.ANTHROPIC,
             model_id="claude-3-5-sonnet-20240620",
-            max_tokens=400,
+            max_tokens=600,
             description="Claude 3.5 Sonnet via Anthropic"
         ),
         "opus": ModelConfig(
@@ -95,18 +95,31 @@ class Config:
             temperature=0.8,
             description="Custom Hephia Model via OpenPipe"
         ),
-        "llama-70b": ModelConfig(
+        "llama-70b-instruct": ModelConfig(
             provider=ProviderType.OPENROUTER,
             model_id="meta-llama/llama-3.1-70b-instruct",
             max_tokens=250,
-            description="LLaMA 3.1 70B via OpenRouter"
+            description="LLaMA 3.1 70B Instruct via OpenRouter"
+        ),
+        "llama-405b-instruct": ModelConfig(
+            provider=ProviderType.OPENROUTER,
+            model_id="meta-llama/llama-3.1-405b-instruct",
+            max_tokens=550,
+            description="LLaMA 3.1 405B Instruct via OpenRouter"
+        ),
+        "llama-405b": ModelConfig(
+            provider=ProviderType.OPENROUTER,
+            model_id="meta-llama/llama-3.1-405b",
+            max_tokens=550,
+            description="LLaMA 3.1 405B Base via OpenRouter"
         ),
     }
 
     # Core LLM configuration - these will be overridden by env vars if present
-    COGNITIVE_MODEL = "openpipe"
-    VALIDATION_MODEL = "gpt3"
-    FALLBACK_MODEL = "gpt3"
+    COGNITIVE_MODEL = "newsonnet"
+    VALIDATION_MODEL = "mistral"
+    SUMMARY_MODEL = "haiku"
+    FALLBACK_MODEL = "opus"
 
     @classmethod
     def get_cognitive_model(cls) -> str:
@@ -117,6 +130,11 @@ class Config:
     def get_validation_model(cls) -> str:
         """Get the validation model from env or default."""
         return os.getenv("VALIDATION_MODEL", cls.VALIDATION_MODEL)
+
+    @classmethod
+    def get_summary_model(cls) -> str:
+        """Get the summary model from env or default."""
+        return os.getenv("SUMMARY_MODEL", cls.SUMMARY_MODEL)
     
     @classmethod
     def get_fallback_model(cls) -> str:
