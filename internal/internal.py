@@ -55,12 +55,14 @@ class Internal:
 
     def setup_event_listeners(self):
         """Set up event listeners for internal systems."""
-        global_event_dispatcher.add_listener("need:changed", self.on_need_change)
+        # silence !
+        #global_event_dispatcher.add_listener("need:changed", self.on_need_change)
         global_event_dispatcher.add_listener("behavior:changed", self.on_behavior_change)
         global_event_dispatcher.add_listener("action:performed", self.on_action_performed)
         global_event_dispatcher.add_listener("mood:changed", self.on_mood_change)
         global_event_dispatcher.add_listener("emotion:new", self.on_new_emotion)
         global_event_dispatcher.add_listener("memory:node_created", self.on_node_created)
+        #global_event_dispatcher.add_listener("cognitive:context_update", self.on_cognitive_update)
 
     async def restore_state(self, state_data: dict):
         """
@@ -144,8 +146,8 @@ class Internal:
             return
         InternalLogger.log_state_change(
             'behavior',
-            event.data.get('old_behavior', 'unknown'),
-            event.data['new_behavior']
+            event.data.get('old_name', 'unknown'),
+            event.data['new_name']
         )
 
     def on_action_performed(self, event):
@@ -182,7 +184,23 @@ class Internal:
         """Handle new memory node events."""
         if not self.is_active:
             return
-        MemoryLogger.info(f"Memory node created: {event.data['node'].node_id}")
+
+        node_id = event.data['node_id']
+        node_type = event.data['node_type']
+
+        if node_type == 'cognitive':
+            text_content = event.data['content']
+            # For cognitive nodes, log both ID and content
+            MemoryLogger.info(f"Cognitive memory node created: {node_id}")
+            MemoryLogger.info(f"Content: {text_content}")
+        else:
+            # For body nodes, just log the ID 
+            MemoryLogger.info(f"Body memory node created: {node_id}")
+
+    def on_cognitive_update(self, event):
+        if not self.is_active:
+            return
+        print(f"Received cognitive update event: {event.data}")
 
     def perform_action(self, action_name: str):
         """Perform a internal action."""

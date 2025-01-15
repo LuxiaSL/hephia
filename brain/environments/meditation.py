@@ -19,7 +19,7 @@ from brain.commands.model import (
 from .base_environment import BaseEnvironment
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 
-class MeditationEnvironment(BaseEnvironment):
+class MeditateEnvironment(BaseEnvironment):
     """
     Environment for meditation and focused internal state influence.
     Provides commands for eliciting specific states and deepening awareness.

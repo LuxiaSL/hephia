@@ -177,8 +177,8 @@ class BehaviorManager:
         self.current_behavior.start()
 
         global_event_dispatcher.dispatch_event_sync(Event("behavior:changed", {
-            "old_behavior": old_behavior.name if old_behavior else None,
-            "new_behavior": new_behavior_name
+            "old_name": old_behavior.name if old_behavior else None,
+            "new_name": new_behavior_name
         }))
 
     def is_locked(self):

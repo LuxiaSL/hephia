@@ -18,7 +18,7 @@ from brain.commands.model import (
 from .base_environment import BaseEnvironment
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 
-class ReflectionEnvironment(BaseEnvironment):
+class ReflectEnvironment(BaseEnvironment):
     """
     Environment for reflecting on and exploring memories.
     Provides commands for memory search, recent recall, and connection traversal.

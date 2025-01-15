@@ -58,7 +58,7 @@ class ExoProcessor:
             self.conversation_history = initial_cognitive_state
             return
 
-        initial_internal_state = await self.state_bridge.get_api_context()
+        initial_internal_state = self.state_bridge.get_api_context()
         formatted_state = TerminalFormatter.format_context_summary(initial_internal_state)
         
         welcome_message = {
@@ -122,39 +122,48 @@ class ExoProcessor:
             async with asyncio.timeout(self.llm_timeout.total_seconds()):
                 # Get LLM response
                 llm_response = await self._get_llm_response()
-                BrainLogger.log_llm_exchange(self.conversation_history, llm_response)
 
+                print(llm_response)
+                print("LUXIA: got response")
                 # Process into command
                 command, error = await self.command_preprocessor.preprocess_command(
                     llm_response,
                     self.environment_registry.get_available_commands()
                 )
 
-                BrainLogger.log_command_processing(
-                    llm_response,
-                    command.raw_input if command else None,
-                    str(error) if error else None
-                )
+                print("LUXIA: got processed command result")
+                if command:
+                    print(command)
+                if error:
+                    print(error)
 
                 # Handle preprocessing errors
-                if not command:
+                if not command or error:
+                    print("LUXIA: crashed out")
                     error_message = TerminalFormatter.format_error(error)
                     self._add_to_history("assistant", llm_response)
                     self._add_to_history("user", error_message)
                     return error_message
                 
-                self._add_to_history("assistant", llm_response)
-                
                 # Execute command
-                current_state = await self.state_bridge.get_api_context()
+                print("LUXIA: getting current state")
+                current_state = self.state_bridge.get_api_context()
+                print("LUXIA: executing command")
                 result = await self._execute_command(command, current_state)
+                print("LUXIA: command done")
+                if not result or not result.success:
+                    print("LUXIA: command failed:")
+                    print("result: ", result)
+                    print("command ", command)
+                    return "died"
 
-                # Format response
+                # Command succeeded, format response and continue processing
                 formatted_response = TerminalFormatter.format_command_result(
                     result,
                     current_state
                 )
 
+                print("LUXIA: getting memories")
                 # Retrieve memories for next turn
                 memories = await self._retrieve_related_memories(
                     llm_response=llm_response,
@@ -163,16 +172,21 @@ class ExoProcessor:
                 )
 
                 if memories:
+                    print("memories: ", memories)
                     formatted_response = TerminalFormatter.format_memories(memories, formatted_response)
 
                 # Update conversation
+                self._add_to_history("assistant", llm_response)
                 self._add_to_history("user", formatted_response)
+                print(formatted_response)
                 self.last_successful_turn = datetime.now()
 
                 # Internal significance check
+                print("LUXIA: checking significance")
                 await self.check_significance(command, llm_response, result)
 
                 # Announce cognitive context
+                print("LUXIA: announcing cognitive context")
                 await self.announce_cognitive_context()
 
                 BrainLogger.log_turn_end(True)
@@ -324,11 +338,12 @@ Keep focus on key points and changes. Be concise and clear. Think of summarizing
         Dispatch event containing raw conversation history and summary
         for state bridge and internal systems to process.
         """
+        processed_state = await self._summarize_conversation()
         global_event_dispatcher.dispatch_event(Event(
             "cognitive:context_update",
             {
                 "raw_state": self.conversation_history,
-                "processed_state": await self._summarize_conversation()
+                "processed_state": processed_state
             }
         ))
 
@@ -356,8 +371,6 @@ Keep focus on key points and changes. Be concise and clear. Think of summarizing
         try:
             # Format query from command result and LLM response
             query_text = f"{llm_response}\n{command_result.message}"
-            if command_result.state_changes:
-                query_text += f"\nState Changes: {command_result.state_changes}"
                 
             # Use cognitive bridge to retrieve memories
             memories = await self.internal.cognitive_bridge.retrieve_memories(
@@ -546,7 +559,6 @@ Return only the unified memory text, no extra commentary."""
             if (self.last_environment and 
                 current_command.environment != self.last_environment and
                 current_command.environment not in {'help', 'version'}):
-                
                 env_history = self._get_environment_session_history(self.last_environment)
                 if env_history and len(env_history) > 2:
                     session_significance = await self._evaluate_session_significance(
@@ -588,18 +600,22 @@ Return only the unified memory text, no extra commentary."""
         """
         Evaluate significance of current interaction using multiple weighted factors.
         Returns True if the interaction is significant enough for memory formation.
+        
+        Factors considered:
+        - Command complexity and type (0.3)
+        - Response characteristics (0.3) 
+        - Environment context (0.2)
+        - Result impact (0.2)
+        
+        Future improvements:
+        - Add retrieval-based relevance check
+        - Consider emotional content analysis
+        - Track state changes per environment
+        - Implement adaptive thresholds based on interaction patterns
         """
         significance_score = 0.0
-        
-        # 1. State Impact (0.4 max)
-        if command_result.state_changes:
-            state_score = 0.4
-            # Bonus for multiple state changes
-            if len(command_result.state_changes) > 1:
-                state_score += min(0.1, len(command_result.state_changes) * 0.02)
-            significance_score += state_score
 
-        # 2. Command Analysis (0.3 max)
+        # 1. Command Analysis (0.3 max)
         command_score = 0.0
         # Action commands indicate active decisions/changes
         if command.action not in ['help', 'version', 'list']:
@@ -609,7 +625,7 @@ Return only the unified memory text, no extra commentary."""
             command_score += min(0.1, len(command.parameters) * 0.05)
         significance_score += command_score
 
-        # 3. Response Impact (0.3 max)
+        # 2. Response Impact (0.3 max)
         response_score = 0.0
         # Length indicates complexity
         words = llm_response.split()
@@ -618,9 +634,26 @@ Return only the unified memory text, no extra commentary."""
         if not command_result.success:
             response_score += 0.15  # Failed commands might be worth remembering
         significance_score += response_score
+
+        # 3. Environment Context (0.2 max)
+        env_score = 0.0
+        # Non-global commands are more likely to be significant
+        if command.environment:
+            env_score += 0.1
+        # Commands with suggested follow-ups indicate ongoing processes
+        if command_result.suggested_commands:
+            env_score += min(0.1, len(command_result.suggested_commands) * 0.02)
+        significance_score += env_score
+
+        # 4. Result Impact (0.2 max)
+        result_score = 0.0
+        # Longer result messages may indicate more significant changes (if not a help)
+        result_words = command_result.message.split()
+        if command.action not in ['help', 'version', 'list']:
+            result_score += min(0.2, len(result_words) / 25)
+        significance_score += result_score
         
-        # Return true if meets threshold
-        return significance_score > 0.5
+        return significance_score > Config.MEMORY_SIGNIFICANCE_THRESHOLD
 
     async def _evaluate_session_significance(
         self,
@@ -638,7 +671,6 @@ Return only the unified memory text, no extra commentary."""
             
         # 2. Command Pattern Analysis
         command_patterns = {}
-        state_changes = 0
         successful_commands = 0
         
         for msg in history:
@@ -648,8 +680,6 @@ Return only the unified memory text, no extra commentary."""
                 command_patterns[command.get("action")] = command_patterns.get(command.get("action"), 0) + 1
                 
                 # Track impacts
-                if msg.get("state_changes"):
-                    state_changes += 1
                 if msg.get("success", False):
                     successful_commands += 1
         
@@ -658,12 +688,12 @@ Return only the unified memory text, no extra commentary."""
         command_variety = len(command_patterns) > 1
         
         # Check for meaningful progression
-        had_impact = state_changes > 0
+        # reimplement impact when we introduce state shifts/responses in accordance with each environment 
+        #had_impact = state_changes > 0
         success_rate = successful_commands / len(interactions) if interactions else 0
         
-        # Session is significant if it shows variety, impact, and reasonable success
+        # Session is significant if it shows variety, and reasonable success
         return (command_variety and 
-                had_impact and 
                 success_rate > 0.5)
 
     async def _trigger_environment_memory(
@@ -756,6 +786,9 @@ Incorporate any state changes, emotional context, or important decisions made as
         except LLMError as e:
             error_msg = f"Significant memory formation failed: {str(e)}"
             BrainLogger.error(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error in memory formation: {str(e)}"
+            BrainLogger.error(error_msg)
 
     def _get_environment_session_history(self, environment: str) -> List[Dict]:
         """Get conversation history since entering specific environment."""
@@ -813,7 +846,7 @@ Focus on key information, dependencies, and cognitive relevance."""
 
         try:
             # Get current state context
-            current_state = await self.state_bridge.get_api_context()
+            current_state = self.state_bridge.get_api_context()
             state_summary = TerminalFormatter.format_context_summary(current_state)
 
             # Build the contextualized prompt

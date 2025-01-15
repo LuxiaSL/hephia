@@ -138,12 +138,11 @@ class StateBridge:
             'mood': self.internal.mood_synthesizer.get_mood_state()
         }
 
-    async def get_api_context(self) -> Dict[str, Any]:
+    def get_api_context(self) -> Dict[str, Any]:
         """Get current processed state for API consumption."""
-        async with self.state_lock:
-            if self.internal:
-                return self.internal_context.get_api_context()
-            return {}
+        if self.internal:
+            return self.internal_context.get_api_context()
+        return {}
 
     async def update_state(self):
         """Update both persistent state and broadcast API context."""

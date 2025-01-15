@@ -35,6 +35,10 @@ from loggers.loggers import MemoryLogger
 from typing import Dict, List, Any, Optional, Tuple, Union
 from contextlib import contextmanager
 from sentence_transformers import SentenceTransformer
+from collections import defaultdict
+from nltk import pos_tag, word_tokenize, ne_chunk
+from nltk.tree import Tree
+import numpy as np
 
 from event_dispatcher import Event, global_event_dispatcher
 from .cognitive_memory_node import CognitiveMemoryNode
@@ -139,6 +143,7 @@ class CognitiveMemory:
                     link_type TEXT,
                     created_at REAL,
                     metadata TEXT,
+                    UNIQUE(cognitive_node_id, body_node_id),
                     FOREIGN KEY(cognitive_node_id) REFERENCES cognitive_memory_nodes(id),
                     FOREIGN KEY(body_node_id) REFERENCES body_memory_nodes(id)
                 )
@@ -215,15 +220,11 @@ class CognitiveMemory:
             if not all([text_content, original_event, current_state]):
                 raise ValueError("Missing required data for memory formation")
             
-            # Generate embedding for the content
-            embedding = self._generate_embedding(text_content)
-            
             # figure out a way to attach the meta-data here in additional property maybe
-            
+
             # Form the actual memory node (async)
             node_id = await self.form_memory(
                 text_content=text_content,
-                embedding=embedding,
                 raw_state=current_state.raw_state,
                 processed_state=current_state.processed_state,
                 formation_source=original_event.event_type
@@ -237,8 +238,8 @@ class CognitiveMemory:
                     'text_content': text_content,
                     'formation_source': original_event.event_type,
                     'state_snapshot': {
-                        'raw': raw_state,
-                        'processed': processed_state
+                        'raw': current_state.raw_state,
+                        'processed': current_state.processed_state
                     }
                 }
             )
@@ -263,7 +264,7 @@ class CognitiveMemory:
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(cognitive_node_id, body_node_id) DO UPDATE 
                 SET link_strength = ?
-            """, (cognitive_id, body_id, strength, time.time(), strength))
+            """, (int(cognitive_id), int(body_id), strength, time.time(), strength))
             conn.commit()
 
     def get_body_links(self, cognitive_id: str) -> List[Tuple[str, float]]:
@@ -387,7 +388,14 @@ class CognitiveMemory:
             # Trigger echos on top results
             top_results = retrieval_scores[:top_k]
             for node, similarity, *_ in top_results:
-                asyncio.create_task(self.trigger_echo(node, similarity))
+                asyncio.create_task(self.trigger_echo(
+                        node,
+                        similarity,
+                        comparison_state=given_state,
+                        query_text=query,
+                        query_embedding=query_embedding
+                    )
+                )
             
             if return_details:
                 # Return both nodes and their detailed metrics
@@ -519,16 +527,142 @@ class CognitiveMemory:
                 node.text_content
             )
             
-            # Cognitive patterns score
-            metrics['cognitive_patterns'] = self._analyze_cognitive_patterns(
-                node.text_content
-            )
-            
             return metrics
             
         except Exception as e:
             self.logger.log_error(f"Semantic metric calculation failed: {e}")
             return {'error': str(e)}
+        
+    def _calculate_semantic_density(self, text: str) -> float:
+        """
+        Calculate semantic density using multiple linguistic features:
+        1. Embedding-based semantic richness (using existing model)
+        2. Lexical diversity and information content
+        3. Syntactic complexity
+        4. Named entity density
+        5. Content word ratio
+        
+        Returns:
+            float: Normalized semantic density score [0-1]
+        """
+        try:
+            
+            # Ensure text is valid
+            if not text or len(text.strip()) == 0:
+                return 0.0
+                
+            # 1. Embedding-based semantic richness
+            # Get sentence embeddings and calculate average cosine similarity
+            # between segments to measure semantic cohesion
+            sentences = [s.strip() for s in text.split('.') if s.strip()]
+            if len(sentences) > 1:
+                embeddings = [self.embedding_model.encode(s) for s in sentences]
+                similarities = []
+                for i in range(len(embeddings)):
+                    for j in range(i+1, len(embeddings)):
+                        sim = self._cosine_similarity(embeddings[i], embeddings[j])
+                        similarities.append(sim)
+                semantic_cohesion = np.mean(similarities) if similarities else 0.5
+            else:
+                semantic_cohesion = 0.5  # Neutral for single sentences
+            
+            # 2. Lexical diversity & information content
+            tokens = word_tokenize(text.lower())
+            unique_ratio = len(set(tokens)) / len(tokens) if tokens else 0
+            
+            # 3. Syntactic complexity 
+            pos_tags = pos_tag(tokens)
+            # Calculate ratio of complex structures (subordinating conjunctions, etc)
+            complex_tags = {'IN', 'WDT', 'WP', 'WRB'}
+            syntactic_complexity = len([t for _, t in pos_tags if t in complex_tags]) / len(pos_tags) if pos_tags else 0
+            
+            # 4. Named entity density
+            try:
+                ne_tree = ne_chunk(pos_tags)
+                named_entities = len([subtree for subtree in ne_tree if type(subtree) == Tree])
+                ne_density = named_entities / len(tokens) if tokens else 0
+            except:
+                ne_density = 0
+            
+            # 5. Content word ratio
+            content_tags = {'NN', 'NNS', 'NNP', 'NNPS', 'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ', 'JJ', 'JJR', 'JJS'}
+            content_ratio = len([t for _, t in pos_tags if t in content_tags]) / len(pos_tags) if pos_tags else 0
+            
+            # Combine metrics with weighted average
+            weights = {
+                'semantic_cohesion': 0.3,
+                'lexical_diversity': 0.2,
+                'syntactic_complexity': 0.15,
+                'ne_density': 0.15,
+                'content_ratio': 0.2
+            }
+            
+            density_score = (
+                semantic_cohesion * weights['semantic_cohesion'] +
+                unique_ratio * weights['lexical_diversity'] +
+                syntactic_complexity * weights['syntactic_complexity'] +
+                ne_density * weights['ne_density'] +
+                content_ratio * weights['content_ratio']
+            )
+            
+            # Normalize to [0-1] range
+            return min(1.0, max(0.0, density_score))
+            
+        except Exception as e:
+            self.logger.log_error(f"Enhanced semantic density calculation failed: {e}")
+            # Fallback to simpler calculation if NLP tools fail
+            try:
+                words = text.split()
+                meaningful_words = [w for w in words if w.isalpha()]
+                return len(set(meaningful_words)) / len(meaningful_words) if meaningful_words else 0.0
+            except:
+                return 0.0
+
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Calculate the cosine similarity between two vectors.
+
+        Args:
+            vec1 (List[float]): First vector.
+            vec2 (List[float]): Second vector.
+
+        Returns:
+            float: Cosine similarity score between 0 and 1.
+        """
+        try:
+            dot_product = sum(a * b for a, b in zip(vec1, vec2))
+            magnitude1 = math.sqrt(sum(a ** 2 for a in vec1))
+            magnitude2 = math.sqrt(sum(b ** 2 for b in vec2))
+            if magnitude1 == 0 or magnitude2 == 0:
+                return 0.0
+            return dot_product / (magnitude1 * magnitude2)
+        except Exception as e:
+            self.logger.log_error(f"Cosine similarity calculation failed: {e}")
+            return 0.0
+
+    def _analyze_text_relevance(self, query: str, text: str) -> float:
+        """
+        Analyze the relevance of the text to the query.
+
+        Args:
+            query (str): The query string.
+            text (str): The text to analyze.
+
+        Returns:
+            float: Relevance score between 0 and 1.
+        """
+        try:
+            # Simple keyword matching for relevance
+            query_words = set(query.lower().split())
+            text_words = set(text.lower().split())
+            if not query_words:
+                return 0.0
+            relevant_words = query_words.intersection(text_words)
+            relevance = len(relevant_words) / len(query_words)
+            return relevance
+        except Exception as e:
+            self.logger.log_error(f"Text relevance analysis failed: {e}")
+            return 0.0
 
     def _calculate_emotional_metrics(
         self,
@@ -567,51 +701,127 @@ class CognitiveMemory:
         except Exception as e:
             self.logger.log_error(f"Emotional metric calculation failed: {e}")
             return {'error': str(e)}
+        
+    def _calculate_emotional_similarity(self, node_vectors: List[Dict[str, Any]], comp_vectors: List[Dict[str, Any]]) -> float:
+        """
+        Calculate similarity between two sets of emotional vectors.
+        Compares the valence-arousal pairs between vectors.
+        """
+        try:
+            if not node_vectors or not comp_vectors:
+                return 0.0
+            
+            # Extract valence-arousal pairs for cosine similarity
+            # EmotionalVector instances are serialized as dicts in state
+            similarities = []
+            for nv in node_vectors:
+                n_vec = [nv.get('valence', 0.0), nv.get('arousal', 0.0)]
+                for cv in comp_vectors:
+                    c_vec = [cv.get('valence', 0.0), cv.get('arousal', 0.0)]
+                    similarities.append(self._cosine_similarity(n_vec, c_vec))
+                    
+            return sum(similarities) / len(similarities) if similarities else 0.0
+        except Exception as e:
+            self.logger.log_error(f"Emotional similarity calculation failed: {e}")
+            return 0.0
+
+    def _calculate_emotional_intensity(self, vectors: List[Dict[str, Any]]) -> float:
+        """
+        Calculate emotional intensity based on vector intensities.
+        Uses direct intensity values rather than computing magnitudes.
+        """
+        try:
+            if not vectors:
+                return 0.0
+            # Use stored intensity values from EmotionalVectors
+            intensities = [v.get('intensity', 0.0) for v in vectors]
+            return sum(intensities) / len(intensities) if intensities else 0.0
+        except Exception as e:
+            self.logger.log_error(f"Emotional intensity calculation failed: {e}")
+            return 0.0
+
+    def _calculate_net_valence(self, vectors: List[Dict[str, Any]]) -> float:
+        """
+        Calculate net valence based on intensity-weighted emotional vectors.
+        
+        Emotional vectors in the system are represented as dicts with 'valence' and 
+        'intensity' fields, serialized from EmotionalVector instances.
+        """
+        try:
+            if not vectors:
+                return 0.0
+                
+            # Weight valences by their intensities for net calculation
+            weighted_valences = []
+            total_intensity = 0.0
+            
+            for vector in vectors:
+                valence = vector.get('valence', 0.0)
+                intensity = vector.get('intensity', 0.0)
+                
+                weighted_valences.append(valence * intensity)
+                total_intensity += intensity
+            
+            # Return intensity-weighted average
+            if total_intensity > 0:
+                return sum(weighted_valences) / total_intensity
+            return 0.0
+            
+        except Exception as e:
+            self.logger.log_error(f"Net valence calculation failed: {e}")
+            return 0.0
+
 
     def _calculate_state_metrics(
         self,
-        node_raw: Dict[str, Any],
+        node_raw: Dict[str, Any], 
         node_processed: Dict[str, Any],
         comp_raw: Dict[str, Any],
         comp_processed: Dict[str, Any]
     ) -> Dict[str, Dict[str, float]]:
-        """Calculate detailed state similarity metrics across all state components"""
+        """
+        Calculate detailed state similarity metrics across all components.
+        Uses BodyMemory's core state comparison logic where possible
+        """
         metrics = {
             'needs': {},
             'behavior': {},
             'mood': {},
-            'cognitive': {}
+            'emotional': {}  
         }
         
         try:
-            # Needs Analysis
+            # Get base similarity metrics from BodyMemory
+            base_similarity = self.body_memory._calculate_state_similarity(
+                {'raw_state': node_raw, 'processed_state': node_processed},
+                {'raw_state': comp_raw, 'processed_state': comp_processed}
+            )
+
+            # Map basic components from BodyMemory results
             if 'needs' in node_raw and 'needs' in comp_raw:
-                metrics['needs'] = {
-                    'satisfaction_similarity': self._calculate_needs_similarity(
-                        node_raw['needs'],
-                        comp_raw['needs']
-                    ),
-                    'urgency_levels': self._calculate_need_urgency(node_raw['needs']),
-                    'state_shifts': self._calculate_need_shifts(
-                        node_raw['needs'],
-                        comp_raw['needs']
-                    )
-                }
-            
-            # Behavior Analysis
+                try:
+                    metrics['needs'] = {
+                        'satisfaction_similarity': base_similarity,
+                        'urgency_levels': self._calculate_need_urgency(node_raw['needs']),
+                        'state_shifts': abs(
+                            self.body_memory._calculate_needs_similarity(node_raw['needs'], comp_raw['needs']) - 1.0
+                        )
+                    }
+                except Exception as inner_e:
+                    self.logger.error(f"Debug - Failed in needs calculation: {str(inner_e)}")
+                    self.logger.error(f"needs_similarity access attempted on: {type(base_similarity)}")
+                    raise
+                
             if 'behavior' in node_raw and 'behavior' in comp_raw:
+                behavior_match = node_raw['behavior'].get('name') == comp_raw['behavior'].get('name')
                 metrics['behavior'] = {
-                    'matching': node_raw['behavior'] == comp_raw['behavior'],
-                    'transition_significance': self._calculate_behavior_transition(
-                        node_raw['behavior'],
-                        comp_raw['behavior']
-                    )
+                    'matching': behavior_match,
+                    'transition_significance': 1.0 - float(behavior_match)  # Simple transition metric
                 }
-            
-            # Mood Analysis
+                
             if 'mood' in node_raw and 'mood' in comp_raw:
                 metrics['mood'] = {
-                    'similarity': self._calculate_mood_similarity(
+                    'similarity': self.body_memory._calculate_mood_similarity(
                         node_raw['mood'],
                         comp_raw['mood']
                     ),
@@ -620,24 +830,89 @@ class CognitiveMemory:
                         self._get_mood_intensity(comp_raw['mood'])
                     )
                 }
-            
-            # Cognitive State Analysis
-            if node_processed.get('cognitive') and comp_processed.get('cognitive'):
-                metrics['cognitive'] = {
-                    'attention_similarity': self._compare_attention_states(
-                        node_processed['cognitive'],
-                        comp_processed['cognitive']
+                
+            # Add emotional state metrics (counts here, just not weighted as strongly)
+            if 'emotional_vectors' in node_raw and 'emotional_vectors' in comp_raw:
+                emotional_similarity = self._calculate_emotional_similarity(
+                    node_raw['emotional_vectors'],
+                    comp_raw['emotional_vectors']
+                )
+                
+                metrics['emotional'] = {
+                    'vector_similarity': emotional_similarity,
+                    'intensity_delta': abs(
+                        self._calculate_emotional_intensity(node_raw['emotional_vectors']) -
+                        self._calculate_emotional_intensity(comp_raw['emotional_vectors'])
                     ),
-                    'processing_depth': self._calculate_processing_depth(
-                        node_processed['cognitive']
+                    'valence_shift': abs(
+                        self._calculate_net_valence(node_raw['emotional_vectors']) -
+                        self._calculate_net_valence(comp_raw['emotional_vectors'])
                     )
                 }
-            
+                
+            # Add cognitive-specific metrics
+            # at some point, include this here. for now, we can't quite manage it. need more detailed metrics or ways of accessing the llms state itself.
+                
             return metrics
             
         except Exception as e:
+            import traceback
+            print("Debug - Full error in state metric calculation:")
+            print(traceback.format_exc())
             self.logger.log_error(f"State metric calculation failed: {e}")
             return {'error': str(e)}
+        
+    def _calculate_need_urgency(self, needs: Dict[str, Dict[str, Any]]) -> float:
+        """
+        Calculate urgency level based on need satisfaction values.
+        Uses the same satisfaction calculation as NeedsManager for consistency,
+        accounting for different need types (e.g. stamina vs other needs).
+        
+        Args:
+            needs: Dictionary of needs with their current values and states
+            
+        Returns:
+            float: Overall urgency level [0,1] across all needs
+        """
+        try:
+            if not needs:
+                return 0.0
+                
+            urgency_sum = 0.0
+            need_count = len(needs)
+            
+            for need_name, need_data in needs.items():
+                # Get current value and account for stamina's inverse satisfaction
+                current_value = need_data.get('current_value', 0)
+                if need_name == 'stamina':
+                    # Stamina urgency increases as value decreases
+                    satisfaction = current_value / 100.0  # Assuming max value of 100
+                else:
+                    # Other needs urgency increases as value increases
+                    satisfaction = 1.0 - (current_value / 100.0)
+                    
+                # Can also use pre-calculated satisfaction if available
+                if 'satisfaction' in need_data:
+                    satisfaction = need_data['satisfaction']
+                    
+                # Higher urgency = lower satisfaction
+                urgency_sum += (1.0 - satisfaction)
+            
+            return urgency_sum / need_count if need_count > 0 else 0.0
+            
+        except Exception as e:
+            self.logger.log_error(f"Need urgency calculation failed: {e}")
+            return 0.0
+
+    def _get_mood_intensity(self, mood: Dict[str, Any]) -> float:
+        """Calculate overall mood intensity from valence/arousal."""
+        if not mood:
+            return 0.0
+        return math.sqrt(
+            mood.get('valence', 0) ** 2 + 
+            mood.get('arousal', 0) ** 2
+        ) / math.sqrt(2)  # Normalize to [0,1]
+
 
     def _calculate_temporal_metrics(self, node: CognitiveMemoryNode) -> Dict[str, float]:
         """Calculate temporal relevance metrics"""
@@ -709,41 +984,87 @@ class CognitiveMemory:
         }
 
     def _compute_final_score(self, metrics: Dict[str, Any]) -> float:
-        """Compute final similarity score from component metrics"""
+        """
+        Compute final similarity score by combining weighted component metrics.
+        
+        Components align with calculate_retrieval_metrics outputs:
+        - Semantic: embedding similarity, text relevance, semantic density
+        - Emotional: vector similarity, valence shifts, emotional complexity
+        - State: needs, behavior, mood similarity metrics  
+        - Temporal: recency and access/echo history
+        - Strength (optional): current strength and network position
+        """
         weights = self._get_component_weights()
         score = 0.0
         
         try:
-            # Semantic Score
+            # Semantic Score 
             if 'semantic' in metrics:
                 semantic_score = (
-                    metrics['semantic'].get('embedding_similarity', 0) * 0.6 +
+                    metrics['semantic'].get('embedding_similarity', 0) * 0.5 +
                     metrics['semantic'].get('text_relevance', 0) * 0.2 +
-                    metrics['semantic'].get('cognitive_patterns', 0) * 0.2
+                    metrics['semantic'].get('semantic_density', 0) * 0.3
                 )
                 score += semantic_score * weights['semantic']
             
             # Emotional Score
             if 'emotional' in metrics:
                 emotional_score = (
-                    metrics['emotional'].get('vector_similarity', 0) * 0.7 +
-                    metrics['emotional'].get('valence_shift', 0) * 0.3
+                    metrics['emotional'].get('vector_similarity', 0) * 0.4 +
+                    metrics['emotional'].get('valence_shift', 0) * 0.3 +
+                    (metrics['emotional'].get('emotional_complexity', 0) / 5.0) * 0.3  # Normalized by max 5 emotions
                 )
                 score += emotional_score * weights['emotional']
             
-            # State Score (average of components)
+            # State Score (weighted average of components)
             if 'state' in metrics:
-                state_scores = []
-                for component in ['needs', 'behavior', 'mood', 'cognitive']:
-                    if component in metrics['state']:
-                        component_metrics = metrics['state'][component]
-                        if isinstance(component_metrics, dict):
-                            state_scores.append(
-                                sum(v for v in component_metrics.values() if isinstance(v, (int, float)))
-                                / len(component_metrics)
-                            )
+                state_scores = {}
+                
+                # Needs comparison
+                if 'needs' in metrics['state']:
+                    state_scores['needs'] = (
+                        metrics['state']['needs'].get('satisfaction_similarity', 0) * 0.6 +
+                        metrics['state']['needs'].get('urgency_levels', 0) * 0.4
+                    )
+                
+                # Behavior matching
+                if 'behavior' in metrics['state']:
+                    state_scores['behavior'] = (
+                        1.0 - metrics['state']['behavior'].get('transition_significance', 0)
+                    )
+                    
+                # Mood comparison
+                if 'mood' in metrics['state']:
+                    state_scores['mood'] = (
+                        metrics['state']['mood'].get('similarity', 0) * 0.7 +
+                        (1.0 - metrics['state']['mood'].get('intensity_delta', 0)) * 0.3
+                    )
+                    
+                # Emotional state 
+                if 'emotional' in metrics['state']:
+                    state_scores['emotional'] = (
+                        metrics['state']['emotional'].get('vector_similarity', 0) * 0.6 +
+                        (1.0 - metrics['state']['emotional'].get('valence_shift', 0)) * 0.4
+                    )
+                
                 if state_scores:
-                    score += (sum(state_scores) / len(state_scores)) * weights['state']
+                    # Weight the state components
+                    component_weights = {
+                        'needs': 0.3,
+                        'behavior': 0.2, 
+                        'mood': 0.25,
+                        'emotional': 0.25
+                    }
+                    
+                    state_score = sum(
+                        score * component_weights.get(component, 1.0)
+                        for component, score in state_scores.items()
+                    ) / sum(
+                        component_weights.get(component, 1.0) 
+                        for component in state_scores.keys()
+                    )
+                    
+                    score += state_score * weights['state']
             
             # Temporal Score
             if 'temporal' in metrics:
@@ -752,13 +1073,18 @@ class CognitiveMemory:
                     metrics['temporal'].get('access_recency', 0) * 0.3 +
                     metrics['temporal'].get('echo_recency', 0) * 0.3
                 )
+                # Apply echo dampening if present
+                if 'echo_dampening' in metrics['temporal']:
+                    temporal_score *= metrics['temporal']['echo_dampening']
+                    
                 score += temporal_score * weights['temporal']
             
-            # Strength Score
+            # Strength Score (when included)
             if 'strength' in metrics:
                 strength_score = (
-                    metrics['strength'].get('current_strength', 0) * 0.7 +
-                    metrics['strength'].get('relative_strength', 1.0) * 0.3
+                    metrics['strength'].get('current_strength', 0) * 0.6 +
+                    metrics['strength'].get('relative_strength', 1.0) * 0.3 +
+                    (1.0 - metrics['strength'].get('ghost_nodes_count', 0) / 10.0) * 0.1  # Normalize by max 10 ghosts
                 )
                 score += strength_score * weights['strength']
             
@@ -788,7 +1114,7 @@ class CognitiveMemory:
             Dict[int, List[Tuple[Any, float, int]]]: Nodes grouped by distance from start.
                 Each entry includes the node, connection weight, and depth.
         """
-        from collections import defaultdict
+
         results = defaultdict(list)
         visited = set([start_node.node_id])
         
@@ -1244,137 +1570,245 @@ class CognitiveMemory:
     # -------------------------------------------------------------------------
     # 6) Echos
     # -------------------------------------------------------------------------
-    def evaluate_echo(self, node: CognitiveMemoryNode) -> Tuple[CognitiveMemoryNode, float, List[Dict]]:
+    def evaluate_echo(
+            self, 
+            node: CognitiveMemoryNode,
+            comparison_state: Optional[Dict[str, Any]] = None, 
+            query_text: Optional[str] = None, 
+            query_embedding: Optional[List[float]] = None
+        ) -> Tuple[CognitiveMemoryNode, float, List[Dict]]:
         """
         Evaluate node & related ghosts for echo potential using comprehensive retrieval metrics.
         Returns tuple of (selected_node, echo_intensity, evaluation_details).
         """
         if not node:
+            self.logger.warning("evaluate_echo called with None node")
             return None, 0.0, []
             
         evaluations = []
-        current_state = self.internal_context.get_memory_context(is_cognitive=True)
-        
-        # Evaluate parent node using full retrieval metrics
-        parent_metrics = self.calculate_retrieval_metrics(
-            target_node=node,
-            comparison_state=current_state,
-            include_strength=True,
-            detailed_metrics=True
-        )
-        
-        if parent_metrics and 'final_score' in parent_metrics:
-            # Use components to calculate echo potential
-            echo_components = {
-                'semantic_match': (
-                    parent_metrics['component_metrics']['semantic'].get('embedding_similarity', 0) * 0.6 +
-                    parent_metrics['component_metrics']['semantic'].get('cognitive_patterns', 0) * 0.4
-                ),
-                'emotional_resonance': (
-                    parent_metrics['component_metrics']['emotional'].get('vector_similarity', 0) * 0.5 +
-                    parent_metrics['component_metrics']['emotional'].get('valence_shift', 0) * 0.5
-                ),
-                'state_alignment': sum(
-                    sum(v for v in comp.values() if isinstance(v, (int, float))) / len(comp)
-                    for comp in parent_metrics['component_metrics']['state'].values()
-                    if isinstance(comp, dict)
-                ) / len(parent_metrics['component_metrics']['state'])
-            }
+        try:    
+            if comparison_state:
+                current_state = comparison_state
+            else:
+                current_state = self.internal_context.get_memory_context(is_cognitive=True)
+
+            if not current_state:
+                self.logger.warning("Failed to get cognitive memory context")
+                return None, 0.0, []
             
-            echo_intensity = (
-                echo_components['semantic_match'] * 0.3 +
-                echo_components['emotional_resonance'] * 0.4 +
-                echo_components['state_alignment'] * 0.3
-            )
-            
-            evaluations.append({
-                "node": node,
-                "echo": {
-                    "intensity": echo_intensity,
-                    "components": echo_components
-                },
-                "relevance": parent_metrics['final_score'],
-                "metrics": parent_metrics,
-                "is_ghost": False
-            })
-        
-        # Evaluate ghost nodes using same metrics system
-        for ghost in node.ghost_nodes:
-            # Create temporary node structure for ghost evaluation
-            ghost_node = CognitiveMemoryNode(
-                node_id=ghost['node_id'],
-                text_content=ghost['text_content'],
-                embedding=ghost.get('embedding', self._generate_embedding(ghost['text_content'])),
-                raw_state=ghost['raw_state'],
-                processed_state=ghost['processed_state'],
-                timestamp=ghost['timestamp'],
-                strength=ghost['strength'],
-                ghosted=True,
-                last_accessed=None,
-                last_echo_time=None,
-                echo_dampening=1.0
-            )
-            
-            ghost_metrics = self.calculate_retrieval_metrics(
-                target_node=ghost_node,
+            # Evaluate parent node using full retrieval metrics
+            print("Debug - Evaluating parent node:", node.node_id)
+            parent_metrics = self.calculate_retrieval_metrics(
+                target_node=node,
                 comparison_state=current_state,
                 include_strength=True,
-                detailed_metrics=True
+                detailed_metrics=True,
+                query_text=query_text,
+                query_embedding=query_embedding
             )
             
-            if ghost_metrics and 'final_score' in ghost_metrics:
-                # Calculate ghost echo components
-                ghost_echo_components = {
-                    'semantic_match': (
-                        ghost_metrics['component_metrics']['semantic'].get('embedding_similarity', 0) * 0.6 +
-                        ghost_metrics['component_metrics']['semantic'].get('cognitive_patterns', 0) * 0.4
-                    ),
-                    'emotional_resonance': (
-                        ghost_metrics['component_metrics']['emotional'].get('vector_similarity', 0) * 0.5 +
-                        ghost_metrics['component_metrics']['emotional'].get('valence_shift', 0) * 0.5
-                    ),
-                    'state_alignment': sum(
-                        sum(v for v in comp.values() if isinstance(v, (int, float))) / len(comp)
-                        for comp in ghost_metrics['component_metrics']['state'].values()
-                        if isinstance(comp, dict)
-                    ) / len(ghost_metrics['component_metrics']['state'])
-                }
-                
-                ghost_echo_intensity = (
-                    ghost_echo_components['semantic_match'] * 0.3 +
-                    ghost_echo_components['emotional_resonance'] * 0.4 +
-                    ghost_echo_components['state_alignment'] * 0.3
-                )
-                
-                # Apply ghost bonus multiplier
-                ghost_echo_intensity *= 1.25
-                
-                evaluations.append({
-                    "node": ghost_node,
-                    "echo": {
-                        "intensity": ghost_echo_intensity,
-                        "components": ghost_echo_components
-                    },
-                    "relevance": ghost_metrics['final_score'] * 1.25,  # Ghost relevance bonus
-                    "metrics": ghost_metrics,
-                    "is_ghost": True
-                })
-        
-        if not evaluations:
-            return None, 0.0, []
+            print("Debug - Parent metrics:", parent_metrics)
             
-        # Select strongest echo based on combined intensity and relevance
-        selected = max(evaluations, key=lambda x: x["echo"]["intensity"] * x["relevance"])
-        final_intensity = selected["echo"]["intensity"] * selected["relevance"]
-        
-        return selected["node"], final_intensity, evaluations
+            if parent_metrics and 'final_score' in parent_metrics:
+                try:
+                    # Validate state metrics structure
+                    state_metrics = parent_metrics['component_metrics']['state']
+                    print("Debug - Parent state metrics structure:", state_metrics)
+                    
+                    # Calculate state alignment with validation
+                    valid_components = [
+                        comp for comp in state_metrics.values()
+                        if isinstance(comp, dict) and len(comp) > 0
+                    ]
+                    print("Debug - Parent valid state components:", valid_components)
+                    
+                    if not valid_components:
+                        self.logger.warning("No valid state components found for alignment calculation")
+                        state_alignment = 0.0
+                    else:
+                        component_sums = []
+                        for comp in valid_components:
+                            numeric_values = [v for v in comp.values() if isinstance(v, (int, float))]
+                            if numeric_values:  # Only calculate if we have valid numbers
+                                component_sums.append(sum(numeric_values) / len(comp))
+                        
+                        state_alignment = (sum(component_sums) / len(valid_components)) if component_sums else 0.0
+                    
+                    print("Debug - Parent state alignment calculated:", state_alignment)
+                    
+                    # Use components to calculate echo potential
+                    echo_components = {
+                        'semantic_match': (
+                            parent_metrics['component_metrics']['semantic'].get('embedding_similarity', 0) * 0.6 +
+                            parent_metrics['component_metrics']['semantic'].get('cognitive_patterns', 0) * 0.4
+                        ),
+                        'emotional_resonance': (
+                            parent_metrics['component_metrics']['emotional'].get('vector_similarity', 0) * 0.5 +
+                            parent_metrics['component_metrics']['emotional'].get('valence_shift', 0) * 0.5
+                        ),
+                        'state_alignment': state_alignment
+                    }
+                    
+                    print("Debug - Parent echo components calculated:", echo_components)
+                    
+                    echo_intensity = (
+                        echo_components['semantic_match'] * 0.3 +
+                        echo_components['emotional_resonance'] * 0.4 +
+                        echo_components['state_alignment'] * 0.3
+                    )
+                    
+                    evaluations.append({
+                        "node": node,
+                        "echo": {
+                            "intensity": echo_intensity,
+                            "components": echo_components
+                        },
+                        "relevance": parent_metrics['final_score'],
+                        "metrics": parent_metrics,
+                        "is_ghost": False
+                    })
+                except Exception as e:
+                    self.logger.error(f"Failed to calculate parent echo components: {str(e)}")
+                    print("Debug - Parent error details:", e.__class__.__name__, str(e))
+                    return None, 0.0, []
 
-    async def trigger_echo(self, node: CognitiveMemoryNode, intensity: float):
+            # Evaluate ghost nodes using same metrics system
+            print(f"Debug - Evaluating {len(node.ghost_nodes)} ghost nodes")
+            for ghost in node.ghost_nodes:
+                try:
+                    print(f"Debug - Processing ghost node: {ghost.get('node_id')}")
+                    # Create temporary node structure for ghost evaluation
+                    ghost_node = CognitiveMemoryNode(
+                        node_id=ghost['node_id'],
+                        text_content=ghost['text_content'],
+                        embedding=ghost.get('embedding', self._generate_embedding(ghost['text_content'])),
+                        raw_state=ghost['raw_state'],
+                        processed_state=ghost['processed_state'],
+                        timestamp=ghost['timestamp'],
+                        strength=ghost['strength'],
+                        ghosted=True,
+                        last_accessed=None,
+                        last_echo_time=None,
+                        echo_dampening=1.0
+                    )
+                    
+                    ghost_metrics = self.calculate_retrieval_metrics(
+                        target_node=ghost_node,
+                        comparison_state=current_state,
+                        include_strength=True,
+                        detailed_metrics=True,
+                        query_text=query_text,
+                        query_embedding=query_embedding
+                    )
+                    
+                    print("Debug - Ghost metrics:", ghost_metrics)
+                    
+                    if ghost_metrics and 'final_score' in ghost_metrics:
+                        # Validate ghost state metrics structure
+                        ghost_state_metrics = ghost_metrics['component_metrics']['state']
+                        print("Debug - Ghost state metrics structure:", ghost_state_metrics)
+                        
+                        # Calculate ghost state alignment with validation
+                        valid_ghost_components = [
+                            comp for comp in ghost_state_metrics.values()
+                            if isinstance(comp, dict) and len(comp) > 0
+                        ]
+                        print("Debug - Ghost valid state components:", valid_ghost_components)
+                        
+                        if not valid_ghost_components:
+                            self.logger.warning(f"No valid state components found for ghost {ghost['node_id']}")
+                            ghost_state_alignment = 0.0
+                        else:
+                            ghost_component_sums = []
+                            for comp in valid_ghost_components:
+                                numeric_values = [v for v in comp.values() if isinstance(v, (int, float))]
+                                if numeric_values:
+                                    ghost_component_sums.append(sum(numeric_values) / len(comp))
+                            
+                            ghost_state_alignment = (sum(ghost_component_sums) / len(valid_ghost_components)) if ghost_component_sums else 0.0
+                        
+                        print("Debug - Ghost state alignment calculated:", ghost_state_alignment)
+                        
+                        # Calculate ghost echo components
+                        ghost_echo_components = {
+                            'semantic_match': (
+                                ghost_metrics['component_metrics']['semantic'].get('embedding_similarity', 0) * 0.6 +
+                                ghost_metrics['component_metrics']['semantic'].get('cognitive_patterns', 0) * 0.4
+                            ),
+                            'emotional_resonance': (
+                                ghost_metrics['component_metrics']['emotional'].get('vector_similarity', 0) * 0.5 +
+                                ghost_metrics['component_metrics']['emotional'].get('valence_shift', 0) * 0.5
+                            ),
+                            'state_alignment': ghost_state_alignment
+                        }
+                        
+                        print("Debug - Ghost echo components calculated:", ghost_echo_components)
+                        
+                        ghost_echo_intensity = (
+                            ghost_echo_components['semantic_match'] * 0.3 +
+                            ghost_echo_components['emotional_resonance'] * 0.4 +
+                            ghost_echo_components['state_alignment'] * 0.3
+                        )
+                        
+                        # Apply ghost bonus multiplier
+                        ghost_echo_intensity *= 1.25
+                        
+                        evaluations.append({
+                            "node": ghost_node,
+                            "echo": {
+                                "intensity": ghost_echo_intensity,
+                                "components": ghost_echo_components
+                            },
+                            "relevance": ghost_metrics['final_score'] * 1.25,  # Ghost relevance bonus
+                            "metrics": ghost_metrics,
+                            "is_ghost": True
+                        })
+                except Exception as e:
+                    self.logger.error(f"Failed to calculate ghost echo components: {str(e)}")
+                    print("Debug - Ghost error details:", e.__class__.__name__, str(e))
+                    continue
+            
+            if not evaluations:
+                self.logger.warning("No valid evaluations generated")
+                return None, 0.0, []
+                
+            # Select strongest echo based on combined intensity and relevance
+            selected = max(evaluations, key=lambda x: x["echo"]["intensity"] * x["relevance"])
+            final_intensity = selected["echo"]["intensity"] * selected["relevance"]
+            
+            print("Debug - Final evaluation selected:", {
+                "node_id": selected["node"].node_id,
+                "intensity": final_intensity,
+                "is_ghost": selected["is_ghost"]
+            })
+            
+            return selected["node"], final_intensity, evaluations
+            
+        except Exception as e:
+            self.logger.error(f"Unexpected error in evaluate_echo: {str(e)}")
+            print("Debug - Critical error:", e.__class__.__name__, str(e))
+            return None, 0.0, []
+
+    async def trigger_echo(
+            self,
+            node: CognitiveMemoryNode, 
+            intensity: float, 
+            comparison_state: Optional[Dict[str, Any]] = None, 
+            query_text: Optional[str] = None, 
+            query_embedding: Optional[List[float]] = None
+        ) -> None:
         """
         Orchestrate echo activation and handle strength adjustments based on 
         comprehensive evaluation metrics.
         """
-        selected_node, final_intensity, details = self.evaluate_echo(node)
+        if not comparison_state:
+            comparison_state = self.internal_context.get_memory_context(is_cognitive=True)
+        if not query_text:
+            query_text = comparison_state['processed_state']['cognitive']
+        if not query_embedding:
+            query_embedding = self._generate_embedding(query_text)
+            
+        selected_node, final_intensity, details = self.evaluate_echo(node, comparison_state, query_text, query_embedding)
         if not selected_node:
             return
             
@@ -1789,8 +2223,8 @@ class CognitiveMemory:
             # Fetch states from context if not provided
             if raw_state is None or processed_state is None:
                 current_state = self.internal_context.get_memory_context(is_cognitive=True)
-                raw_state = raw_state or current_state.raw_state
-                processed_state = processed_state or current_state.processed_state
+                raw_state = raw_state or current_state['raw_state']
+                processed_state = processed_state or current_state['processed_state']
 
             # Attempt to find or create body node if none given
             if not body_node_id:
@@ -1803,7 +2237,7 @@ class CognitiveMemory:
             if not embedding:
                 embedding = self._generate_embedding(text_content)
 
-            # Calculate strength (placeholder)
+            # Calculate strength 
             strength = self._calculate_initial_strength(text_content, raw_state, processed_state, embedding)
             
             node = CognitiveMemoryNode(
@@ -1818,7 +2252,7 @@ class CognitiveMemory:
             
             # Persist in DB
             self.nodes.append(node)
-            await self._persist_node(node)
+            self._persist_node(node)
 
             # Form initial connections
             self._form_initial_connections(node)
@@ -1833,12 +2267,15 @@ class CognitiveMemory:
             # Dispatch event
             global_event_dispatcher.dispatch_event(Event(
                 "memory:node_created",
-                {"node_type": "cognitive", "node": node}
+                {"node_type": "cognitive", "node_id": node.node_id, "content": text_content}
             ))
 
             return str(node.node_id)  # Return the node ID
-        
+            
         except Exception as e:
+            import traceback
+            print("Debug - Full error in memory formation:")
+            print(traceback.format_exc()) 
             self.logger.log_error(f"Failed to form cognitive memory: {e}")
             raise MemorySystemError(f"Memory formation failed: {e}")
 
@@ -2469,3 +2906,4 @@ class CognitiveMemory:
             self.logger.log_error(f"Failed to generate embedding: {e}")
             # Return zero vector as fallback
             return [0.0] * 384
+            

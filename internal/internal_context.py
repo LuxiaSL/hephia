@@ -108,7 +108,7 @@ class InternalContext:
             print(f"DEBUG - Error getting emotional state: {str(e)}")
             return []
 
-    def get_memory_context(self, get_cognitive=False):
+    def get_memory_context(self, is_cognitive=False):
         """
         Gets raw and processed state context for memory formation.
         
@@ -130,7 +130,7 @@ class InternalContext:
                 'mood': self.internal.mood_synthesizer.get_mood_state()
             }
 
-            if get_cognitive:
+            if is_cognitive:
                 cog_state = self.internal.cognitive_bridge.get_cognitive_state()
                 raw_state['cognitive'] = cog_state.get('raw_state', {})
 
@@ -149,16 +149,23 @@ class InternalContext:
             if hasattr(self.internal.emotional_processor, 'current_stimulus'):
                 stimulus = self.internal.emotional_processor.current_stimulus
                 
-                # Get overall emotional state
-                overall_state = {
-                    'name': self.internal.emotional_processor._get_emotion_name_by_category(
-                        self.internal.emotional_processor._categorize_stimulus(stimulus)
-                    ),
-                    'valence': float(stimulus.valence),
-                    'arousal': float(stimulus.arousal),
-                    'intensity': float(stimulus.intensity)
-                }
-                emotional_state.append(overall_state)
+                # Check if stimulus exists and has meaningful values
+                if stimulus and (abs(stimulus.valence) >= 0.001 or 
+                               abs(stimulus.arousal) >= 0.001 or 
+                               stimulus.intensity >= 0.001):
+                    # Get overall emotional state
+                    overall_state = {
+                        'name': self.internal.emotional_processor._get_emotion_name_by_category(
+                            self.internal.emotional_processor._categorize_stimulus(stimulus)
+                        ),
+                        'valence': float(stimulus.valence),
+                        'arousal': float(stimulus.arousal),
+                        'intensity': float(stimulus.intensity)
+                    }
+                    emotional_state.append(overall_state)
+                else:
+                    # Return an empty emotional state if no meaningful stimulus exists
+                    emotional_state = []
                 
                 # Include active vector categories for detailed view
                 for vector in stimulus.active_vectors:
@@ -186,7 +193,7 @@ class InternalContext:
                 'emotional_state': emotional_state
             }
 
-            if get_cognitive:
+            if is_cognitive:
                 processed_state['cognitive'] = cog_state.get('processed_state', {})
 
             return {

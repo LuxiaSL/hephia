@@ -11,6 +11,8 @@ from .base_environment import BaseEnvironment, CommandResult
 from .notes import NotesEnvironment
 from .search import SearchEnvironment
 from .web import WebEnvironment
+from .meditation import MeditateEnvironment
+from .reflection import ReflectEnvironment
 from api_clients import APIManager
 from brain.commands.model import (
     CommandDefinition,
@@ -23,10 +25,11 @@ class EnvironmentRegistry:
     Manages and provides access to all available environments.
     """
     
-    def __init__(self, api_manager: APIManager):
+    def __init__(self, api_manager: APIManager, cognitive_bridge):
         """Initialize the environment registry."""
         self.environments: Dict[str, BaseEnvironment] = {}
         self.api_manager = api_manager
+        self.cognitive_bridge = cognitive_bridge
         self.setup_environments()
     
     def setup_environments(self):
@@ -35,6 +38,8 @@ class EnvironmentRegistry:
         self.register_environment("notes", NotesEnvironment())
         self.register_environment("search", SearchEnvironment(self.api_manager))
         self.register_environment("web", WebEnvironment())
+        self.register_environment("meditate", MeditateEnvironment(self.cognitive_bridge))
+        self.register_environment("reflect", ReflectEnvironment(self.cognitive_bridge))
     
     def register_environment(self, name: str, environment: BaseEnvironment):
         """Register a new environment."""

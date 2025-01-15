@@ -22,6 +22,8 @@ from typing import Dict, List, Any, Optional
 import time
 import json
 
+from event_dispatcher import Event, global_event_dispatcher
+
 class MemorySystemError(Exception):
     """Generic memory system error."""
     pass

@@ -5,6 +5,7 @@ Initializes and runs the complete system with all necessary checks and monitorin
 
 import asyncio
 import uvicorn
+import threading
 from dotenv import load_dotenv
 import os
 from datetime import datetime
@@ -13,6 +14,9 @@ from pathlib import Path
 from core.server import HephiaServer
 from config import Config, ProviderType
 from loggers import LogManager
+from event_dispatcher import global_event_dispatcher
+from display.hephia_tui import start_visualization, handle_cognitive_event, handle_state_event, poll_commands
+
 LogManager.setup_logging()
 
 def setup_data_directory():
@@ -59,8 +63,8 @@ async def main():
     """Initialize and run the complete Hephia system."""
     print(f"""
 ╔═══════════════════════════════════════════════╗
-║             Hephia Project v0.1               ║
-║     A Digital Homunculus in Latent Space     ║
+║             Hephia Project v0.2               ║
+║     A Digital Homunculus in Latent Space      ║
 ╚═══════════════════════════════════════════════╝
 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     """)
@@ -79,13 +83,55 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     try:
         # Initialize server
         server = HephiaServer()
+
+        # Start interface in a separate thread
+        vis_thread = threading.Thread(target=start_visualization, daemon=True)
+        vis_thread.start()
+
+        # Hook up event handlers
+        # Cognitive context handler
+        global_event_dispatcher.add_listener(
+            "cognitive:context_update",
+            lambda event: handle_cognitive_event(
+                f"Cognitive State:\n"
+                f"Summary: {event.data.get('processed_state', 'No summary available')}\n"
+                f"Recent Messages:\n" + 
+                "\n".join(
+                    f"  {msg['role']}: {msg['content'][:100]}..." 
+                    for msg in event.data.get('raw_state', [])[-3:]
+                )
+            )
+        )
+
+        # System state handler 
+        global_event_dispatcher.add_listener(
+            "state:changed",
+            lambda event: handle_state_event(
+                f"System State:\n"
+                f"Mood: {event.data.get('context', {}).get('mood', {}).get('name', 'unknown')} "
+                f"(v:{event.data.get('context', {}).get('mood', {}).get('valence', 0):.2f}, "
+                f"a:{event.data.get('context', {}).get('mood', {}).get('arousal', 0):.2f})\n"
+                f"Behavior: {event.data.get('context', {}).get('behavior', {}).get('name', 'none')}\n"
+                f"Needs: {', '.join(f'{k}: {str(v)}' for k,v in event.data.get('context', {}).get('needs', {}).items())}\n"
+                f"Emotional State: {event.data.get('context', {}).get('emotional_state', 'neutral')}"
+            )
+        )
+
+        # Poll for commands periodically
+        async def command_polling():
+            while True:
+                poll_commands()
+                await asyncio.sleep(0.5)
+
+        # Add command polling to your server tasks
+        asyncio.create_task(command_polling())
         
         print("""
 Hephia is now active! 
 
 Press Ctrl+C to shutdown gracefully
         """)
-        
+
         # Configure and run FastAPI server
         config = uvicorn.Config(
             app=server.app,
@@ -101,7 +147,8 @@ Press Ctrl+C to shutdown gracefully
     except KeyboardInterrupt:
         print("\n\n🌙 Shutting down Hephia...")
         await server.shutdown()
-        print("Goodbye! Thank you for witnessing the emergence.\n")
+        vis_thread.stop()
+        print("Goodbye!\n")
     except Exception as e:
         print(f"\n❌ Fatal error occurred: {e}")
         raise

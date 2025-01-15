@@ -103,13 +103,13 @@ class WebEnvironment(BaseEnvironment):
                     )
                 ],
                 examples=[
-                    "web open https://example.com",
-                    "web open https://example.com --preview=full --extract=structured",
-                    "web open https://news.site --extract=text --format=markdown"
+                    "web open https://sitetoaccess.com",
+                    "web open https://sitetoaccess.com --preview=full --extract=structured",
+                    "web open https://sitetoaccess.com --extract=text --format=markdown"
                 ],
                 related_commands=[
-                    'notes create "Save web content"',
-                    'search query "Related topic"'
+                    'notes create "<Summary of page>"',
+                    'search query "<Related topic>"',
                 ],
                 failure_hints={
                     "404": "Page not found. Check the URL is correct.",
@@ -209,6 +209,8 @@ class WebEnvironment(BaseEnvironment):
             
     def _validate_url(self, url: str) -> bool:
         """Validate URL format and structure."""
+        url = url.strip('"\'')
+    
         if not url.startswith(("http://", "https://")):
             return False
             

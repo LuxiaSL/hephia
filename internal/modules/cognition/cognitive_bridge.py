@@ -6,6 +6,7 @@ Handles reflection requests, meditation effects, and memory traversal while main
 clean separation between mechanical and cognitive layers.
 """
 
+import asyncio
 from typing import Dict, List, Any, Optional
 from event_dispatcher import Event, global_event_dispatcher
 from internal.modules.memory.cognitive_memory_node import CognitiveMemoryNode
@@ -36,7 +37,7 @@ class CognitiveBridge:
     def setup_event_listeners(self):
         global_event_dispatcher.add_listener(
             "cognitive:memory:request_formation",
-            self._handle_memory_formation
+            lambda event: asyncio.create_task(self._handle_memory_formation(event))
         )
         global_event_dispatcher.add_listener(
             "cognitive:context_update",
@@ -88,6 +89,9 @@ class CognitiveBridge:
 
             results = []
             for node in matching_nodes:
+                # Skip if node is not a CognitiveMemoryNode instance
+                if not isinstance(node, CognitiveMemoryNode):
+                    continue
                 # Get connected nodes if depth > 1
                 if depth > 1:
                     connections = self.cognitive_memory.traverse_connections(
@@ -142,9 +146,11 @@ class CognitiveBridge:
         """
         try:
             if not context_state:
-                context_state = self.internal_context.get_memory_context().raw_state
+                context_state = self.internal_context.get_memory_context()
             # Get memories from cognitive system
-            memories = self.cognitive_memory.retrieve_memories(query, context_state, limit)
+            
+            raw_state = context_state["raw_state"]
+            memories = self.cognitive_memory.retrieve_memories(query, raw_state, limit)
             if not memories:
                 return []
 
@@ -158,9 +164,6 @@ class CognitiveBridge:
                     'strength': node.strength
                 }
                 results.append(memory_data)
-                
-                # Trigger light echo effect
-                await self.cognitive_memory.trigger_echo(node, 0.3)
 
             return results
 
@@ -197,7 +200,7 @@ class CognitiveBridge:
 
             results = []
             for node in recent:
-                # Trigger memory echo
+                # Trigger memory echo (needed, get_recent_memories doesn't do this)
                 await self.cognitive_memory.trigger_echo(node, 0.5)  # Base intensity
 
                 # Format with rounded timestamp
@@ -346,20 +349,20 @@ class CognitiveBridge:
             ))
         return None
 
-    def _handle_memory_formation(self, event: Event):
+    async def _handle_memory_formation(self, event: Event):
         """Handle memory formation requests from ExoProcessor."""
         try:
             source = event.data.get('source')
             if source == 'environment_transition':
                 # Handle environment session memory
-                self._form_environment_memory(
+                await self._form_environment_memory(
                     event.data.get('environment'),
                     event.data.get('summary'),
                     event.data.get('history', [])
                 )
             elif source == 'content_significance':
                 # Handle significant content memory
-                self._form_content_memory(
+                await self._form_content_memory(
                     event.data.get('content'),
                     event.data.get('command'),
                     event.data.get('response'),
@@ -371,7 +374,7 @@ class CognitiveBridge:
                 {"message": f"Memory formation failed: {str(e)}"}
             ))
 
-    def _form_environment_memory(
+    async def _form_environment_memory(
         self,
         environment: str,
         summary: str,
@@ -383,11 +386,10 @@ class CognitiveBridge:
             current_state = self.internal_context.get_memory_context()
 
             # Create memory node
-            self.cognitive_memory.form_memory(
+            await self.cognitive_memory.form_memory(
                 text_content=summary,
-                embedding=self.cognitive_memory._generate_embedding(summary),
-                raw_state=current_state.raw_state,
-                processed_state=current_state.processed_state,
+                raw_state=current_state['raw_state'],
+                processed_state=current_state['processed_state'],
                 formation_source='environment_transition'
             )
         except Exception as e:
@@ -396,7 +398,7 @@ class CognitiveBridge:
                 {"message": f"Environment memory formation failed: {str(e)}"}
             ))
 
-    def _form_content_memory(
+    async def _form_content_memory(
         self,
         content: str,
         command: str,
@@ -409,11 +411,10 @@ class CognitiveBridge:
             current_state = self.internal_context.get_memory_context()
             
             # Create memory node
-            self.cognitive_memory.form_memory(
+            await self.cognitive_memory.form_memory(
                 text_content=content,
-                embedding=self.cognitive_memory._generate_embedding(summary),
-                raw_state=current_state.raw_state,
-                processed_state=current_state.processed_state,
+                raw_state=current_state['raw_state'],
+                processed_state=current_state['processed_state'],
                 formation_source='content_significance'
             )
         except Exception as e:

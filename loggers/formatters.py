@@ -37,6 +37,13 @@ class MemoryFormatter(logging.Formatter):
         timestamp = self.formatTime(record)
         msg = record.getMessage()
         return f"[{timestamp}] {record.levelname:8} MEMORY | {msg}"
+    
+class EventFormatter(logging.Formatter):
+    """Formatter for event dispatcher"""
+    
+    def format(self, record):
+        timestamp = self.formatTime(record)
+        return f"[{timestamp}] {record.levelname:8} EVENT | {record.getMessage()}"
 
 class ConsoleFormatter(logging.Formatter):
     """Minimal formatter for console output."""

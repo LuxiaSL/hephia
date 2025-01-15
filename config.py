@@ -78,7 +78,7 @@ class Config:
         ),
         "mistral": ModelConfig(
             provider=ProviderType.OPENROUTER,
-            model_id="mistralai/mistral-7b",
+            model_id="mistralai/mistral-7b-instruct:free",
             max_tokens=250,
             description="Mistral 7B via OpenRouter"
         ),
@@ -144,12 +144,16 @@ class Config:
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05
+    MEMORY_UPDATE_TIMER = 180 # think about this deeper
 
     # ExoProcessor settings
     EXO_MIN_INTERVAL = 30.0  
-    EXO_TIMEOUT = 30.0     
-    LLM_TIMEOUT = 15.0     
-    EXO_MAX_MESSAGES = 20
+    EXO_TIMEOUT = 45.0     
+    LLM_TIMEOUT = 20.0     
+    EXO_MAX_MESSAGES = 30
+
+    # lower = more memories, higher = less memories
+    MEMORY_SIGNIFICANCE_THRESHOLD = 0.6
     
     # unsure how to name this properly; it's for the display in the exo, the llm side? 
     TERMINAL_WIDTH = 50

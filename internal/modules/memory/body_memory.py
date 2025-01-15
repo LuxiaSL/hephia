@@ -284,8 +284,8 @@ class BodyMemory:
                 # Save behavior/mood changes
                 metadata.update({
                     'change_type': event_type,
-                    'old_state': event.data.get('old_state'),
-                    'new_state': event.data.get('new_state')
+                    'old_state': event.data.get('old_name'),
+                    'new_state': event.data.get('new_name')
                 })
                 self.form_memory(metadata)
                 return
@@ -337,7 +337,7 @@ class BodyMemory:
                 raw_state['formation_metadata'] = metadata
             
             # Calculate initial node strength (use cognitive context retrieval here)
-            initial_strength = self._calculate_initial_strength(self.context.get_memory_context(get_cognitive=True))
+            initial_strength = self._calculate_initial_strength(self.context.get_memory_context(is_cognitive=True))
             
             # Create node
             node = BodyMemoryNode(
@@ -346,7 +346,6 @@ class BodyMemory:
                 processed_state=processed_state,
                 strength=initial_strength
             )
-            
 
              # Add to memory and persist
             self.nodes.append(node)
@@ -360,7 +359,7 @@ class BodyMemory:
                 "memory:node_created",
                 {
                     "node_type": "body",
-                    "node": node,
+                    "node_id": node.node_id,
                     "metadata": metadata
                 }
             ))
@@ -560,8 +559,8 @@ class BodyMemory:
         if ('needs' in raw1 and 'needs' in raw2 and
             isinstance(raw1['needs'], dict) and isinstance(raw2['needs'], dict)):
             needs_sim = self._calculate_needs_similarity(
-                {k: v.get('satisfaction', 0.5) for k,v in raw1['needs'].items()},
-                {k: v.get('satisfaction', 0.5) for k,v in raw2['needs'].items()}
+                raw1['needs'],  # Pass the raw needs dictionaries
+                raw2['needs']   # Not the pre-processed satisfaction values
             )
             similarity += needs_sim * 0.2
             components += 0.2
@@ -704,7 +703,7 @@ class BodyMemory:
             
             if with_metrics:
                 # Get current state for metric calculation
-                current_state = self.context.get_memory_context(get_cognitive=False)
+                current_state = self.context.get_memory_context(is_cognitive=False)
                 
                 # Calculate metrics for each node
                 node_metrics = []

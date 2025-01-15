@@ -52,7 +52,7 @@ class HephiaServer:
         self.internal = Internal()
         self.state_bridge = StateBridge(internal=self.internal)
         self.timer = TimerCoordinator()
-        self.environment_registry = EnvironmentRegistry(self.api)
+        self.environment_registry = EnvironmentRegistry(self.api, cognitive_bridge=self.internal.cognitive_bridge)
 
         self.exo_processor = ExoProcessor(
             api_manager=self.api,
@@ -117,7 +117,7 @@ class HephiaServer:
         @self.app.get("/state")
         async def get_state():
             """Get current system state."""
-            return await self.state_bridge.get_api_context()
+            return self.state_bridge.get_api_context()
     
     def setup_event_handlers(self):
         """Set up handlers for system events."""
@@ -137,40 +137,54 @@ class HephiaServer:
     
     async def startup(self):
         """Initialize all systems in correct order."""
-        # retrieve & apply prior state first
-        await self.state_bridge.initialize()
+        try:
+            # retrieve & apply prior state first
+            await self.state_bridge.initialize()
 
-        # init internals
-        await self.internal.start()
-        
-        # init exo
-        await self.exo_processor.initialize()
-        asyncio.create_task(self.exo_processor.start())
-        
-        # simple periodic internal timers
-        self.timer.add_task(
-            name="needs_update",
-            interval=Config.NEED_UPDATE_TIMER,
-            callback=self.internal.update_needs
-        )
-        
-        self.timer.add_task(
-            name="emotions_update",
-            interval=Config.EMOTION_UPDATE_TIMER,
-            callback=self.internal.update_emotions
-        )
-        
-        # Start timer
-        asyncio.create_task(self.timer.run())
+            # init internals
+            await self.internal.start()
+            
+            # init exo
+            await self.exo_processor.initialize()
+            asyncio.create_task(self.exo_processor.start())
+            
+            # simple periodic internal timers
+            self.timer.add_task(
+                name="needs_update",
+                interval=Config.NEED_UPDATE_TIMER,
+                callback=self.internal.update_needs
+            )
+            
+            self.timer.add_task(
+                name="emotions_update",
+                interval=Config.EMOTION_UPDATE_TIMER,
+                callback=self.internal.update_emotions
+            )
+
+            self.timer.add_task(
+                name="memories_update",
+                interval=Config.MEMORY_UPDATE_TIMER,
+                callback=self.internal.update_memories
+            )
+            
+            # Start timer
+            asyncio.create_task(self.timer.run())
+        except Exception as e:
+            await self.shutdown()
+            raise RuntimeError(f"Startup failed: {str(e)}") from e
     
     async def shutdown(self):
         """Clean shutdown of all systems."""
-        self.timer.stop()
-        self.internal.stop()
-        await self.exo_processor.stop()
-        await self.state_bridge._save_session()
+        try:
+            self.timer.stop()
+            self.internal.stop()
+            await self.exo_processor.stop()
+            await self.state_bridge._save_session()
 
-    
+        except Exception as e:
+            self.logger.error(f"Error during shutdown: {str(e)}")
+            raise
+
     async def handle_websocket_connection(self, websocket: WebSocket):
         """
         Handle individual WebSocket connections.
@@ -183,7 +197,7 @@ class HephiaServer:
         
         try:
             # Send initial state
-            initial_state = await self.state_bridge.get_api_context()
+            initial_state = self.state_bridge.get_api_context()
             await websocket.send_json({
                 "type": "initial_state",
                 "data": initial_state

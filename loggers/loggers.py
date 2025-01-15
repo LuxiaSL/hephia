@@ -73,6 +73,30 @@ class InternalLogger:
 
 class BrainLogger:
     """Enhanced logger for cognitive operations."""
+
+    @staticmethod
+    def error(message: str):
+        """Log error-level brain system events."""
+        logger = logging.getLogger('hephia.brain')
+        logger.error(f"Brain Error: {message}")
+
+    @staticmethod
+    def warning(message: str):
+        """Log warning-level brain system events."""
+        logger = logging.getLogger('hephia.brain')
+        logger.warning(f"Brain Warning: {message}")
+
+    @staticmethod
+    def debug(message: str):
+        """Log debug-level brain system events."""
+        logger = logging.getLogger('hephia.brain')
+        logger.debug(f"Brain Debug: {message}")
+
+    @staticmethod
+    def info(message: str):
+        """Log info-level brain system events."""
+        logger = logging.getLogger('hephia.brain')
+        logger.info(f"Brain Info: {message}")
     
     @staticmethod
     def log_llm_exchange(messages: List[Dict], response: str):
@@ -127,7 +151,8 @@ class MemoryLogger:
 
     @staticmethod
     def log_error(message: str):
-        self.error(message)
+        logger = logging.getLogger('hephia.memory')
+        logger.error(message)
 
     @staticmethod
     def error(message: str):
@@ -199,3 +224,52 @@ class MemoryLogger:
             f"  From Memory ID: {from_memory_id}\n"
             f"  To Memory ID: {to_memory_id}"
         )
+
+class EventLogger:
+    """Logger for event system operations."""
+    @staticmethod
+    def error(message: str):
+        """Log error-level event system events."""
+        logger = logging.getLogger('hephia.events')
+        logger.error(f"Event Error: {message}")
+
+    @staticmethod
+    def warning(message: str):
+        """Log warning-level event system events."""
+        logger = logging.getLogger('hephia.events')
+        logger.warning(f"Event Warning: {message}")
+
+    @staticmethod
+    def debug(message: str):
+        """Log debug-level event system events."""
+        logger = logging.getLogger('hephia.events')
+        logger.debug(f"Event Debug: {message}")
+
+    @staticmethod
+    def info(message: str):
+        """Log info-level event system events."""
+        logger = logging.getLogger('hephia.events')
+        logger.info(f"Event Info: {message}")
+
+    @staticmethod
+    def log_event_dispatch(event_type: str, data: Any = None, metadata: Optional[Dict] = None):
+        """Log event dispatch with formatted data and metadata."""
+        logger = logging.getLogger('hephia.events')
+        
+        # Build message components
+        components = [f"Event Dispatched: {event_type}"]
+        
+        if data is not None:
+            if isinstance(data, (dict, list)):
+                data_str = json.dumps(data, indent=2)
+                components.append(f"Data:\n{data_str}")
+            else:
+                components.append(f"Data: {str(data)}")
+                
+        if metadata:
+            meta_str = json.dumps(metadata, indent=2)
+            components.append(f"Metadata:\n{meta_str}")
+        
+        # Join with newlines for debug, keep compact for info
+        logger.debug('\n'.join(components))
+        logger.info(f"Dispatched: {event_type}")

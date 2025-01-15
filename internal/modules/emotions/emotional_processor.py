@@ -441,7 +441,7 @@ class EmotionalProcessor:
 
     def _process_behavior_event(self, data):
         """Processes behavior-related events into emotional vectors."""
-        new_behavior = data['new_behavior']
+        new_behavior = data['new_name']
         mapping = self.EMOTION_MAPPINGS['behavior'].get(new_behavior)
 
         if mapping:
@@ -666,8 +666,8 @@ class EmotionalProcessor:
                 # Add meditation vector to current stimulus
                 self.current_stimulus.add_vector(meditation_vector)
 
-                # Log and dispatch meditation effect
-                global_event_dispatcher.dispatch_event_sync(Event("emotion:meditation", {
+                # Log and dispatch meditation effect (counts as new emotion for systems)
+                global_event_dispatcher.dispatch_event_sync(Event("emotion:new", {
                     "emotion": meditation_vector,
                     "duration": duration
                 }))

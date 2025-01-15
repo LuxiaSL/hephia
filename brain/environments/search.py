@@ -15,6 +15,7 @@ from brain.commands.model import (
     ParameterType,
     CommandResult
 )
+from config import Config
 
 class SearchEnvironment(BaseEnvironment):
     """

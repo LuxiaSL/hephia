@@ -4,6 +4,7 @@ from collections import defaultdict
 import re
 import traceback
 from typing import Any, Callable, Dict, List, Optional
+from loggers import EventLogger
 
 class Event:
     """
@@ -34,6 +35,8 @@ class EventDispatcher:
         """
         self.listeners: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.wildcard_listeners: List[Dict[str, Any]] = []
+        self.event_filter: Optional[str] = None # use one or the other to either choose an event to get rid of/view 
+        self.event_select: Optional[str] = None
 
     def add_listener(self, event_type: str, callback: Callable, priority: int = 0) -> None:
         """
@@ -77,6 +80,13 @@ class EventDispatcher:
         Raises:
             None, but prints error messages for exceptions in listeners.
         """
+        # Check if event should be filtered
+        if self.event_filter and not event.event_type.startswith(self.event_filter + ':'):
+            EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
+
+        if self.event_select and event.event_type.startswith(self.event_select + ':'):
+            EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
+
         # Create a copy of the listeners for this event type
         listeners_to_call = self.listeners[event.event_type].copy()
         

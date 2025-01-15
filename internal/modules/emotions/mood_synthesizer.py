@@ -115,8 +115,7 @@ class MoodSynthesizer:
                 # Dispatch the mood change event with consistent dictionary formatting
                 global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
                     "old_name": old_name,
-                    "new_name": new_name,
-                    "mood_object": new_mood  # Include full object if deeper access is required
+                    "new_name": new_name
                 }))
 
     def _calculate_mood(self, current_needs, recent_emotions, current_behavior):
