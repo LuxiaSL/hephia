@@ -70,9 +70,8 @@ class NeedsManager:
         for need_name in ['boredom', 'loneliness']:
             if need_name in remembered_needs:
                 current = self.needs[need_name].value
-                # Try to get either current_value or value
-                remembered = (remembered_needs[need_name].get('current_value') or 
-                            remembered_needs[need_name].get('value', current))
+                # Get value from the remembered needs structure
+                remembered = remembered_needs[need_name].get('value', current)
                 
                 # Calculate moderate shift toward remembered state
                 shift = (remembered - current) * echo_data.get('intensity', 0.3) * 0.4

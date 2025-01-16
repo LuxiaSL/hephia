@@ -13,6 +13,8 @@ from internal.modules.memory.cognitive_memory_node import CognitiveMemoryNode
 
 import time
 
+from loggers.loggers import BrainLogger
+
 class CognitiveBridge:
     """
     Bridges conscious and subconscious processes, orchestrating memory traversal,
@@ -83,7 +85,7 @@ class CognitiveBridge:
         """
         try:
             # Initial search
-            matching_nodes = self.cognitive_memory.retrieve_memories(topic, self.internal_context.get_memory_context().raw_state, 5)
+            matching_nodes = self.cognitive_memory.retrieve_memories(topic, self.internal_context.get_memory_context(is_cognitive=True), 5)
             if not matching_nodes:
                 return []
 
@@ -146,11 +148,11 @@ class CognitiveBridge:
         """
         try:
             if not context_state:
-                context_state = self.internal_context.get_memory_context()
+                context_state = self.internal_context.get_memory_context(is_cognitive=True)
             # Get memories from cognitive system
             
             raw_state = context_state["raw_state"]
-            memories = self.cognitive_memory.retrieve_memories(query, raw_state, limit)
+            memories = self.cognitive_memory.retrieve_memories(query, context_state, limit)
             if not memories:
                 return []
 
@@ -227,6 +229,7 @@ class CognitiveBridge:
         Generate multi-system meditation effects.
         """
         try:
+            BrainLogger.info(f"Meditating on state: {state} ({intensity}, {duration})")
             intensity = max(0.0, min(1.0, intensity))
             duration = max(1, min(10, duration))
             effects = []

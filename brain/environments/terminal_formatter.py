@@ -35,15 +35,20 @@ class TerminalFormatter:
         behavior_str = f"Behavior: {behavior.get('name', 'Unknown')}"
         
         # Format needs
-        needs_str = ", ".join(f"{k}: {v.get('satisfaction', 0):.2f}" for k, v in needs.items())
+        needs_satisfaction = []
+        for need, details in needs.items():
+            if isinstance(details, dict) and 'satisfaction' in details:
+                satisfaction_pct = details['satisfaction'] * 100
+                needs_satisfaction.append(f"{need}: {satisfaction_pct:.2f}%")
+        needs_str = f"Needs Satisfaction: {', '.join(needs_satisfaction)}"
         
         # Format emotions (if any recent ones exist)
         emotions_str = ""
         if emotional_state:
             recent_emotions = ", ".join(f"{e['name']}({e['intensity']:.2f})" for e in emotional_state)
-            emotions_str = f"\nRecent Emotions: {recent_emotions}"
+            emotions_str = f"\nEmotional State: {recent_emotions}"
 
-        return f"{mood_str}\n{behavior_str}\nNeeds: {needs_str}{emotions_str}"
+        return f"{mood_str}\n{behavior_str}\n{needs_str}{emotions_str}"
     
     @staticmethod
     def format_command_result(result: CommandResult, state: Dict[str, Any]) -> str:

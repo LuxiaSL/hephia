@@ -15,7 +15,7 @@ from core.server import HephiaServer
 from config import Config, ProviderType
 from loggers import LogManager
 from event_dispatcher import global_event_dispatcher
-from display.hephia_tui import start_visualization, handle_cognitive_event, handle_state_event, poll_commands
+from display.hephia_tui import handle_cognitive_event, handle_state_event, start_monitor
 
 LogManager.setup_logging()
 
@@ -85,46 +85,21 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         server = HephiaServer()
 
         # Start interface in a separate thread
-        vis_thread = threading.Thread(target=start_visualization, daemon=True)
+        vis_thread = threading.Thread(target=start_monitor, daemon=True)
         vis_thread.start()
 
         # Hook up event handlers
         # Cognitive context handler
         global_event_dispatcher.add_listener(
             "cognitive:context_update",
-            lambda event: handle_cognitive_event(
-                f"Cognitive State:\n"
-                f"Summary: {event.data.get('processed_state', 'No summary available')}\n"
-                f"Recent Messages:\n" + 
-                "\n".join(
-                    f"  {msg['role']}: {msg['content'][:100]}..." 
-                    for msg in event.data.get('raw_state', [])[-3:]
-                )
-            )
+            lambda event: handle_cognitive_event(event)
         )
 
         # System state handler 
         global_event_dispatcher.add_listener(
             "state:changed",
-            lambda event: handle_state_event(
-                f"System State:\n"
-                f"Mood: {event.data.get('context', {}).get('mood', {}).get('name', 'unknown')} "
-                f"(v:{event.data.get('context', {}).get('mood', {}).get('valence', 0):.2f}, "
-                f"a:{event.data.get('context', {}).get('mood', {}).get('arousal', 0):.2f})\n"
-                f"Behavior: {event.data.get('context', {}).get('behavior', {}).get('name', 'none')}\n"
-                f"Needs: {', '.join(f'{k}: {str(v)}' for k,v in event.data.get('context', {}).get('needs', {}).items())}\n"
-                f"Emotional State: {event.data.get('context', {}).get('emotional_state', 'neutral')}"
-            )
+            lambda event: handle_state_event(event)
         )
-
-        # Poll for commands periodically
-        async def command_polling():
-            while True:
-                poll_commands()
-                await asyncio.sleep(0.5)
-
-        # Add command polling to your server tasks
-        asyncio.create_task(command_polling())
         
         print("""
 Hephia is now active! 

@@ -7,7 +7,7 @@ It manages both HTTP endpoints for commands and WebSocket connections
 for real-time state updates.
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from typing import List, Dict, Any
@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from core.timer import TimerCoordinator
 from core.state_bridge import StateBridge
+from core.event_bridge import EventBridge
 from event_dispatcher import global_event_dispatcher, Event
 from internal.internal import Internal
 from config import Config
@@ -36,6 +37,14 @@ class StateUpdateResponse(BaseModel):
     event_type: str
     data: Dict[str, Any]
 
+class ChatMessage(BaseModel):
+    role: str  # "system", "user", "assistant"
+    content: str
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    stream: bool = False
+
 class HephiaServer:
     """
     Main server class coordinating all Hephia's systems.
@@ -51,6 +60,7 @@ class HephiaServer:
         self.api = APIManager.from_env()
         self.internal = Internal()
         self.state_bridge = StateBridge(internal=self.internal)
+        self.event_bridge = EventBridge(state_bridge=self.state_bridge)
         self.timer = TimerCoordinator()
         self.environment_registry = EnvironmentRegistry(self.api, cognitive_bridge=self.internal.cognitive_bridge)
 
@@ -93,26 +103,41 @@ class HephiaServer:
             await self.handle_websocket_connection(websocket)
         
         @self.app.post("/v1/chat/completions")
-        async def chat_completions(request: CommandRequest):
-            """Handle LLM interactions and commands."""
+        async def handle_conversation(request: ChatRequest = Body(...)):
+            """
+            A conversation endpoint that accepts a full conversation history from the client
+            and returns the next assistant response.
+            """
             try:
-                response = await self.exo_processor.process_command(request.messages)
+                messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        
+                response_text = await self.exo_processor.process_user_conversation(messages)
+                
+                # Return a standard ChatCompletion-like JSON response
                 return {
-                    "id": f"chat-{id(response)}",
-                    "object": "chat.completion",
+                    "id": f"chat-{id(response_text)}",
+                    "object": "chat.completion", 
                     "created": int(time.time()),
-                    "model": "exocortex",
+                    "model": 'hephia',
                     "choices": [{
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "content": response
+                            "content": response_text
                         },
                         "finish_reason": "stop"
                     }]
                 }
             except Exception as e:
+                print(f"Error processing conversation: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
+            
+        @self.app.post("/v1/prune_conversation")
+        async def prune_conversation():
+            """Prune the conversation history."""
+            self.exo_processor.prune_conversation()
+            return {"status": "success"}
+            
         
         @self.app.get("/state")
         async def get_state():
@@ -129,10 +154,6 @@ class HephiaServer:
         global_event_dispatcher.add_listener(
             "internal:action",
             lambda event: asyncio.create_task(self.broadcast_state_update(event))
-        )
-        global_event_dispatcher.add_listener(
-            "timer:task_executed",
-            lambda event: asyncio.create_task(self.handle_timer_event(event))
         )
     
     async def startup(self):
@@ -259,15 +280,6 @@ class HephiaServer:
             except Exception as e:
                 print(f"Error broadcasting to client: {e}")
                 self.active_connections.remove(connection)
-    
-    async def handle_timer_event(self, event: Event):
-        """
-        Handle timer-triggered events.
-        
-        Args:
-            event: The timer event to handle
-        """
-        await self.state_bridge.process_timer_event(event)
     
     def run(self, host: str = "0.0.0.0", port: int = 8000):
         """

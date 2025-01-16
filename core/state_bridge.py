@@ -105,13 +105,12 @@ class StateBridge:
     async def update_cognitive_state(self, event: Event):
         """Update cognitive state and broadcast API context."""
         async with self.state_lock:
-            try:
-                # Update cognitive state
-                self.persistent_state.brain_state = event.data.get('raw_state', {})
-                await self.update_state()
-            except Exception as e:
-                print(f"Error updating cognitive state: {e}")
-                raise
+            self.persistent_state.brain_state = event.data.get('raw_state', {})
+        try:
+            await self.update_state()
+        except Exception as e:
+            print(f"Error updating cognitive state: {e}")
+            raise
 
     def _validate_brain_state(self, state: Any) -> Optional[List[Dict[str, str]]]:
         """Validate and normalize brain state structure."""
@@ -167,14 +166,6 @@ class StateBridge:
             except Exception as e:
                 print(f"Error updating state: {e}")
                 raise
-    
-    async def process_timer_event(self, event: Event):
-        """Handle timer-triggered state updates."""
-        if self.internal:
-            try:
-                await self.update_state()
-            except Exception as e:
-                print(f"Error processing timer event: {e}")
     
     # Database operations
     async def _init_database(self):

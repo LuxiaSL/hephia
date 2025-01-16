@@ -35,8 +35,8 @@ class EventDispatcher:
         """
         self.listeners: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.wildcard_listeners: List[Dict[str, Any]] = []
-        self.event_filter: Optional[str] = None # use one or the other to either choose an event to get rid of/view 
-        self.event_select: Optional[str] = None
+        self.event_filter: List[str] = ['timer', 'state', 'need', 'emotion'] # list of event types to filter out
+        self.event_select: List[str] = None # list of event types to select
 
     def add_listener(self, event_type: str, callback: Callable, priority: int = 0) -> None:
         """
@@ -81,11 +81,15 @@ class EventDispatcher:
             None, but prints error messages for exceptions in listeners.
         """
         # Check if event should be filtered
-        if self.event_filter and not event.event_type.startswith(self.event_filter + ':'):
-            EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
+        # Log events that don't start with any filtered prefixes
+        if self.event_filter:
+            if not any(event.event_type.startswith(prefix + ':') for prefix in self.event_filter):
+                EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
 
-        if self.event_select and event.event_type.startswith(self.event_select + ':'):
-            EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
+        # Log events that start with any selected prefixes
+        if self.event_select:
+            if any(event.event_type.startswith(prefix + ':') for prefix in self.event_select):
+                EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
 
         # Create a copy of the listeners for this event type
         listeners_to_call = self.listeners[event.event_type].copy()

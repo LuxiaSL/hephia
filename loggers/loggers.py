@@ -260,8 +260,15 @@ class EventLogger:
         components = [f"Event Dispatched: {event_type}"]
         
         if data is not None:
-            if isinstance(data, (dict, list)):
-                data_str = json.dumps(data, indent=2)
+            if isinstance(data, dict):
+                # Convert any EmotionalVector objects to dictionaries
+                processed_data = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in data.items()}
+                data_str = json.dumps(processed_data, indent=2)
+                components.append(f"Data:\n{data_str}")
+            elif isinstance(data, list):
+                # Convert any EmotionalVector objects in list
+                processed_data = [item.to_dict() if hasattr(item, 'to_dict') else item for item in data]
+                data_str = json.dumps(processed_data, indent=2)
                 components.append(f"Data:\n{data_str}")
             else:
                 components.append(f"Data: {str(data)}")

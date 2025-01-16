@@ -25,6 +25,32 @@ class EmotionalVector:
         self.name = name
         self.timestamp = time.time()
 
+    def to_dict(self):
+        """Serializes EmotionalVector to dictionary."""
+        return {
+            'valence': self.valence,
+            'arousal': self.arousal,
+            'intensity': self.intensity,
+            'source_type': self.source_type,
+            'source_data': self.source_data,
+            'name': self.name,
+            'timestamp': self.timestamp
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        """Creates EmotionalVector from dictionary."""
+        vector = cls(
+            valence=data['valence'],
+            arousal=data['arousal'],
+            intensity=data['intensity'],
+            source_type=data.get('source_type'),
+            source_data=data.get('source_data'),
+            name=data.get('name')
+        )
+        vector.timestamp = data.get('timestamp', time.time())
+        return vector
+
     def __repr__(self):
         return (f"EmotionalVector(name={self.name}, valence={self.valence:.2f}, "
                 f"arousal={self.arousal:.2f}, intensity={self.intensity:.2f}, "
@@ -594,40 +620,46 @@ class EmotionalProcessor:
         if not echo_data or 'metadata' not in echo_data:
             return
             
-        # Extract core emotional data from echo
+        # Extract metadata and check for mood since emotional array is empty
         metadata = echo_data['metadata']
-        intensity = echo_data.get('intensity', 0.3)  # Default moderate intensity if not specified
-        
-        # Process the primary emotional state (first vector)
+        intensity = echo_data.get('intensity', 0.3)
+
+        # First try emotional data
         if 'emotional' in metadata and metadata['emotional']:
             primary_emotion = metadata['emotional'][0]
+            emotion_source = primary_emotion
+        # Fall back to mood data if available
+        elif 'mood' in metadata and metadata['mood'].get('mood'):
+            emotion_source = metadata['mood']['mood']
+        else:
+            return
             
-            # Create echo vector from primary emotion
-            echo_vector = EmotionalVector(
-                valence=primary_emotion['valence'],
-                arousal=primary_emotion['arousal'],
-                intensity=intensity * primary_emotion.get('intensity', 1.0),
-                source_type='memory_echo',
-                source_data={'echo_source': echo_data.get('source_node')},
-                name=primary_emotion.get('name', 'echo')
-            )
-            
-            # Apply echo-specific dampening
-            category = self._categorize_vector(echo_vector.valence, echo_vector.arousal)
-            echo_dampening = self._calculate_dampening(category) * 0.7  # Echo specific reduction
-            echo_vector.intensity *= echo_dampening
-            
-            # Add echo vector to current stimulus
-            self.current_stimulus.add_vector(echo_vector)
-            
-            # Log and dispatch the echo vector
-            global_event_dispatcher.dispatch_event_sync(Event("emotion:echo", {
-                "emotion": echo_vector,
-                "source": echo_data.get('source_node')
-            }))
-            
-            # Process influences on echo vector
-            self._process_influences(echo_vector)
+        # Create echo vector from emotion source
+        echo_vector = EmotionalVector(
+            valence=emotion_source['valence'],
+            arousal=emotion_source['arousal'], 
+            intensity=intensity * emotion_source.get('intensity', 0.25),
+            source_type='memory_echo',
+            source_data={'echo_source': echo_data.get('source_node')},
+            name=emotion_source.get('name', 'echo')
+        )
+        
+        # Apply echo-specific dampening
+        category = self._categorize_vector(echo_vector.valence, echo_vector.arousal)
+        echo_dampening = self._calculate_dampening(category) * 0.7  # Echo specific reduction
+        echo_vector.intensity *= echo_dampening
+        
+        # Add echo vector to current stimulus
+        self.current_stimulus.add_vector(echo_vector)
+        
+        # Log and dispatch the echo vector
+        global_event_dispatcher.dispatch_event_sync(Event("emotion:echo", {
+            "emotion": echo_vector,
+            "source": echo_data.get('source_node')
+        }))
+        
+        # Process influences on echo vector
+        self._process_influences(echo_vector)
 
     def process_meditation(self, event):
         """Processes meditation events for emotional influence."""

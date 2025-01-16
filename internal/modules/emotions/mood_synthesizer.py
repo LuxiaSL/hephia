@@ -241,46 +241,44 @@ class MoodSynthesizer:
         echo_data = event.data
         if not echo_data or 'metadata' not in echo_data:
             return
-
+            
         metadata = echo_data['metadata']
-        if not metadata.get('emotional'):
-            return
+        
+        # Extract mood influence from metadata if available
+        mood_data = metadata.get('mood', {}).get('mood', {})
+        if mood_data and 'valence' in mood_data and 'arousal' in mood_data:
+            # Scale echo influence by the echo intensity 
+            echo_intensity = echo_data.get('intensity', 0.3) * 0.4  # Reduced influence
+            echo_valence = mood_data['valence'] * echo_intensity  
+            echo_arousal = mood_data['arousal'] * echo_intensity
 
-        # Get the primary emotional state from the echo
-        primary_emotion = metadata['emotional'][0]
+            # Create temporary mood nudge combining current mood and echo
+            echo_mood = Mood(
+                valence=self.current_mood.valence + (echo_valence * self.weights['emotions']),
+                arousal=self.current_mood.arousal + (echo_arousal * self.weights['emotions'])
+            )
 
-        # Scale echo influence by the echo intensity and mood system weights
-        echo_intensity = echo_data.get('intensity', 0.3) * 0.4  # Reduced influence vs direct emotions
-        echo_valence = primary_emotion['valence'] * echo_intensity
-        echo_arousal = primary_emotion['arousal'] * echo_intensity
-
-        # Create temporary mood nudge from echo
-        echo_mood = Mood(
-            valence=self.current_mood.valence + (echo_valence * self.weights['emotions']),
-            arousal=self.current_mood.arousal + (echo_arousal * self.weights['emotions'])  
-        )
-
-        # Update mood if the echo influence is significant
-        if abs(echo_mood.valence - self.current_mood.valence) > 0.1 or \
-           abs(echo_mood.arousal - self.current_mood.arousal) > 0.1:
-            
-            # Clamp values
-            echo_mood.valence = max(-1.0, min(1.0, echo_mood.valence))
-            echo_mood.arousal = max(-1.0, min(1.0, echo_mood.arousal))
-            
-            # Apply the echo-influenced mood
-            old_name = self.current_mood_name
-            self.current_mood = echo_mood
-            new_name = self._map_mood_to_name(echo_mood)
-            
-            if new_name != old_name:
-                self.current_mood_name = new_name
-                global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
-                    "old_name": old_name,
-                    "new_name": new_name,
-                    "mood_object": echo_mood,
-                    "source": "memory_echo"
-                }))
+            # Update mood if the echo influence is significant
+            if abs(echo_mood.valence - self.current_mood.valence) > 0.1 or \
+               abs(echo_mood.arousal - self.current_mood.arousal) > 0.1:
+                
+                # Clamp values
+                echo_mood.valence = max(-1.0, min(1.0, echo_mood.valence))
+                echo_mood.arousal = max(-1.0, min(1.0, echo_mood.arousal))
+                
+                # Apply the echo-influenced mood
+                old_name = self.current_mood_name
+                self.current_mood = echo_mood
+                new_name = self._map_mood_to_name(echo_mood)
+                
+                if new_name != old_name:
+                    self.current_mood_name = new_name
+                    global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
+                        "old_name": old_name,
+                        "new_name": new_name,
+                        "mood_object": echo_mood,
+                        "source": "memory_echo"
+                    }))
 
     def process_meditation(self, event):
         """

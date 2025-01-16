@@ -353,7 +353,7 @@ class CognitiveMemory:
 
         Args:
             query: The query string to retrieve relevant memories
-            given_state: The given internal state for comparison
+            given_state: The given internal state for comparison (from is_cognitive, raw_state, processed_state)
             top_k: Number of top memories to retrieve
             return_details: If True, returns detailed retrieval metrics alongside nodes
             
@@ -463,6 +463,9 @@ class CognitiveMemory:
             metrics['emotional'] = emotional_metrics
             
             # 3. State Analysis (broken down by component)
+            print("Debug - target_node.raw_state: ", target_node.raw_state)
+            print("Debug - target_node.processed_state: ", target_node.processed_state)
+            print("Debug - comparison_state: ", comparison_state)
             state_metrics = self._calculate_state_metrics(
                 target_node.raw_state,
                 target_node.processed_state,
@@ -1801,11 +1804,39 @@ class CognitiveMemory:
         Orchestrate echo activation and handle strength adjustments based on 
         comprehensive evaluation metrics.
         """
-        if not comparison_state:
+        # Validate comparison state structure
+        valid_comparison_state = True
+        if comparison_state:
+            # Check for required structure
+            if not ('raw_state' in comparison_state and 'processed_state' in comparison_state):
+                self.logger.warning(
+                    "Invalid comparison state structure received in trigger_echo. "
+                    f"State: {comparison_state}, Query: {query_text}"
+                )
+                valid_comparison_state = False
+
+        # Get current context if no valid comparison state
+        if not comparison_state or not valid_comparison_state:
             comparison_state = self.internal_context.get_memory_context(is_cognitive=True)
+            self.logger.warning(f"Replacing with {comparison_state} in trigger_echo")
+            if not comparison_state:
+                self.logger.error("Failed to get cognitive memory context in trigger_echo")
+                return
+
+        # Extract query text from processed state if not provided
         if not query_text:
-            query_text = comparison_state['processed_state']['cognitive']
-        if not query_embedding:
+            # Safely try to get from processed state cognitive field
+            try:
+                query_text = comparison_state.get('processed_state', {}).get('cognitive', '')
+                if not query_text:
+                    self.logger.warning("No query text found in processed state")
+                    # Could set a default here if needed
+            except Exception as e:
+                self.logger.warning(f"Error extracting query text from state: {e}")
+                query_text = ''  # Set empty default
+
+        # Generate embedding if needed
+        if not query_embedding and query_text:
             query_embedding = self._generate_embedding(query_text)
             
         selected_node, final_intensity, details = self.evaluate_echo(node, comparison_state, query_text, query_embedding)

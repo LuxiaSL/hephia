@@ -44,6 +44,7 @@ class ExoProcessor:
         self.last_successful_turn = None
         self.is_running = False
         self.last_environment = None
+        self.summary = None
         
         # timing convert
         self.min_interval = timedelta(seconds=Config.EXO_MIN_INTERVAL)
@@ -55,6 +56,7 @@ class ExoProcessor:
         initial_cognitive_state = self.state_bridge.persistent_state.brain_state
         # brain_state will already be validated list from state bridge
         if initial_cognitive_state:
+            BrainLogger.debug(f"Loaded initial cognitive state: {initial_cognitive_state}")
             self.conversation_history = initial_cognitive_state
             return
 
@@ -143,6 +145,8 @@ class ExoProcessor:
                     error_message = TerminalFormatter.format_error(error)
                     self._add_to_history("assistant", llm_response)
                     self._add_to_history("user", error_message)
+                    print("LUXIA: announcing cognitive context")
+                    await self.announce_cognitive_context()
                     return error_message
                 
                 # Execute command
@@ -155,7 +159,6 @@ class ExoProcessor:
                     print("LUXIA: command failed:")
                     print("result: ", result)
                     print("command ", command)
-                    return "died"
 
                 # Command succeeded, format response and continue processing
                 formatted_response = TerminalFormatter.format_command_result(
@@ -212,6 +215,17 @@ class ExoProcessor:
             max_tokens=model_config.max_tokens,
             return_content_only=True
         )
+    
+    def prune_conversation(self):
+        """Remove the last message pair from conversation history and update state."""
+        if len(self.conversation_history) > 2:  # Keep system prompt + at least 1 exchange
+            # Remove last two messages (user/assistant pair)
+            self.conversation_history = self.conversation_history[:-2]
+            
+            # Trigger cognitive context update to propagate changes
+            asyncio.create_task(self.announce_cognitive_context())
+            
+            BrainLogger.debug("Pruned last conversation pair")
 
     async def _execute_command(
         self,
@@ -339,6 +353,8 @@ Keep focus on key points and changes. Be concise and clear. Think of summarizing
         for state bridge and internal systems to process.
         """
         processed_state = await self._summarize_conversation()
+        BrainLogger.debug(f"conversation history: {self.conversation_history}")
+        self.summary = processed_state
         global_event_dispatcher.dispatch_event(Event(
             "cognitive:context_update",
             {
@@ -888,3 +904,72 @@ Respond with only the final text. No explanations or meta-commentary."""
             if not isinstance(e, LLMError):
                 raise LLMError(error_msg) from e
             raise
+
+    ##############################
+    # User Conversation Handlers #
+    ##############################
+    async def process_user_conversation(self, conversation: List[Dict[str, str]]) -> str:
+        """
+        Process a conversation provided by the client (messages array) 
+        and return a one-turn completion from the LLM.
+        
+        'conversation' is a list of dicts with 'role' and 'content', 
+        similar to the standard ChatGPT format.
+        """
+        # 1. Get the current state to add as context, if desired
+        current_internal_state = self.state_bridge.get_api_context()
+        state_summary = TerminalFormatter.format_context_summary(current_internal_state)
+        
+        # 2. Create a new conversation buffer we’ll pass to the LLM
+        #    - Insert an internal system prompt with your config
+        #    - Then insert the user’s conversation
+        
+        new_convo = []
+        
+        new_convo.append({
+            "role": "system",
+            "content": Config.USER_SYSTEM_PROMPT
+        })
+
+        cognitive_summary = self.summary or "No cognitive summary available."
+        
+        # Optionally, insert a state summary or environment summary as a “system” or “assistant” message
+        # to ensure the LLM sees it as context, not user content:
+        new_convo.append({
+            "role": "system",
+            "content": f"[State Summary]\n{state_summary}\n[Current Thought Processes]\n{cognitive_summary}"
+        })
+        
+        # Now append the user-supplied conversation
+        # (Take care to ensure it’s in the standard OpenAI format: "role": "user"|"assistant"|"system", "content": "...")
+        for msg in conversation:
+            new_convo.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+        
+        # 3. Call the LLM 
+        # In your code, you can either replicate `_get_llm_response` 
+        # or reuse `_one_turn_llm_call` if it suits your needs. 
+        # For clarity, let's do a minimal direct approach:
+        
+        model_name = Config.get_cognitive_model()
+        model_config = Config.AVAILABLE_MODELS[model_name]
+        
+        try:
+            result = await self.api.create_completion(
+                provider=model_config.provider.value,
+                model=model_config.model_id,
+                messages=new_convo,
+                temperature=model_config.temperature,
+                max_tokens=model_config.max_tokens,
+                return_content_only=True
+            )
+            
+            if not result or not isinstance(result, str) or len(result.strip()) == 0:
+                raise LLMError("Got empty or invalid response from LLM.")
+            
+            return result
+        
+        except Exception as e:
+            raise LLMError(f"Failed to process user conversation: {str(e)}") from e

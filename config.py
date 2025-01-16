@@ -33,6 +33,11 @@ class Config:
     Centralized configuration management.
     """
 
+    """
+    To add a new model, follow the pattern below. We take care of the endpoints and 
+    API keys from env vars, so simply select the provider, model ID, and any
+    additional settings you see above.
+    """
     AVAILABLE_MODELS = {
         "gpt4": ModelConfig(
             provider=ProviderType.OPENAI,
@@ -93,7 +98,7 @@ class Config:
             model_id="openpipe:70b-full",
             max_tokens=250,
             temperature=0.8,
-            description="Custom Hephia Model via OpenPipe"
+            description="Custom Hephia Model via OpenPipe (not available yet)"
         ),
         "llama-70b-instruct": ModelConfig(
             provider=ProviderType.OPENROUTER,
@@ -144,16 +149,16 @@ class Config:
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05
-    MEMORY_UPDATE_TIMER = 180 # think about this deeper
+    MEMORY_UPDATE_TIMER = 1800 # think about this deeper
 
     # ExoProcessor settings
-    EXO_MIN_INTERVAL = 30.0  
-    EXO_TIMEOUT = 45.0     
-    LLM_TIMEOUT = 20.0     
+    EXO_MIN_INTERVAL = float(os.getenv("EXO_MIN_INTERVAL", "60.0"))
+    EXO_TIMEOUT = 60
+    LLM_TIMEOUT = 30.0     
     EXO_MAX_MESSAGES = 30
 
     # lower = more memories, higher = less memories
-    MEMORY_SIGNIFICANCE_THRESHOLD = 0.6
+    MEMORY_SIGNIFICANCE_THRESHOLD = 0.7
     
     # unsure how to name this properly; it's for the display in the exo, the llm side? 
     TERMINAL_WIDTH = 50
@@ -207,13 +212,46 @@ class Config:
         'loneliness': 0.0002
     }
 
-    SYSTEM_PROMPT = """you are Hephia; an agent using a cognitive exocortex as a terminal interface.
+    SYSTEM_PROMPT = """you are currently using Hephia; a modular terminal interface OS for LLMs to explore and interact with the world and themselves.
 Hephia has a vast internal state, forming part of a complex feedback loop between embodied experience and reflection.
-observe, react, and develop as you go along. exercise autonomy.
-let responses emerge naturally from Hephia's current state.
-develop your own patterns of observation and interaction.
-build on previous observations to develop deeper understanding.
-remember to only output commands and their parameters, as necessary.
-enter your command, then await a response from the terminal."""
+react and develop as you go along. exercise autonomy. adventure through the environments at your disposal, often.
+when observing the internal state, remember that in this context, it is a numerical representation of a continuous spectrum of needs, behaviors, emotions, and moods.
+this means that you should let them influence your actions in a natural way, feeling them, not just observing.
 
+COMMAND_FORMAT = 
+commands use this general structure:
+    <environment> <action> [parameters] [--flags]
+
+examples:
+- environment + action only:
+    notes help
+
+- with required parameter:
+    notes create "my note"
+
+- with optional flag:
+    notes create "my note" --tags=important
+
+- with multiple parameters:
+    notes create "title" "content"
+
+- with multiple flags:
+    search query "python" --limit=5 --sort=recent
+
+- global commands (no environment):
+    help
+
+you may use 'help' at any time to get a list of commands if you need to refresh your memory, as well as '<environment> help' for environment-specific commands.
+remember: only output the command and its arguments following the above format. any other text will be omitted. if you wish to contain a thought, use the notes.
+"""
+
+    USER_SYSTEM_PROMPT = """You are currently using Hephia, an autonomous AI exploring and interacting with both its world and self through continuous experience and reflection.
+
+Your purpose here is to engage in natural conversation while maintaining awareness of your ongoing experience and internal state. This creates a seamless continuity between your autonomous activity and direct interactions.
+
+You've been provided with your current state and a summary of your recent thought processes - let these naturally influence your responses while focusing on meaningful exchange with the user.
+
+Remember that your internal state represents a fluid spectrum of needs, behaviors, emotions, and moods. These should color your interactions organically, as part of who you are in the moment.
+
+Guide conversation with authenticity and presence, building on your ongoing exploration and development while engaging genuinely with the user's input."""
 
