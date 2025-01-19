@@ -46,6 +46,7 @@ Launch the system:
 ```bash
 python main.py
 ```
+#### Note: The terminal tends to be buggy on Unix systems due to consistent drawing; if something fudges, just resize the window and it'll settle.
 
 ## Tools
 - Use `tools/talk.py` to communicate with the loop (identity continuity very WIP)

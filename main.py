@@ -34,11 +34,13 @@ def validate_configuration():
         ProviderType.ANTHROPIC: "ANTHROPIC_API_KEY",
         ProviderType.GOOGLE: "GOOGLE_API_KEY",
         ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
-        ProviderType.PERPLEXITY: "PERPLEXITY_API_KEY"
+        ProviderType.PERPLEXITY: "PERPLEXITY_API_KEY",
+        ProviderType.CHAPTER2: "CHAPTER2_API_KEY",
+        ProviderType.CHAPTER2: "CHAPTER2_SOCKET_PATH"
     }
     
     # Validate model configurations
-    for role in ['cognitive', 'validation', 'fallback']:
+    for role in ['cognitive', 'validation', 'fallback', 'summary']:
         model_name = getattr(Config, f'get_{role}_model')()
         
         if model_name not in Config.AVAILABLE_MODELS:
@@ -122,7 +124,6 @@ Press Ctrl+C to shutdown gracefully
     except KeyboardInterrupt:
         print("\n\n🌙 Shutting down Hephia...")
         await server.shutdown()
-        vis_thread.stop()
         print("Goodbye!\n")
     except Exception as e:
         print(f"\n❌ Fatal error occurred: {e}")

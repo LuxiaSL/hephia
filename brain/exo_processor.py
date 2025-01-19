@@ -125,40 +125,40 @@ class ExoProcessor:
                 # Get LLM response
                 llm_response = await self._get_llm_response()
 
-                print(llm_response)
-                print("LUXIA: got response")
+                #print(llm_response)
+                #print("LUXIA: got response")
                 # Process into command
                 command, error = await self.command_preprocessor.preprocess_command(
                     llm_response,
                     self.environment_registry.get_available_commands()
                 )
 
-                print("LUXIA: got processed command result")
-                if command:
-                    print(command)
-                if error:
-                    print(error)
+                #print("LUXIA: got processed command result")
+                #if command:
+                    #print(command)
+                #if error:
+                    #print(error)
 
                 # Handle preprocessing errors
                 if not command or error:
-                    print("LUXIA: crashed out")
+                    #print("LUXIA: crashed out")
                     error_message = TerminalFormatter.format_error(error)
                     self._add_to_history("assistant", llm_response)
                     self._add_to_history("user", error_message)
-                    print("LUXIA: announcing cognitive context")
+                    #print("LUXIA: announcing cognitive context")
                     await self.announce_cognitive_context()
                     return error_message
                 
                 # Execute command
-                print("LUXIA: getting current state")
+                #print("LUXIA: getting current state")
                 current_state = self.state_bridge.get_api_context()
-                print("LUXIA: executing command")
+                #print("LUXIA: executing command")
                 result = await self._execute_command(command, current_state)
-                print("LUXIA: command done")
-                if not result or not result.success:
-                    print("LUXIA: command failed:")
-                    print("result: ", result)
-                    print("command ", command)
+                #print("LUXIA: command done")
+                #if not result or not result.success:
+                    #print("LUXIA: command failed:")
+                    #print("result: ", result)
+                    #print("command ", command)
 
                 # Command succeeded, format response and continue processing
                 formatted_response = TerminalFormatter.format_command_result(
@@ -166,7 +166,7 @@ class ExoProcessor:
                     current_state
                 )
 
-                print("LUXIA: getting memories")
+                #print("LUXIA: getting memories")
                 # Retrieve memories for next turn
                 memories = await self._retrieve_related_memories(
                     llm_response=llm_response,
@@ -175,21 +175,21 @@ class ExoProcessor:
                 )
 
                 if memories:
-                    print("memories: ", memories)
+                    #print("memories: ", memories)
                     formatted_response = TerminalFormatter.format_memories(memories, formatted_response)
 
                 # Update conversation
                 self._add_to_history("assistant", llm_response)
                 self._add_to_history("user", formatted_response)
-                print(formatted_response)
+                #print(formatted_response)
                 self.last_successful_turn = datetime.now()
 
                 # Internal significance check
-                print("LUXIA: checking significance")
+                #print("LUXIA: checking significance")
                 await self.check_significance(command, llm_response, result)
 
                 # Announce cognitive context
-                print("LUXIA: announcing cognitive context")
+                #print("LUXIA: announcing cognitive context")
                 await self.announce_cognitive_context()
 
                 BrainLogger.log_turn_end(True)

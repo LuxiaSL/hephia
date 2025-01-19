@@ -17,6 +17,7 @@ class ProviderType(Enum):
     GOOGLE = "google"
     OPENROUTER = "openrouter"
     PERPLEXITY = "perplexity"
+    CHAPTER2 = "chapter2"
 
 @dataclass
 class ModelConfig:
@@ -118,6 +119,12 @@ class Config:
             max_tokens=550,
             description="LLaMA 3.1 405B Base via OpenRouter"
         ),
+        "chapter2": ModelConfig(
+            provider=ProviderType.CHAPTER2,
+            model_id="foo",
+            max_tokens=500,
+            description="Elena"
+        )
     }
 
     # Core LLM configuration - these will be overridden by env vars if present
@@ -146,6 +153,10 @@ class Config:
         """Get the fallback model from env or default."""
         return os.getenv("FALLBACK_MODEL", cls.FALLBACK_MODEL)
     
+    # set to desired values
+    CHAPTER2_SOCKET_PATH = os.getenv("CHAPTER2_SOCKET_PATH", "/tmp/chapter2.sock")
+    CHAPTER2_HTTP_PORT = int(os.getenv("CHAPTER2_HTTP_PORT", "6005"))
+    
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05
@@ -160,10 +171,6 @@ class Config:
     # lower = more memories, higher = less memories
     MEMORY_SIGNIFICANCE_THRESHOLD = 0.7
     
-    # unsure how to name this properly; it's for the display in the exo, the llm side? 
-    TERMINAL_WIDTH = 50
-    MAX_RECENT_EMOTIONS = 3
-
     # Initial needs
     INITIAL_HUNGER = 0
     INITIAL_THIRST = 0

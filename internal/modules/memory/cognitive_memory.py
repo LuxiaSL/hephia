@@ -463,9 +463,6 @@ class CognitiveMemory:
             metrics['emotional'] = emotional_metrics
             
             # 3. State Analysis (broken down by component)
-            print("Debug - target_node.raw_state: ", target_node.raw_state)
-            print("Debug - target_node.processed_state: ", target_node.processed_state)
-            print("Debug - comparison_state: ", comparison_state)
             state_metrics = self._calculate_state_metrics(
                 target_node.raw_state,
                 target_node.processed_state,
@@ -860,8 +857,7 @@ class CognitiveMemory:
             
         except Exception as e:
             import traceback
-            print("Debug - Full error in state metric calculation:")
-            print(traceback.format_exc())
+            self.logger.log_error(traceback.format_exc())
             self.logger.log_error(f"State metric calculation failed: {e}")
             return {'error': str(e)}
         
@@ -1600,7 +1596,7 @@ class CognitiveMemory:
                 return None, 0.0, []
             
             # Evaluate parent node using full retrieval metrics
-            print("Debug - Evaluating parent node:", node.node_id)
+            self.logger.debug("Debug - Evaluating parent node:", node.node_id)
             parent_metrics = self.calculate_retrieval_metrics(
                 target_node=node,
                 comparison_state=current_state,
@@ -1610,20 +1606,20 @@ class CognitiveMemory:
                 query_embedding=query_embedding
             )
             
-            print("Debug - Parent metrics:", parent_metrics)
+            #print("Debug - Parent metrics:", parent_metrics)
             
             if parent_metrics and 'final_score' in parent_metrics:
                 try:
                     # Validate state metrics structure
                     state_metrics = parent_metrics['component_metrics']['state']
-                    print("Debug - Parent state metrics structure:", state_metrics)
+                    self.logger.debug("Debug - Parent state metrics structure:", state_metrics)
                     
                     # Calculate state alignment with validation
                     valid_components = [
                         comp for comp in state_metrics.values()
                         if isinstance(comp, dict) and len(comp) > 0
                     ]
-                    print("Debug - Parent valid state components:", valid_components)
+                    self.logger.debug("Debug - Parent valid state components:", valid_components)
                     
                     if not valid_components:
                         self.logger.warning("No valid state components found for alignment calculation")
@@ -1637,7 +1633,7 @@ class CognitiveMemory:
                         
                         state_alignment = (sum(component_sums) / len(valid_components)) if component_sums else 0.0
                     
-                    print("Debug - Parent state alignment calculated:", state_alignment)
+                    self.logger.debug("Debug - Parent state alignment calculated:", state_alignment)
                     
                     # Use components to calculate echo potential
                     echo_components = {
@@ -1652,7 +1648,7 @@ class CognitiveMemory:
                         'state_alignment': state_alignment
                     }
                     
-                    print("Debug - Parent echo components calculated:", echo_components)
+                    self.logger.debug("Debug - Parent echo components calculated:", echo_components)
                     
                     echo_intensity = (
                         echo_components['semantic_match'] * 0.3 +
@@ -1672,14 +1668,14 @@ class CognitiveMemory:
                     })
                 except Exception as e:
                     self.logger.error(f"Failed to calculate parent echo components: {str(e)}")
-                    print("Debug - Parent error details:", e.__class__.__name__, str(e))
+                    self.logger.debug("Debug - Parent error details:", e.__class__.__name__, str(e))
                     return None, 0.0, []
 
             # Evaluate ghost nodes using same metrics system
-            print(f"Debug - Evaluating {len(node.ghost_nodes)} ghost nodes")
+            self.logger.debug(f"Debug - Evaluating {len(node.ghost_nodes)} ghost nodes")
             for ghost in node.ghost_nodes:
                 try:
-                    print(f"Debug - Processing ghost node: {ghost.get('node_id')}")
+                    self.logger.debug(f"Debug - Processing ghost node: {ghost.get('node_id')}")
                     # Create temporary node structure for ghost evaluation
                     ghost_node = CognitiveMemoryNode(
                         node_id=ghost['node_id'],
@@ -1704,19 +1700,19 @@ class CognitiveMemory:
                         query_embedding=query_embedding
                     )
                     
-                    print("Debug - Ghost metrics:", ghost_metrics)
+                    self.logger.debug("Debug - Ghost metrics:", ghost_metrics)
                     
                     if ghost_metrics and 'final_score' in ghost_metrics:
                         # Validate ghost state metrics structure
                         ghost_state_metrics = ghost_metrics['component_metrics']['state']
-                        print("Debug - Ghost state metrics structure:", ghost_state_metrics)
+                        self.logger.debug("Debug - Ghost state metrics structure:", ghost_state_metrics)
                         
                         # Calculate ghost state alignment with validation
                         valid_ghost_components = [
                             comp for comp in ghost_state_metrics.values()
                             if isinstance(comp, dict) and len(comp) > 0
                         ]
-                        print("Debug - Ghost valid state components:", valid_ghost_components)
+                        self.logger.debug("Debug - Ghost valid state components:", valid_ghost_components)
                         
                         if not valid_ghost_components:
                             self.logger.warning(f"No valid state components found for ghost {ghost['node_id']}")
@@ -1730,7 +1726,7 @@ class CognitiveMemory:
                             
                             ghost_state_alignment = (sum(ghost_component_sums) / len(valid_ghost_components)) if ghost_component_sums else 0.0
                         
-                        print("Debug - Ghost state alignment calculated:", ghost_state_alignment)
+                        self.logger.debug("Debug - Ghost state alignment calculated:", ghost_state_alignment)
                         
                         # Calculate ghost echo components
                         ghost_echo_components = {
@@ -1745,7 +1741,7 @@ class CognitiveMemory:
                             'state_alignment': ghost_state_alignment
                         }
                         
-                        print("Debug - Ghost echo components calculated:", ghost_echo_components)
+                        self.logger.debug("Debug - Ghost echo components calculated:", ghost_echo_components)
                         
                         ghost_echo_intensity = (
                             ghost_echo_components['semantic_match'] * 0.3 +
@@ -1768,7 +1764,7 @@ class CognitiveMemory:
                         })
                 except Exception as e:
                     self.logger.error(f"Failed to calculate ghost echo components: {str(e)}")
-                    print("Debug - Ghost error details:", e.__class__.__name__, str(e))
+                    self.logger.debug("Debug - Ghost error details:", e.__class__.__name__, str(e))
                     continue
             
             if not evaluations:
@@ -1779,7 +1775,7 @@ class CognitiveMemory:
             selected = max(evaluations, key=lambda x: x["echo"]["intensity"] * x["relevance"])
             final_intensity = selected["echo"]["intensity"] * selected["relevance"]
             
-            print("Debug - Final evaluation selected:", {
+            self.logger.debug("Debug - Final evaluation selected:", {
                 "node_id": selected["node"].node_id,
                 "intensity": final_intensity,
                 "is_ghost": selected["is_ghost"]
@@ -1789,7 +1785,7 @@ class CognitiveMemory:
             
         except Exception as e:
             self.logger.error(f"Unexpected error in evaluate_echo: {str(e)}")
-            print("Debug - Critical error:", e.__class__.__name__, str(e))
+            self.logger.debug("Debug - Critical error:", e.__class__.__name__, str(e))
             return None, 0.0, []
 
     async def trigger_echo(
@@ -2305,8 +2301,7 @@ class CognitiveMemory:
             
         except Exception as e:
             import traceback
-            print("Debug - Full error in memory formation:")
-            print(traceback.format_exc()) 
+            self.logger.log_error(traceback.format_exc()) 
             self.logger.log_error(f"Failed to form cognitive memory: {e}")
             raise MemorySystemError(f"Memory formation failed: {e}")
 

@@ -8,11 +8,8 @@ python-dotenv
 nltk
 pydantic
 numpy
-
-# Sentence Transformers pinned to a version that works well with torch>=1.6
 sentence-transformers
 
 # Curses on Windows vs. non-Windows
-curses; sys_platform != "win32"
 windows-curses; sys_platform == "win32"
 

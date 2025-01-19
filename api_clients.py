@@ -5,7 +5,10 @@ Provides unified interfaces for multiple API services while maintaining
 provider-specific optimizations and requirements.
 """
 
+import platform
 import aiohttp
+from aiohttp import UnixConnector 
+import os
 from typing import Dict, Any, List, Optional, Union
 import json
 import asyncio
@@ -364,6 +367,150 @@ class PerplexityClient(BaseAPIClient):
         response = await self._make_request("chat/completions", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
 
+class UnixSocketClient(BaseAPIClient):
+    """Base client for Unix socket communication."""
+    
+    def __init__(self, socket_path: str, service_name: str):
+        super().__init__(
+            api_key="N/A",
+            base_url="http://localhost",  # The actual hostname doesn't matter for Unix sockets
+            service_name=service_name
+        )
+        self.socket_path = socket_path
+    
+    def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
+        """Get headers for Unix socket requests"""
+        headers = {"Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
+
+    def _extract_message_content(self, response: Dict[str, Any]) -> str:
+        """Extract message from Unix socket response"""
+        return response["choices"][0]["message"]["content"]
+        
+    async def _make_request(self, endpoint: str, method: str = "POST", 
+                          payload: Optional[Dict] = None, 
+                          extra_headers: Optional[Dict] = None) -> Dict[str, Any]:
+        """Make request via Unix socket with retry logic."""
+        headers = self._get_headers(extra_headers)
+        
+        for attempt in range(self.max_retries):
+            try:
+                connector = UnixConnector(path=self.socket_path)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    url = f"http://localhost/{endpoint.lstrip('/')}"
+                    async with session.request(
+                        method,
+                        url,
+                        headers=headers,
+                        json=payload
+                    ) as response:
+                        if response.status == 200:
+                            SystemLogger.log_api_request(
+                                self.service_name, 
+                                endpoint,
+                                response.status
+                            )
+                            return await response.json()
+                        
+                        error_text = await response.text()
+                        SystemLogger.log_api_request(
+                            self.service_name,
+                            endpoint,
+                            response.status,
+                            error_text
+                        )
+                        
+                        if response.status >= 500:
+                            delay = self.retry_delay * (attempt + 1)
+                            SystemLogger.log_api_retry(
+                                self.service_name,
+                                attempt + 1,
+                                self.max_retries,
+                                f"Server error, waiting {delay}s"
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                            
+                        raise Exception(f"Unix socket error: Status {response.status}")
+                        
+            except Exception as e:
+                SystemLogger.log_api_retry(
+                    self.service_name,
+                    attempt + 1, 
+                    self.max_retries,
+                    str(e)
+                )
+                if attempt == self.max_retries - 1:
+                    raise
+                await asyncio.sleep(self.retry_delay * (attempt + 1))
+
+class Chapter2Client(BaseAPIClient):
+    """Client for Chapter2 API supporting both HTTP and Unix socket."""
+    
+    def __init__(self, socket_path: str = None, http_port: int = None):
+        self.is_unix = platform.system() != "Windows"
+        self.socket_path = socket_path or os.getenv("CHAPTER2_SOCKET_PATH", "/tmp/chapter2.sock")
+        self.http_port = http_port or int(os.getenv("CHAPTER2_HTTP_PORT", "6005"))
+        
+        # Initialize base class with HTTP configuration first
+        super().__init__(
+            api_key="N/A", 
+            base_url=f"http://localhost:{self.http_port}/v1",
+            service_name="Chapter2"
+        )
+        
+        # Then check if we should use Unix socket
+        self.use_unix = self.is_unix and os.path.exists(self.socket_path)
+        if self.use_unix:
+            self.unix_client = UnixSocketClient(self.socket_path, "Chapter2")
+        else:
+            self.unix_client = None
+    
+    def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
+        """Get headers for HTTP requests"""
+        headers = {"Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
+
+    def _extract_message_content(self, response: Dict[str, Any]) -> str:
+        """Extract message content from response"""
+        return response["choices"][0]["message"]["content"]
+    
+    async def create_completion(
+        self,
+        messages: List[Dict[str, str]], 
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 150,
+        return_content_only: bool = False,
+        **kwargs
+    ) -> Union[Dict[str, Any], str]:
+        """Route completion request to appropriate client."""
+        if self.use_unix:
+            response = await self.unix_client._make_request(
+                "v1/chat/completions",
+                payload={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    **kwargs
+                }
+            )
+            return self._extract_message_content(response) if return_content_only else response
+            
+        return await super().create_completion(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            return_content_only=return_content_only,
+            **kwargs
+        )
+    
 class APIManager:
     """
     Central manager for all API clients.
@@ -392,6 +539,7 @@ class APIManager:
             self.clients["openpipe"] = OpenPipeClient(openpipe_key)
         if perplexity_key:
             self.clients["perplexity"] = PerplexityClient(perplexity_key)
+        self.clients["chapter2"] = Chapter2Client()
     
     @classmethod
     def from_env(cls):

@@ -200,7 +200,7 @@ class Internal:
     def on_cognitive_update(self, event):
         if not self.is_active:
             return
-        print(f"Received cognitive update event: {event.data}")
+        #print(f"Received cognitive update event: {event.data}")
 
     def perform_action(self, action_name: str):
         """Perform a internal action."""
