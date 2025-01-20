@@ -58,7 +58,7 @@ class HephiaServer:
 
         # Core systems
         self.api = APIManager.from_env()
-        self.internal = Internal()
+        self.internal = Internal(self.api)
         self.state_bridge = StateBridge(internal=self.internal)
         self.event_bridge = EventBridge(state_bridge=self.state_bridge)
         self.timer = TimerCoordinator()

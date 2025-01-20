@@ -15,6 +15,8 @@ import asyncio
 from abc import ABC, abstractmethod
 from loggers import SystemLogger
 
+from config import Config
+
 class BaseAPIClient(ABC):
     """Base class for API clients with common functionality."""
     
@@ -451,8 +453,8 @@ class Chapter2Client(BaseAPIClient):
     
     def __init__(self, socket_path: str = None, http_port: int = None):
         self.is_unix = platform.system() != "Windows"
-        self.socket_path = socket_path or os.getenv("CHAPTER2_SOCKET_PATH", "/tmp/chapter2.sock")
-        self.http_port = http_port or int(os.getenv("CHAPTER2_HTTP_PORT", "6005"))
+        self.socket_path = socket_path or Config.get_chapter2_socket_path()
+        self.http_port = http_port or Config.get_chapter2_http_port()
         
         # Initialize base class with HTTP configuration first
         super().__init__(

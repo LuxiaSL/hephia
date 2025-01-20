@@ -20,10 +20,10 @@ class MemorySystem:
     Coordinates body memory and cognitive memory processes.
     """
 
-    def __init__(self, internal_context, db_path: str = 'data/memory.db'):
+    def __init__(self, internal_context, api_manager, db_path: str = 'data/memory.db'):
         """Initialize the memory system"""
         self.body_memory = BodyMemory(internal_context, db_path)
-        self.cognitive_memory = CognitiveMemory(internal_context, self.body_memory, db_path)
+        self.cognitive_memory = CognitiveMemory(internal_context, self.body_memory, api_manager, db_path)
         
     def update(self) -> None:
         """Update all memory subsystems"""

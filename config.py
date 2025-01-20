@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 import os
+import platform
 
 class ProviderType(Enum):
     """Available LLM providers."""
@@ -153,10 +154,22 @@ class Config:
         """Get the fallback model from env or default."""
         return os.getenv("FALLBACK_MODEL", cls.FALLBACK_MODEL)
     
-    # set to desired values
-    CHAPTER2_SOCKET_PATH = os.getenv("CHAPTER2_SOCKET_PATH", "/tmp/chapter2.sock")
-    CHAPTER2_HTTP_PORT = int(os.getenv("CHAPTER2_HTTP_PORT", "6005"))
-    
+    @classmethod
+    def get_chapter2_socket_path(cls) -> Optional[str]:
+        """Get the Chapter 2 socket path from env or default."""
+        default_socket = "/tmp/chapter2.sock" if platform.system() != "Windows" else None
+        return os.getenv("CHAPTER2_SOCKET_PATH", default_socket)
+
+    @classmethod
+    def get_chapter2_http_port(cls) -> int:
+        """Get the Chapter 2 HTTP port from env or default."""
+        return int(os.getenv("CHAPTER2_HTTP_PORT", "8008"))
+
+    @classmethod
+    def get_use_local_embedding(cls) -> bool:
+        """Get the embedding type configuration from env or default."""
+        return os.getenv("USE_LOCAL_EMBEDDING", "True").lower() in ("true", "1", "yes")
+
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05

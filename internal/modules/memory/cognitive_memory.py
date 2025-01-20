@@ -34,14 +34,114 @@ import math
 from loggers.loggers import MemoryLogger
 from typing import Dict, List, Any, Optional, Tuple, Union
 from contextlib import contextmanager
-from sentence_transformers import SentenceTransformer
 from collections import defaultdict
 from nltk import pos_tag, word_tokenize, ne_chunk
 from nltk.tree import Tree
 import numpy as np
 
+from config import Config
 from event_dispatcher import Event, global_event_dispatcher
 from .cognitive_memory_node import CognitiveMemoryNode
+
+class EmbeddingManager:
+    def __init__(self, api_manager=None):
+        self.api_manager = api_manager
+        self.use_local = Config.get_use_local_embedding()
+        self.model = None
+        self.max_retries = 3
+        self.retry_delay = 1  # seconds
+        
+        if self.use_local:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self.model = SentenceTransformer('all-MiniLM-L6-v2')
+                MemoryLogger.info("Using local sentence-transformers")
+            except Exception as e:
+                MemoryLogger.warning(f"Local embedding failed, using API fallback: {e}")
+                self.use_local = False
+        else:
+            MemoryLogger.info("Using API embedding")
+
+    def encode(self, text: str, convert_to_tensor=False, normalize_embeddings=True):
+        """Matches sentence-transformers encode() interface exactly."""
+        try:
+            if self.use_local and self.model:
+                return self.model.encode(
+                    text,
+                    convert_to_tensor=convert_to_tensor,
+                    normalize_embeddings=normalize_embeddings
+                )
+            elif self.api_manager:
+                import requests
+                import time
+                
+                # Get API key and create client for debugging
+                client = self.api_manager.get_client('openai')
+                api_key = client.api_key
+                
+                MemoryLogger.debug(f"Starting API embedding request. Text length: {len(text)}")
+                MemoryLogger.debug(f"API Key starts with: {api_key[:6]}...")
+                
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                
+                for attempt in range(self.max_retries):
+                    try:
+                        MemoryLogger.debug(f"Attempt {attempt + 1} of {self.max_retries}")
+                        
+                        response = requests.post(
+                            "https://api.openai.com/v1/embeddings",
+                            headers=headers,
+                            json={
+                                "input": text,
+                                "model": "text-embedding-3-small"
+                            }
+                        )
+                        
+                        MemoryLogger.debug(f"Response status: {response.status_code}")
+                        MemoryLogger.debug(f"Response headers: {dict(response.headers)}")
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            MemoryLogger.debug("Successful embedding response received")
+                            return data['data'][0]['embedding']
+                            
+                        if response.status_code == 429:  # Rate limit
+                            retry_after = int(response.headers.get('Retry-After', self.retry_delay))
+                            error_content = response.json() if response.content else "No error content"
+                            MemoryLogger.warning(f"Rate limited on attempt {attempt + 1}. Error: {error_content}")
+                            MemoryLogger.warning(f"Rate limit headers: {response.headers.get('x-ratelimit-limit')}, " 
+                                            f"Remaining: {response.headers.get('x-ratelimit-remaining')}, "
+                                            f"Reset: {response.headers.get('x-ratelimit-reset')}")
+                            MemoryLogger.info(f"Rate limited, waiting {retry_after}s")
+                            time.sleep(retry_after)
+                            continue
+                            
+                        if response.status_code >= 500:  # Server error
+                            delay = self.retry_delay * (attempt + 1)
+                            error_content = response.json() if response.content else "No error content"
+                            MemoryLogger.warning(f"Server error: {error_content}")
+                            MemoryLogger.info(f"Server error, waiting {delay}s")
+                            time.sleep(delay)
+                            continue
+                            
+                        error_content = response.json() if response.content else "No error content"
+                        MemoryLogger.error(f"API request failed with status {response.status_code}: {error_content}")
+                        raise Exception(f"API request failed: {response.status_code} - {error_content}")
+                        
+                    except requests.exceptions.RequestException as e:
+                        MemoryLogger.error(f"Request exception on attempt {attempt + 1}: {str(e)}")
+                        if attempt == self.max_retries - 1:
+                            raise
+                        time.sleep(self.retry_delay * (attempt + 1))
+                        
+                return [0.0] * 384
+            
+        except Exception as e:
+            MemoryLogger.error(f"Embedding failed: {str(e)}")
+            return [0.0] * 384
 
 class DatabaseError(Exception):
     """Database operation errors."""
@@ -63,7 +163,9 @@ class CognitiveMemory:
     # -------------------------------------------------------------------------
     # 1) DB & Table Setup
     # -------------------------------------------------------------------------
-    def __init__(self, internal_context, body_memory, db_path: str = 'data/memory.db',
+    def __init__(self, internal_context, body_memory,
+                 api_manager = None, 
+                 db_path: str = 'data/memory.db',
                  ghost_threshold: float = 0.1,
                  final_prune_threshold: float = 0.05,
                  revive_threshold: float = 0.2):
@@ -77,7 +179,7 @@ class CognitiveMemory:
         self.body_memory = body_memory
         self.nodes: List[CognitiveMemoryNode] = []
 
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.embedding_model = EmbeddingManager(api_manager)
 
         self.db_path = db_path
         self.min_active_nodes = 5
@@ -1596,7 +1698,7 @@ class CognitiveMemory:
                 return None, 0.0, []
             
             # Evaluate parent node using full retrieval metrics
-            self.logger.debug("Debug - Evaluating parent node:", node.node_id)
+            self.logger.debug(f"Debug - Evaluating parent node: {node.node_id}")
             parent_metrics = self.calculate_retrieval_metrics(
                 target_node=node,
                 comparison_state=current_state,
@@ -1612,14 +1714,14 @@ class CognitiveMemory:
                 try:
                     # Validate state metrics structure
                     state_metrics = parent_metrics['component_metrics']['state']
-                    self.logger.debug("Debug - Parent state metrics structure:", state_metrics)
+                    self.logger.debug(f"Debug - Parent state metrics structure: {state_metrics}")
                     
                     # Calculate state alignment with validation
                     valid_components = [
                         comp for comp in state_metrics.values()
                         if isinstance(comp, dict) and len(comp) > 0
                     ]
-                    self.logger.debug("Debug - Parent valid state components:", valid_components)
+                    self.logger.debug(f"Debug - Parent valid state components: {valid_components}")
                     
                     if not valid_components:
                         self.logger.warning("No valid state components found for alignment calculation")
@@ -1633,7 +1735,7 @@ class CognitiveMemory:
                         
                         state_alignment = (sum(component_sums) / len(valid_components)) if component_sums else 0.0
                     
-                    self.logger.debug("Debug - Parent state alignment calculated:", state_alignment)
+                    self.logger.debug(f"Debug - Parent state alignment calculated: {state_alignment}")
                     
                     # Use components to calculate echo potential
                     echo_components = {
@@ -1648,7 +1750,7 @@ class CognitiveMemory:
                         'state_alignment': state_alignment
                     }
                     
-                    self.logger.debug("Debug - Parent echo components calculated:", echo_components)
+                    self.logger.debug(f"Debug - Parent echo components calculated: {echo_components}")
                     
                     echo_intensity = (
                         echo_components['semantic_match'] * 0.3 +
@@ -1668,7 +1770,7 @@ class CognitiveMemory:
                     })
                 except Exception as e:
                     self.logger.error(f"Failed to calculate parent echo components: {str(e)}")
-                    self.logger.debug("Debug - Parent error details:", e.__class__.__name__, str(e))
+                    self.logger.debug(f"Debug - Parent error details: {e.__class__.__name__} {str(e)}")
                     return None, 0.0, []
 
             # Evaluate ghost nodes using same metrics system
@@ -1700,19 +1802,19 @@ class CognitiveMemory:
                         query_embedding=query_embedding
                     )
                     
-                    self.logger.debug("Debug - Ghost metrics:", ghost_metrics)
+                    self.logger.debug(f"Debug - Ghost metrics: {ghost_metrics}")
                     
                     if ghost_metrics and 'final_score' in ghost_metrics:
                         # Validate ghost state metrics structure
                         ghost_state_metrics = ghost_metrics['component_metrics']['state']
-                        self.logger.debug("Debug - Ghost state metrics structure:", ghost_state_metrics)
+                        self.logger.debug(f"Debug - Ghost state metrics structure: {ghost_state_metrics}")
                         
                         # Calculate ghost state alignment with validation
                         valid_ghost_components = [
                             comp for comp in ghost_state_metrics.values()
                             if isinstance(comp, dict) and len(comp) > 0
                         ]
-                        self.logger.debug("Debug - Ghost valid state components:", valid_ghost_components)
+                        self.logger.debug(f"Debug - Ghost valid state components: {valid_ghost_components}")
                         
                         if not valid_ghost_components:
                             self.logger.warning(f"No valid state components found for ghost {ghost['node_id']}")
@@ -1726,7 +1828,7 @@ class CognitiveMemory:
                             
                             ghost_state_alignment = (sum(ghost_component_sums) / len(valid_ghost_components)) if ghost_component_sums else 0.0
                         
-                        self.logger.debug("Debug - Ghost state alignment calculated:", ghost_state_alignment)
+                        self.logger.debug(f"Debug - Ghost state alignment calculated: {ghost_state_alignment}")
                         
                         # Calculate ghost echo components
                         ghost_echo_components = {
@@ -1741,7 +1843,7 @@ class CognitiveMemory:
                             'state_alignment': ghost_state_alignment
                         }
                         
-                        self.logger.debug("Debug - Ghost echo components calculated:", ghost_echo_components)
+                        self.logger.debug(f"Debug - Ghost echo components calculated: {ghost_echo_components}")
                         
                         ghost_echo_intensity = (
                             ghost_echo_components['semantic_match'] * 0.3 +
@@ -1764,7 +1866,7 @@ class CognitiveMemory:
                         })
                 except Exception as e:
                     self.logger.error(f"Failed to calculate ghost echo components: {str(e)}")
-                    self.logger.debug("Debug - Ghost error details:", e.__class__.__name__, str(e))
+                    self.logger.debug(f"Debug - Ghost error details: {e.__class__.__name__} {str(e)}")
                     continue
             
             if not evaluations:
@@ -1775,17 +1877,12 @@ class CognitiveMemory:
             selected = max(evaluations, key=lambda x: x["echo"]["intensity"] * x["relevance"])
             final_intensity = selected["echo"]["intensity"] * selected["relevance"]
             
-            self.logger.debug("Debug - Final evaluation selected:", {
-                "node_id": selected["node"].node_id,
-                "intensity": final_intensity,
-                "is_ghost": selected["is_ghost"]
-            })
+            self.logger.debug(f"Debug - Final evaluation selected: node_id={selected['node'].node_id}, intensity={final_intensity}, is_ghost={selected['is_ghost']}")
             
             return selected["node"], final_intensity, evaluations
             
         except Exception as e:
             self.logger.error(f"Unexpected error in evaluate_echo: {str(e)}")
-            self.logger.debug("Debug - Critical error:", e.__class__.__name__, str(e))
             return None, 0.0, []
 
     async def trigger_echo(
@@ -2918,15 +3015,17 @@ class CognitiveMemory:
                 split = max_chars // 2
                 cleaned_text = cleaned_text[:split] + " ... " + cleaned_text[-split:]
                 
-            # Generate embedding - using all-MiniLM-L6-v2 model
-            # This provides good balance of speed/quality and matches 384 dim
             embedding = self.embedding_model.encode(
                 cleaned_text,
                 convert_to_tensor=False,  # Return numpy array
                 normalize_embeddings=True  # L2 normalize
             )
             
-            return embedding.tolist()
+            # Handle the different return types
+            if isinstance(embedding, list):
+                return embedding  # API already returns a list
+            else:
+                return embedding.tolist()  # Convert numpy array to list for local model
             
         except Exception as e:
             self.logger.log_error(f"Failed to generate embedding: {e}")

@@ -23,7 +23,7 @@ class Internal:
     Core internal class, now designed to work with server architecture.
     """
 
-    def __init__(self):
+    def __init__(self, api_manager):
         """Initialize internal systems."""
         # Initialize context & state control
         self.context = InternalContext(self)
@@ -34,7 +34,7 @@ class Internal:
         self.action_manager = ActionManager(self.needs_manager)
 
         # Initialize cognitive and emotional modules
-        self.memory_system = MemorySystem(self.context)
+        self.memory_system = MemorySystem(self.context, api_manager)
         self.mood_synthesizer = MoodSynthesizer(self.context)
         self.cognitive_bridge = CognitiveBridge(
             self.context, 
