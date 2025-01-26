@@ -4,8 +4,6 @@ environments/meditation.py - Meditation environment for Hephia.
 Enables focused introspection and state influence through meditation
 commands. Used to elicit specific emotional/cognitive states and deepen
 internal awareness.
-
-todo in both: error handling & failure return checks
 """
 
 from typing import Dict, List, Any
@@ -14,7 +12,8 @@ from brain.commands.model import (
     Parameter,
     Flag,
     ParameterType,
-    CommandResult
+    CommandResult,
+    CommandValidationError
 )
 from .base_environment import BaseEnvironment
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
@@ -182,13 +181,29 @@ class MeditateEnvironment(BaseEnvironment):
                 )
                 
                 if not result:
+                    error = CommandValidationError(
+                        message=f"Could not find or access memory {memory_id}",
+                        suggested_fixes=[
+                            "Verify the memory ID is correct",
+                            "Check if the memory still exists"
+                        ],
+                        related_commands=[
+                            'reflect recent',
+                            'reflect query "recent memories"'
+                        ],
+                        examples=[
+                            'meditate absorb memory_123',
+                            'meditate absorb memory_456'
+                        ]
+                    )
                     return CommandResult(
                         success=False,
                         message=f"Could not find or access memory {memory_id}.",
                         suggested_commands=[
                             'reflect recent',
                             'reflect query "recent memories"'
-                        ]
+                        ],
+                        error=error
                     )
                 
                 # Format the absorption experience
@@ -218,6 +233,24 @@ class MeditateEnvironment(BaseEnvironment):
                 )
                 
         except Exception as e:
+            error = CommandValidationError(
+                message=str(e),
+                suggested_fixes=[
+                    "Try a lower intensity level",
+                    "Start with basic meditation states",
+                    "Check if the cognitive bridge is functioning"
+                ],
+                related_commands=[
+                    'meditate focus "calm" --intensity=0.3',
+                    'meditate focus "peace"',
+                    'help'
+                ],
+                examples=[
+                    'meditate focus "calm"',
+                    'meditate focus "clarity" --intensity=0.5'
+                ]
+            )
+            
             return CommandResult(
                 success=False,
                 message=f"Meditation failed: {str(e)}",
@@ -225,5 +258,5 @@ class MeditateEnvironment(BaseEnvironment):
                     'meditate focus "calm"',
                     'help'
                 ],
-                error=str(e)
+                error=error
             )

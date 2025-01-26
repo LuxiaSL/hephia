@@ -34,7 +34,6 @@ class EnvironmentRegistry:
     
     def setup_environments(self):
         """Set up all available environments."""
-        # External tools
         self.register_environment("notes", NotesEnvironment())
         self.register_environment("search", SearchEnvironment(self.api_manager))
         self.register_environment("web", WebEnvironment())

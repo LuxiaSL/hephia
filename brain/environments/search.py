@@ -13,7 +13,8 @@ from brain.commands.model import (
     Parameter,
     Flag,
     ParameterType,
-    CommandResult
+    CommandResult,
+    CommandValidationError
 )
 from config import Config
 
@@ -157,9 +158,31 @@ class SearchEnvironment(BaseEnvironment):
                 )
                 
             except Exception as e:
+                error = CommandValidationError(
+                    message=str(e),
+                    suggested_fixes=[
+                        "Try rephrasing your search terms",
+                        "Check if search service is available",
+                        "Try reducing detail level or result limit"
+                    ],
+                    related_commands=[
+                        'search query "simpler terms"',
+                        'search query "..." --detail=low',
+                        'help'
+                    ],
+                    examples=[
+                        'search query "basic explanation of quantum computing"',
+                        'search query "weather" --detail=low --limit=3'
+                    ]
+                )
+                
                 return CommandResult(
                     success=False,
                     message=f"Search failed: {str(e)}",
-                    suggested_commands=["search query <try different terms>"],
-                    error=str(e)
+                    suggested_commands=[
+                        'search query "simpler terms"',
+                        'notes search',
+                        'help'
+                    ],
+                    error=error
                 )

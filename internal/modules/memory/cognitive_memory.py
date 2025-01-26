@@ -1014,7 +1014,6 @@ class CognitiveMemory:
             mood.get('arousal', 0) ** 2
         ) / math.sqrt(2)  # Normalize to [0,1]
 
-
     def _calculate_temporal_metrics(self, node: CognitiveMemoryNode) -> Dict[str, float]:
         """Calculate temporal relevance metrics"""
         metrics = {}
@@ -1255,22 +1254,21 @@ class CognitiveMemory:
         self,
         count: int = 5,
         include_ghosted: bool = False,
-        with_metrics: bool = False,
         time_window: Optional[float] = None
-    ) -> Union[List[CognitiveMemoryNode], Tuple[List[CognitiveMemoryNode], List[Dict[str, Any]]]]:
+    ) -> List[CognitiveMemoryNode]:
         """
         Retrieve the most recent cognitive memories, optionally within a time window.
-        Can return detailed metrics about the recent memories' significance.
-        
+
         Args:
             count: Number of recent memories to retrieve
             include_ghosted: Whether to include ghosted memories
-            with_metrics: Return detailed metrics about each memory
             time_window: Optional time window in seconds to limit search
             
         Returns:
-            Either List[CognitiveMemoryNode] or Tuple of (nodes, metrics) if with_metrics=True
+            List[CognitiveMemoryNode] 
         """
+        if time_window and time_window <= 0:
+            raise ValueError("Time window must be positive")
         try:
             # Filter nodes based on criteria
             current_time = time.time()
@@ -1287,27 +1285,14 @@ class CognitiveMemory:
                 reverse=True
             )[:count]
             
-            if with_metrics:
-                # Get current state for metric calculation
-                current_state = self.internal_context.get_memory_context(is_cognitive=True)
-                
-                # Calculate metrics for each node
-                node_metrics = []
-                for node in recent_nodes:
-                    metrics = self.calculate_retrieval_metrics(
-                        target_node=node,
-                        comparison_state=current_state,
-                        detailed_metrics=True
-                    )
-                    node_metrics.append(metrics)
-                    
-                return recent_nodes, node_metrics
-                
+            #at some point might want to do metrics here, but have to consider how to construct the comparison 
+            # for retrieval as a dummy or maybe in relation to current state? 
+            # not sure why i wanted it here other than use possibly in other environments or pieces.
             return recent_nodes
             
         except Exception as e:
             self.logger.log_error(f"Failed to retrieve recent memories: {e}")
-            return [] if not with_metrics else ([], [])
+            return []
 
     # -------------------------------------------------------------------------
     # 5) Ghost & Decay Handling

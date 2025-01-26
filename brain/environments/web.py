@@ -165,10 +165,31 @@ class WebEnvironment(BaseEnvironment):
                 )
                 
                 if not processed:
+                    error = CommandValidationError(
+                        message="Could not process page content",
+                        suggested_fixes=[
+                            "Check if the URL is accessible",
+                            "Verify the page contains readable content",
+                            "Try a different URL"
+                        ],
+                        related_commands=[
+                            "web open https://example.com",
+                            "search query <topic>"
+                        ],
+                        examples=[
+                            "web open https://docs.python.org",
+                            "web open https://news.site/article --preview=short"
+                        ]
+                    )
                     return CommandResult(
                         success=False,
                         message="Failed to process page content",
-                        error="Content processing failed"
+                        suggested_commands=[
+                            "web open https://example.com",
+                            "search query 'related topic'",
+                            "help"
+                        ],
+                        error=error
                     )
                 
                 # Format the response based on mode and format
@@ -192,19 +213,57 @@ class WebEnvironment(BaseEnvironment):
                 )
                 
             except aiohttp.ClientError as e:
-                error_msg = str(e)
-                suggestion = "web open <different_url>"
+                error = CommandValidationError(
+                    message=f"Failed to access URL: {str(e)}",
+                    suggested_fixes=[
+                        "Check if the URL is correct",
+                        "Verify the site is accessible",
+                        "Try using https:// instead of http://"
+                    ],
+                    related_commands=[
+                        "web open https://example.com",
+                        "search query <topic>"
+                    ],
+                    examples=[
+                        "web open https://docs.python.org",
+                        "web open https://news.site/article"
+                    ]
+                )
                 
-                if "ssl" in error_msg.lower():
+                suggestion = "web open <different_url>"
+                if "ssl" in str(e).lower():
                     suggestion = f"web open https://{url.replace('http://', '')}"
-                elif "dns" in error_msg.lower():
+                elif "dns" in str(e).lower():
                     suggestion = "Check domain spelling"
                 
                 return CommandResult(
                     success=False,
-                    message=f"Failed to access URL: {error_msg}",
-                    suggested_commands=[suggestion],
-                    error=str(e)
+                    message=f"Failed to access URL: {str(e)}",
+                    suggested_commands=[suggestion, "help"],
+                    error=error
+                )
+
+            except Exception as e:
+                error = CommandValidationError(
+                    message=f"An unexpected error occurred: {str(e)}",
+                    suggested_fixes=[
+                        "Try the operation again",
+                        "Verify the URL format and accessibility"
+                    ],
+                    related_commands=[
+                        "web open https://example.com",
+                        "help"
+                    ],
+                    examples=[
+                        "web open https://docs.python.org"
+                    ]
+                )
+                
+                return CommandResult(
+                    success=False,
+                    message=f"Error processing request: {str(e)}",
+                    suggested_commands=["help"],
+                    error=error
                 )
             
     def _validate_url(self, url: str) -> bool:

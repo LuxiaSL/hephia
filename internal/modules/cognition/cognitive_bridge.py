@@ -199,11 +199,15 @@ class CognitiveBridge:
         """
         try:
             recent = self.cognitive_memory.get_recent_memories(limit)
+            if not recent:  # Handle empty results
+                return []
 
             results = []
             for node in recent:
+                if not isinstance(node, CognitiveMemoryNode):
+                    continue  # Skip invalid nodes
                 # Trigger memory echo (needed, get_recent_memories doesn't do this)
-                await self.cognitive_memory.trigger_echo(node, 0.5)  # Base intensity
+                await self.cognitive_memory.trigger_echo(node, 0.75)  # Base intensity
 
                 # Format with rounded timestamp
                 time_diff = time.time() - node.timestamp
@@ -211,7 +215,8 @@ class CognitiveBridge:
                 
                 results.append({
                     'id': node.node_id,
-                    'content': node.text_content,
+                    'content': node.text_content if hasattr(node, 'text_content') 
+                            else f"Non-textual memory ({node.__class__.__name__})",
                     'time': formatted_time
                 })
 
@@ -279,6 +284,18 @@ class CognitiveBridge:
                     }
                 ))
                 effects.append("Mood becoming contemplative")
+
+            # If no effects generated yet, dispatch subtle calming effect
+            if not effects:
+                global_event_dispatcher.dispatch_event(Event(
+                    "cognitive:emotional:meditation",
+                    {
+                        "type": "calming",
+                        "intensity": intensity * 0.3,  # Reduced intensity
+                        "duration": duration
+                    }
+                ))
+                effects.append("Subtle calming")
 
             # need effects (to be done later; need to make a way to have temporary effects, like with echo. eventually cause decaying shifts to the base/multiplicative rate)
 

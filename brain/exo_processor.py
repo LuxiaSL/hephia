@@ -156,9 +156,9 @@ class ExoProcessor:
                 result = await self._execute_command(command, current_state)
                 #print("LUXIA: command done")
                 #if not result or not result.success:
-                    #print("LUXIA: command failed:")
-                    #print("result: ", result)
-                    #print("command ", command)
+                #print("LUXIA: command:")
+                #print("result: ", result)
+                #print("command ", command)
 
                 # Command succeeded, format response and continue processing
                 formatted_response = TerminalFormatter.format_command_result(
@@ -251,8 +251,14 @@ class ExoProcessor:
                 )
             return CommandResult(
                 success=False,
-                message=f"Unknown global command: {command.action}",
-                suggested_commands=["help"]
+                message=f"Error in {command.environment}: {str(e)}",
+                suggested_commands=[f"{command.environment} help"],
+                error=CommandValidationError(
+                    message=str(e),
+                    suggested_fixes=["Check command syntax", "Verify environment state"],
+                    related_commands=["help"],
+                    examples=[f"{command.environment} help"]
+                )
             )
         
         # Handle environment commands
@@ -277,7 +283,12 @@ class ExoProcessor:
                 success=False,
                 message=f"Error in {command.environment}: {str(e)}",
                 suggested_commands=[f"{command.environment} help"],
-                error=str(e)
+                error=CommandValidationError(
+                    message=str(e),
+                    suggested_fixes=["Check command syntax", "Verify environment state"],
+                    related_commands=[f"{command.environment} help"],
+                    examples=[f"{command.environment} help"]
+                )
             )
         
     def _add_to_history(self, role: str, content: str):

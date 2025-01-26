@@ -415,17 +415,33 @@ class NotesEnvironment(BaseEnvironment):
             return CommandResult(
                 success=False,
                 message=f"Database error: {str(e)}",
-                error="DatabaseError",
+                error=CommandValidationError(
+                    message=f"Database error: {str(e)}",
+                    suggested_fixes=[
+                        "Check database connectivity and ensure no concurrency issues",
+                        "Retry the operation"
+                    ],
+                    related_commands=["notes help"],
+                    examples=["notes list --tag=important", 'notes create "Sample note"']
+                ),
                 suggested_commands=["notes help"]
             )
         except Exception as e:
             return CommandResult(
                 success=False,
                 message=str(e),
-                error=type(e).__name__,
+                error=CommandValidationError(
+                    message=str(e),
+                    suggested_fixes=[
+                        "Check your command syntax",
+                        "Review the environment help: notes help"
+                    ],
+                    related_commands=["notes help"],
+                    examples=["notes list", 'notes create "Sample note"']
+                ),
                 suggested_commands=["notes help"]
             )
-    
+
     async def _create_note(
         self, 
         content: str, 
@@ -500,7 +516,7 @@ class NotesEnvironment(BaseEnvironment):
             if tags:
                 suggested_next.append(f"notes list --tag={tag_list[0]}")  # View similar notes
             else:
-                suggested_next.append(f'notes tags add {note_id} <tag>')  # Suggest tagging
+                suggested_next.append(f'notes tag-add {note_id} <tag>')  # Suggest tagging
             
             return CommandResult(
                 success=True,
@@ -518,13 +534,21 @@ class NotesEnvironment(BaseEnvironment):
             return CommandResult(
                 success=False,
                 message=f"Failed to create note: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Failed to create note: {str(e)}",
+                    suggested_fixes=[
+                        "Check input formatting and try again",
+                        "Ensure the database is accessible"
+                    ],
+                    related_commands=["notes list", "notes help"],
+                    examples=['notes create "My first note"', 'notes create "Another note" --tags=example']
+                ),
                 suggested_commands=[
                     'notes create "Try again"',
                     "notes list"
-                ],
-                error=str(e)
+                ]
             )
-            
+
         finally:
             conn.close()
 
@@ -556,10 +580,18 @@ class NotesEnvironment(BaseEnvironment):
                     success=False,
                     message=f"Note {note_id} not found",
                     suggested_commands=[
-                        "notes list",  # Browse existing notes
-                        f'notes create "New note"'  # Create instead
+                        "notes list",
+                        'notes create "New note"'
                     ],
-                    error="NotFound"
+                    error=CommandValidationError(
+                        message=f"Note {note_id} not found",
+                        suggested_fixes=[
+                            "Check the note ID",
+                            "Try 'notes list' to see available notes"
+                        ],
+                        related_commands=["notes list", "notes create"],
+                        examples=["notes read abc123", "notes list --limit=5"]
+                    )
                 )
             
             # Parse stored context
@@ -587,7 +619,7 @@ class NotesEnvironment(BaseEnvironment):
             # Generate contextual suggestions
             suggested = [
                 f"notes update {note_id} \"New content\"",  # Update
-                f"notes tags add {note_id} <tag>"  # Add tags
+                f"notes tag-add {note_id} <tag>"  # Add tags
             ]
             
             # Add tag-based suggestions
@@ -607,6 +639,30 @@ class NotesEnvironment(BaseEnvironment):
                     "tags": note[-1].split(',') if note[-1] else [],
                     "context": context
                 }
+            )
+        
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to read note: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Failed to read note: {str(e)}",
+                    suggested_fixes=[
+                        "Verify the note ID exists",
+                        "Try listing available notes first"
+                    ],
+                    related_commands=["notes list", "notes search"],
+                    examples=[
+                        "notes read abc123",
+                        "notes list --limit=5",
+                        'notes search "keyword"'
+                    ]
+                ),
+                suggested_commands=[
+                    "notes list", 
+                    "notes search <query>",
+                    'notes create "New note"'
+                ]
             )
             
         finally:
@@ -670,6 +726,31 @@ class NotesEnvironment(BaseEnvironment):
                     "filter_tag": tag
                 }
             )
+
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to list notes: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Failed to list notes: {str(e)}",
+                    suggested_fixes=[
+                    "Check database connectivity",
+                    "Try with a smaller limit value",
+                    "Verify tag name if filtering by tag"
+                    ],
+                    related_commands=["notes create", "notes search", "notes tags"],
+                    examples=[
+                    "notes list --limit=5",
+                    "notes list --tag=important",
+                    "notes list"
+                    ]
+                ),
+                suggested_commands=[
+                    'notes create "New note"',
+                    "notes tags",
+                    "notes search <query>"
+                ]
+            )
             
         finally:
             conn.close()
@@ -699,7 +780,15 @@ class NotesEnvironment(BaseEnvironment):
                         "notes list",
                         f'notes create "{content}"'
                     ],
-                    error="NotFound"
+                    error=CommandValidationError(
+                        message=f"Note {note_id} not found",
+                        suggested_fixes=[
+                            "Verify the note ID is correct",
+                            "Use 'notes list' to see available note IDs"
+                        ],
+                        related_commands=["notes list", "notes create"],
+                        examples=[f'notes update {note_id} "New content"', "notes list --limit=5"]
+                    )
                 )
 
             # Update note content and context
@@ -772,7 +861,31 @@ class NotesEnvironment(BaseEnvironment):
                     "context": new_context
                 }
             )
-            
+        
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to update note: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Failed to update note: {str(e)}",
+                    suggested_fixes=[
+                        "Verify the note ID exists",
+                        "Check content format and tags",
+                        "Ensure database is accessible"
+                    ],
+                    related_commands=["notes read", "notes list"],
+                    examples=[
+                        f'notes update {note_id} "Updated content"',
+                        f'notes update {note_id} "New content" --tags=important,todo'
+                    ]
+                ),
+                suggested_commands=[
+                    f"notes read {note_id}",
+                    "notes list",
+                    "notes tags"
+                ]
+            )
+
         finally:
             conn.close()
     
@@ -796,10 +909,18 @@ class NotesEnvironment(BaseEnvironment):
                     success=False,
                     message=f"Note {note_id} not found",
                     suggested_commands=[
-                        "notes list",  # Browse existing notes
-                        "notes search <query>"  # Search for similar notes
+                        "notes list",
+                        "notes search <query>"
                     ],
-                    error="NotFound"
+                    error=CommandValidationError(
+                        message=f"Note {note_id} not found",
+                        suggested_fixes=[
+                            "Double-check the note ID",
+                            "Try 'notes list' to see existing notes"
+                        ],
+                        related_commands=["notes list", "notes search"],
+                        examples=["notes delete abc123", "notes list --limit=5"]
+                    )
                 )
 
             # Delete note - tags are handled by foreign key constraints
@@ -818,7 +939,26 @@ class NotesEnvironment(BaseEnvironment):
                     "deleted_id": note_id
                 }
             )
-            
+        
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to delete note: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Failed to delete note: {str(e)}",
+                    suggested_fixes=[
+                        "Check the note ID",
+                        "Verify database access"
+                    ],
+                    related_commands=["notes list", "notes create"],
+                    examples=["notes delete abc123", "notes list --limit=5"]
+                ),
+                suggested_commands=[
+                    "notes list",
+                    "notes create \"New note\""
+                ]
+            )
+
         finally:
             conn.close()
     
@@ -880,7 +1020,28 @@ class NotesEnvironment(BaseEnvironment):
                     "has_more": len(notes) == limit
                 }
             )
-            
+        
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Search failed: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Search failed: {str(e)}",
+                    suggested_fixes=[
+                        "Check search query format",
+                        "Verify database access"
+                    ],
+                    related_commands=["notes list", "notes create"],
+                    examples=[
+                        'notes search "keyword"',
+                        'notes search "complex query" --limit=10'
+                    ]
+                ),
+                suggested_commands=[
+                    'notes list',
+                    'notes create "New note"'
+                ]
+            )
         finally:
             conn.close()
     
@@ -892,31 +1053,42 @@ class NotesEnvironment(BaseEnvironment):
     ) -> CommandResult:
         """
         Manage tags for a note.
-        
-        Tag changes ripple through:
-        - Note relationships
-        - Search capabilities
-        - Organization structures
         """
         if action not in ['add', 'remove']:
             return CommandResult(
                 success=False,
                 message=f"Unknown tag action: {action}",
                 suggested_commands=[
-                    "notes tags add <note_id> tag1 tag2",
-                    "notes tags remove <note_id> tag1 tag2"
+                    "notes tag-add <note_id> tag1 tag2",
+                    "notes tag-remove <note_id> tag1 tag2"
                 ],
-                error="InvalidAction"
+                error=CommandValidationError(
+                    message=f"Unknown tag action: {action}",
+                    suggested_fixes=["Use 'add' or 'remove' only"],
+                    related_commands=["notes tag-add", "notes tag-remove"],
+                    examples=[
+                        "notes tag-add abc123 important",
+                        "notes tag-remove abc123 important"
+                    ]
+                )
             )
-            
+
         if not tags:
             return CommandResult(
                 success=False,
                 message="No tags specified",
                 suggested_commands=[
-                    f"notes tags {action} {note_id} tag1 tag2"
+                    f"notes tag-{action} {note_id} tag1 tag2"
                 ],
-                error="NoTags"
+                error=CommandValidationError(
+                    message="No tags specified",
+                    suggested_fixes=["Provide at least one tag"],
+                    related_commands=["notes tag-add", "notes tag-remove"],
+                    examples=[
+                        "notes tag-add abc123 important",
+                        "notes tag-remove abc123 old-tag"
+                    ]
+                )
             )
 
         conn = sqlite3.connect(self.db_path)
@@ -930,8 +1102,20 @@ class NotesEnvironment(BaseEnvironment):
                     success=False,
                     message=f"Note {note_id} not found",
                     suggested_commands=["notes list"],
-                    error="NotFound"
+                    error=CommandValidationError(
+                        message=f"Note {note_id} not found",
+                        suggested_fixes=[
+                            "Check the note ID carefully",
+                            "Use 'notes list' to see which IDs exist"
+                        ],
+                        related_commands=["notes list", "notes create"],
+                        examples=[
+                            "notes tag-add abc123 important",
+                            "notes tag-remove abc123 old-tag"
+                        ]
+                    )
                 )
+
 
             if action == 'add':
                 for tag in tags:
@@ -972,6 +1156,28 @@ class NotesEnvironment(BaseEnvironment):
                     "action": action,
                     "tags": list(tags)
                 }
+            )
+        
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to {action} tags: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Failed to {action} tags: {str(e)}",
+                    suggested_fixes=[
+                        "Check tag names and note ID",
+                        "Ensure database access"
+                    ],
+                    related_commands=["notes list", "notes tags"],
+                    examples=[
+                        f"notes tag-{action} abc123 important",
+                        "notes tags"
+                    ]
+                ),
+                suggested_commands=[
+                    "notes list",
+                    "notes tags"
+                ]
             )
             
         finally:

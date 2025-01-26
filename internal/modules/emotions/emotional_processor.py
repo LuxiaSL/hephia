@@ -108,10 +108,24 @@ class EmotionalStimulus:
             if abs(current) < min_change:
                 setattr(vector, attr, 0.0)
             else:
-                decay = -decay_rate if current > 0 else decay_rate
-                setattr(vector, attr, current * (1 - decay))
+                # Handle decay more safely - ensure we don't overflow
+                try:
+                    decay = -decay_rate if current > 0 else decay_rate
+                    new_value = current * (1 - decay)
+                    # Bound values to prevent overflow
+                    new_value = max(-1.0, min(1.0, new_value))
+                    setattr(vector, attr, new_value)
+                except (OverflowError, FloatingPointError):
+                    # If overflow occurs, gracefully decay to 0
+                    setattr(vector, attr, 0.0)
 
-        vector.intensity *= (1 - decay_rate)
+        # Handle intensity decay similarly
+        try:
+            vector.intensity *= (1 - decay_rate)
+            vector.intensity = max(0.0, min(1.0, vector.intensity))
+        except (OverflowError, FloatingPointError):
+            vector.intensity = 0.0
+            
         if vector.intensity < min_change:
             vector.intensity = 0.0
 
@@ -123,16 +137,49 @@ class EmotionalStimulus:
             self.intensity = 0.0
             return
 
-        # Sum up the weighted valence and arousal
-        total_intensity = sum(v.intensity for v in self.active_vectors)
-        if total_intensity == 0:
+        # Filter out invalid vectors and get total intensity
+        valid_vectors = [v for v in self.active_vectors 
+                        if v.intensity >= 0.0 and 
+                        -1.0 <= v.valence <= 1.0 and 
+                        -1.0 <= v.arousal <= 1.0]
+        
+        total_intensity = sum(v.intensity for v in valid_vectors)
+        
+        if total_intensity <= 0.0:
             self.valence = 0.0
             self.arousal = 0.0
             self.intensity = 0.0
             return
 
-        weighted_valence = sum(v.valence * v.intensity for v in self.active_vectors) / total_intensity
-        weighted_arousal = sum(v.arousal * v.intensity for v in self.active_vectors) / total_intensity
+        try:
+            # Calculate weighted values with validated inputs
+            weighted_valence = 0.0
+            weighted_arousal = 0.0
+            
+            # Calculate sums while checking for potential numerical issues
+            for v in valid_vectors:
+                try:
+                    # Ensure intensity is valid for division
+                    if not 0 <= v.intensity <= 1.0:
+                        continue
+                        
+                    weighted_valence += v.valence * v.intensity
+                    weighted_arousal += v.arousal * v.intensity
+                except (OverflowError, FloatingPointError):
+                    continue
+                    
+            # Only perform division if we have valid total intensity
+            if total_intensity > 0:
+                weighted_valence /= total_intensity
+                weighted_arousal /= total_intensity
+            else:
+                weighted_valence = 0.0
+                weighted_arousal = 0.0
+                
+        except (OverflowError, FloatingPointError, ZeroDivisionError):
+            # Fallback to neutral state if calculations fail
+            weighted_valence = 0.0 
+            weighted_arousal = 0.0
 
         # Normalize and bound values
         self.valence = max(-1.0, min(1.0, weighted_valence))
