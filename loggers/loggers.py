@@ -5,7 +5,22 @@ Provides clean interfaces for specific logging needs.
 
 import logging
 import json
+import sys
+import re
 from typing import Dict, Any, List, Optional
+
+def strip_emojis(text: str) -> str:
+    """Remove emojis and other special characters from text."""
+    emoji_pattern = re.compile("["
+        u"\U0001F600-\U0001F64F"  # emoticons
+        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+        u"\U0001F680-\U0001F6FF"  # transport & map symbols
+        u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        u"\U00002702-\U000027B0"
+        u"\U000024C2-\U0001F251"
+        "]+", flags=re.UNICODE)
+    return emoji_pattern.sub('', text)
+
 
 class SystemLogger:
     """Logger for internal system operations."""
@@ -22,15 +37,15 @@ class SystemLogger:
         
         if error:
             logger.error(
-                f"API Error ({service}):\n"
-                f"  Endpoint: {endpoint}\n"
+                f"API Error ({strip_emojis(str(service))}):\n"
+                f"  Endpoint: {strip_emojis(str(endpoint))}\n"
                 f"  Status: {status}\n"
-                f"  Error: {error}"
+                f"  Error: {strip_emojis(str(error))}"
             )
         else:
             logger.debug(
-                f"API Request ({service}):\n"
-                f"  Endpoint: {endpoint}\n"
+                f"API Request ({strip_emojis(str(service))}):\n"
+                f"  Endpoint: {strip_emojis(str(endpoint))}\n"
                 f"  Status: {status}"
             )
 
@@ -39,10 +54,34 @@ class SystemLogger:
         """Log API retry attempts."""
         logger = logging.getLogger('hephia.system')
         logger.warning(
-            f"API Retry ({service}):\n"
+            f"API Retry ({strip_emojis(str(service))}):\n"
             f"  Attempt: {attempt}/{max_retries}\n"
-            f"  Reason: {reason}"
+            f"  Reason: {strip_emojis(str(reason))}"
         )
+
+    @staticmethod
+    def error(message: str):
+        """Log error-level system events."""
+        logger = logging.getLogger('hephia.system')
+        logger.error(f"System Error: {strip_emojis(str(message))}")
+
+    @staticmethod
+    def warning(message: str):
+        """Log warning-level system events."""
+        logger = logging.getLogger('hephia.system')
+        logger.warning(f"System Warning: {strip_emojis(str(message))}")
+
+    @staticmethod
+    def debug(message: str):
+        """Log debug-level system events."""
+        logger = logging.getLogger('hephia.system')
+        logger.debug(f"System Debug: {strip_emojis(str(message))}")
+
+    @staticmethod
+    def info(message: str):
+        """Log info-level system events."""
+        logger = logging.getLogger('hephia.system')
+        logger.info(f"System Info: {strip_emojis(str(message))}")
 
 class InternalLogger:
     """Logger for internal state changes."""
@@ -78,38 +117,42 @@ class BrainLogger:
     def error(message: str):
         """Log error-level brain system events."""
         logger = logging.getLogger('hephia.brain')
-        logger.error(f"Brain Error: {message}")
+        logger.error(f"Brain Error: {strip_emojis(str(message))}")
 
     @staticmethod
     def warning(message: str):
         """Log warning-level brain system events."""
         logger = logging.getLogger('hephia.brain')
-        logger.warning(f"Brain Warning: {message}")
+        logger.warning(f"Brain Warning: {strip_emojis(str(message))}")
 
     @staticmethod
     def debug(message: str):
         """Log debug-level brain system events."""
         logger = logging.getLogger('hephia.brain')
-        logger.debug(f"Brain Debug: {message}")
+        logger.debug(f"Brain Debug: {strip_emojis(str(message))}")
 
     @staticmethod
     def info(message: str):
         """Log info-level brain system events."""
         logger = logging.getLogger('hephia.brain')
-        logger.info(f"Brain Info: {message}")
+        logger.info(f"Brain Info: {strip_emojis(str(message))}")
     
     @staticmethod
     def log_llm_exchange(messages: List[Dict], response: str):
         """Log LLM interaction with clear formatting."""
         logger = logging.getLogger('hephia.brain')
+        # Clean messages and response
+        clean_messages = [{k: strip_emojis(str(v)) for k, v in msg.items()} for msg in messages[-5:]]
+        clean_response = strip_emojis(str(response))
+        
         logger.debug(
             "LLM EXCHANGE\n"
             f"Context (last 5 messages):\n"
-            f"{json.dumps(messages[-5:], indent=2)}\n"
-            f"Response:\n{response}"
+            f"{json.dumps(clean_messages, indent=2)}\n"
+            f"Response:\n{clean_response}"
         )
         # Clean version for console
-        logger.info(f"LLM: {response[:100]}...")
+        logger.info(f"LLM: {clean_response[:100]}...")
     
     @staticmethod
     def log_command_processing(
@@ -121,14 +164,14 @@ class BrainLogger:
         logger = logging.getLogger('hephia.brain')
         logger.debug(
             "COMMAND PROCESSING\n"
-            f"Raw Input:\n{raw_input}\n"
-            f"Processed Command: {processed}\n"
-            f"Validation: {validation_result or 'Success'}"
+            f"Raw Input:\n{strip_emojis(str(raw_input))}\n"
+            f"Processed Command: {strip_emojis(str(processed)) if processed else None}\n"
+            f"Validation: {strip_emojis(str(validation_result)) if validation_result else 'Success'}"
         )
         if processed:
-            logger.info(f"Command: {processed}")
+            logger.info(f"Command: {strip_emojis(str(processed))}")
         if validation_result:
-            logger.warning(f"Command failed: {validation_result}")
+            logger.warning(f"Command failed: {strip_emojis(str(validation_result))}")
     
     @staticmethod
     def log_turn_start():
@@ -142,7 +185,7 @@ class BrainLogger:
         logger = logging.getLogger('hephia.brain')
         status = "completed successfully" if success else "failed"
         if reason:
-            logger.debug(f"Exo loop turn {status}: {reason}")
+            logger.debug(f"Exo loop turn {status}: {strip_emojis(str(reason))}")
         else:
             logger.debug(f"Exo loop turn {status}")
 
@@ -152,40 +195,40 @@ class MemoryLogger:
     @staticmethod
     def log_error(message: str):
         logger = logging.getLogger('hephia.memory')
-        logger.error(message)
+        logger.error(strip_emojis(str(message)))
 
     @staticmethod
     def error(message: str):
         """Log error-level memory system events."""
         logger = logging.getLogger('hephia.memory')
-        logger.error(f"Memory Error: {message}")
+        logger.error(f"Memory Error: {strip_emojis(str(message))}")
 
     @staticmethod
     def warning(message: str):
         """Log warning-level memory system events."""
         logger = logging.getLogger('hephia.memory')
-        logger.warning(f"Memory Warning: {message}")
+        logger.warning(f"Memory Warning: {strip_emojis(str(message))}")
 
     @staticmethod
     def debug(message: str):
         """Log debug-level memory system events."""
         logger = logging.getLogger('hephia.memory')
-        logger.debug(f"Memory Debug: {message}")
+        logger.debug(f"Memory Debug: {strip_emojis(str(message))}")
 
     @staticmethod
     def info(message: str):
         """Log info-level memory system events."""
         logger = logging.getLogger('hephia.memory')
-        logger.info(f"Memory Info: {message}")
+        logger.info(f"Memory Info: {strip_emojis(str(message))}")
 
     @staticmethod
     def log_memory_formation(memory_type: str, memory_id: str, details: Dict[str, Any]):
         """Log the formation of a new memory node."""
         logger = logging.getLogger('hephia.memory')
         logger.info(
-            f"Memory Formation ({memory_type}):\n"
-            f"  Memory ID: {memory_id}\n"
-            f"  Details: {json.dumps(details, indent=2)}"
+            f"Memory Formation ({strip_emojis(str(memory_type))}):\n"
+            f"  Memory ID: {strip_emojis(str(memory_id))}\n"
+            f"  Details: {json.dumps({k: strip_emojis(str(v)) for k,v in details.items()}, indent=2)}"
         )
 
     @staticmethod
@@ -194,15 +237,15 @@ class MemoryLogger:
         logger = logging.getLogger('hephia.memory')
         if success:
             logger.debug(
-                f"Memory Retrieval Success ({memory_type}):\n"
-                f"  Memory ID: {memory_id}\n"
-                f"  Query: {query}"
+                f"Memory Retrieval Success ({strip_emojis(str(memory_type))}):\n"
+                f"  Memory ID: {strip_emojis(str(memory_id))}\n"
+                f"  Query: {strip_emojis(str(query)) if query else None}"
             )
         else:
             logger.warning(
-                f"Memory Retrieval Failure ({memory_type}):\n"
-                f"  Memory ID: {memory_id}\n"
-                f"  Query: {query}"
+                f"Memory Retrieval Failure ({strip_emojis(str(memory_type))}):\n"
+                f"  Memory ID: {strip_emojis(str(memory_id))}\n"
+                f"  Query: {strip_emojis(str(query)) if query else None}"
             )
 
     @staticmethod
@@ -210,8 +253,8 @@ class MemoryLogger:
         """Log the decay of a memory node."""
         logger = logging.getLogger('hephia.memory')
         logger.info(
-            f"Memory Decay ({memory_type}):\n"
-            f"  Memory ID: {memory_id}\n"
+            f"Memory Decay ({strip_emojis(str(memory_type))}):\n"
+            f"  Memory ID: {strip_emojis(str(memory_id))}\n"
             f"  New Strength: {new_strength}"
         )
 
@@ -220,9 +263,9 @@ class MemoryLogger:
         """Log the merging of two memory nodes."""
         logger = logging.getLogger('hephia.memory')
         logger.info(
-            f"Memory Merge ({memory_type}):\n"
-            f"  From Memory ID: {from_memory_id}\n"
-            f"  To Memory ID: {to_memory_id}"
+            f"Memory Merge ({strip_emojis(str(memory_type))}):\n"
+            f"  From Memory ID: {strip_emojis(str(from_memory_id))}\n"
+            f"  To Memory ID: {strip_emojis(str(to_memory_id))}"
         )
 
 class EventLogger:
@@ -231,25 +274,25 @@ class EventLogger:
     def error(message: str):
         """Log error-level event system events."""
         logger = logging.getLogger('hephia.events')
-        logger.error(f"Event Error: {message}")
+        logger.error(f"Event Error: {strip_emojis(str(message))}")
 
     @staticmethod
     def warning(message: str):
         """Log warning-level event system events."""
         logger = logging.getLogger('hephia.events')
-        logger.warning(f"Event Warning: {message}")
+        logger.warning(f"Event Warning: {strip_emojis(str(message))}")
 
     @staticmethod
     def debug(message: str):
         """Log debug-level event system events."""
         logger = logging.getLogger('hephia.events')
-        logger.debug(f"Event Debug: {message}")
+        logger.debug(f"Event Debug: {strip_emojis(str(message))}")
 
     @staticmethod
     def info(message: str):
         """Log info-level event system events."""
         logger = logging.getLogger('hephia.events')
-        logger.info(f"Event Info: {message}")
+        logger.info(f"Event Info: {strip_emojis(str(message))}")
 
     @staticmethod
     def log_event_dispatch(event_type: str, data: Any = None, metadata: Optional[Dict] = None):
@@ -257,26 +300,26 @@ class EventLogger:
         logger = logging.getLogger('hephia.events')
         
         # Build message components
-        components = [f"Event Dispatched: {event_type}"]
+        components = [f"Event Dispatched: {strip_emojis(str(event_type))}"]
         
         if data is not None:
             if isinstance(data, dict):
                 # Convert any EmotionalVector objects to dictionaries
-                processed_data = {k: v.to_dict() if hasattr(v, 'to_dict') else v for k, v in data.items()}
+                processed_data = {k: str(v.to_dict() if hasattr(v, 'to_dict') else v) for k, v in data.items()}
                 data_str = json.dumps(processed_data, indent=2)
                 components.append(f"Data:\n{data_str}")
             elif isinstance(data, list):
                 # Convert any EmotionalVector objects in list
-                processed_data = [item.to_dict() if hasattr(item, 'to_dict') else item for item in data]
+                processed_data = [str(item.to_dict() if hasattr(item, 'to_dict') else item) for item in data]
                 data_str = json.dumps(processed_data, indent=2)
                 components.append(f"Data:\n{data_str}")
             else:
-                components.append(f"Data: {str(data)}")
+                components.append(f"Data: {strip_emojis(str(data))}")
                 
         if metadata:
-            meta_str = json.dumps(metadata, indent=2)
+            meta_str = json.dumps({k: strip_emojis(str(v)) for k,v in metadata.items()}, indent=2)
             components.append(f"Metadata:\n{meta_str}")
         
         # Join with newlines for debug, keep compact for info
         logger.debug('\n'.join(components))
-        logger.info(f"Dispatched: {event_type}")
+        logger.info(f"Dispatched: {strip_emojis(str(event_type))}")

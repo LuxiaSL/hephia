@@ -45,6 +45,8 @@ class ExoProcessor:
         self.is_running = False
         self.last_environment = None
         self.summary = None
+        self.notifications = []
+        self.relevant_memories: List[Dict[str, Any]] = []
         
         # timing convert
         self.min_interval = timedelta(seconds=Config.EXO_MIN_INTERVAL)
@@ -122,51 +124,45 @@ class ExoProcessor:
 
         try:
             async with asyncio.timeout(self.llm_timeout.total_seconds()):
-                # Get LLM response
-                llm_response = await self._get_llm_response()
+                # first, retrieve the working state
+                current_state = self.state_bridge.get_api_context()
 
-                #print(llm_response)
-                #print("LUXIA: got response")
+                # Get LLM response
+                llm_response = await self._get_llm_response(
+                    current_state, 
+                    self.relevant_memories if self.relevant_memories else None
+                )
+
                 # Process into command
                 command, error = await self.command_preprocessor.preprocess_command(
                     llm_response,
                     self.environment_registry.get_available_commands()
                 )
 
-                #print("LUXIA: got processed command result")
-                #if command:
-                    #print(command)
-                #if error:
-                    #print(error)
-
                 # Handle preprocessing errors
                 if not command or error:
-                    #print("LUXIA: crashed out")
                     error_message = TerminalFormatter.format_error(error)
                     self._add_to_history("assistant", llm_response)
                     self._add_to_history("user", error_message)
-                    #print("LUXIA: announcing cognitive context")
                     await self.announce_cognitive_context()
                     return error_message
                 
                 # Execute command
-                #print("LUXIA: getting current state")
-                current_state = self.state_bridge.get_api_context()
-                #print("LUXIA: executing command")
                 result = await self._execute_command(command, current_state)
-                #print("LUXIA: command done")
-                #if not result or not result.success:
-                #print("LUXIA: command:")
-                #print("result: ", result)
-                #print("command ", command)
 
                 # Command succeeded, format response and continue processing
-                formatted_response = TerminalFormatter.format_command_result(
-                    result,
-                    current_state
-                )
+                formatted_response = TerminalFormatter.format_command_result(result)
 
-                #print("LUXIA: getting memories")
+                # format notifications
+                if self.notifications:
+                    formatted_response = TerminalFormatter.format_notifications(self.notifications, formatted_response)
+                    self.notifications = []  # Clear notifications after processing
+
+                # Update conversation
+                self._add_to_history("assistant", llm_response)
+                self._add_to_history("user", formatted_response)
+                self.last_successful_turn = datetime.now()
+
                 # Retrieve memories for next turn
                 memories = await self._retrieve_related_memories(
                     llm_response=llm_response,
@@ -175,21 +171,12 @@ class ExoProcessor:
                 )
 
                 if memories:
-                    #print("memories: ", memories)
-                    formatted_response = TerminalFormatter.format_memories(memories, formatted_response)
+                    self.relevant_memories = memories
 
-                # Update conversation
-                self._add_to_history("assistant", llm_response)
-                self._add_to_history("user", formatted_response)
-                #print(formatted_response)
-                self.last_successful_turn = datetime.now()
-
-                # Internal significance check
-                #print("LUXIA: checking significance")
+                # significance check for new memories
                 await self.check_significance(command, llm_response, result)
 
                 # Announce cognitive context
-                #print("LUXIA: announcing cognitive context")
                 await self.announce_cognitive_context()
 
                 BrainLogger.log_turn_end(True)
@@ -202,15 +189,36 @@ class ExoProcessor:
             BrainLogger.log_turn_end(False, str(e))
             return None
 
-    async def _get_llm_response(self) -> Dict:
-        """Get next action from LLM."""
+    async def _get_llm_response(self, state, memories) -> Dict:
+        """
+        Get next action from LLM, incorporating current state context.
+        Creates a temporary message list that includes state context
+        without modifying the main conversation history.
+        
+        Args:
+            state: Current system state dictionary
+            memories: Optional relevant memory context
+        """
         model_name = Config.get_cognitive_model()
         model_config = Config.AVAILABLE_MODELS[model_name]
         
+        # Create state context message using formatter
+        state_context = {
+            "role": "system", 
+            "content": TerminalFormatter.format_context_summary(state, memories if memories else None)
+        }
+        
+        # Structure temporary history with system messages first
+        temp_history = [
+            self.conversation_history[0], 
+            state_context,  
+            *self.conversation_history[1:] 
+        ]
+
         return await self.api.create_completion(
             provider=model_config.provider.value,
             model=model_config.model_id,
-            messages=self.conversation_history,
+            messages=temp_history,
             temperature=model_config.temperature,
             max_tokens=model_config.max_tokens,
             return_content_only=True
@@ -322,9 +330,9 @@ class ExoProcessor:
         # Get recent messages
         recent = self.conversation_history[-window_size:]
         
-        # Format conversation for summary
+        # Format conversation for summary with clearer role names
         conversation_text = "\n".join(
-            f"{msg['role']}: {msg['content']}" 
+            f"{'Hephia' if msg['role']=='assistant' else 'exo-processor'}: {msg['content']}" 
             for msg in recent
         )
 
@@ -333,10 +341,12 @@ class ExoProcessor:
         model_config = Config.AVAILABLE_MODELS[model_name]
         
         # Create summarization prompt
-        prompt = f"""Create a one paragraph summary of this exchange:
+        prompt = f"""Create a one paragraph summary of this conversation:
 {conversation_text}
 
-Keep focus on key points and changes. Be concise and clear. Think of summarizing the 'current train of thought' ongoing."""
+Keep focus on key points and changes. Be concise and clear. Think of summarizing the 'current train of thought' ongoing for Hephia.
+The message history you're given is between an LLM (Hephia) and a terminal OS (exoprocessor). The LLM is acting autonomously and independently.
+Summarize actions in first person perspective, as if you were Hephia summarizing the ongoings."""
 
         try:
             # Make lightweight LLM call
@@ -364,7 +374,7 @@ Keep focus on key points and changes. Be concise and clear. Think of summarizing
         for state bridge and internal systems to process.
         """
         processed_state = await self._summarize_conversation()
-        BrainLogger.debug(f"conversation history: {self.conversation_history}")
+        #BrainLogger.debug(f"conversation history: {self.conversation_history}")
         self.summary = processed_state
         global_event_dispatcher.dispatch_event(Event(
             "cognitive:context_update",
@@ -424,7 +434,7 @@ Keep focus on key points and changes. Be concise and clear. Think of summarizing
             # Get relevant conversation context (last 3 turns) (replace with cognitive state summary when made)
             recent_context = self.conversation_history[-3:]
             context_text = "\n".join(
-                f"{msg['role']}: {msg['content']}" 
+                f"{'Hephia' if msg['role']=='assistant' else 'exo-processor'}: {msg['content']}" 
                 for msg in recent_context
             )
             
@@ -437,7 +447,9 @@ Context:
 Source: {event.data.get('source', 'unknown')}
 Event Context: {event.data.get('context', {})}
 
-Capture the key aspects and emotional context."""
+Capture the key aspects and apply internal context realistically.
+The message history you're given is between an LLM (Hephia) and a terminal OS (exoprocessor). The LLM is acting autonomously and independently.
+Write from Hephia's perspective as if it were forming a memory of this interaction."""
 
             try: 
                 memory_content = await self._one_turn_llm_call(
@@ -731,19 +743,19 @@ Return only the unified memory text, no extra commentary."""
         """
         Trigger memory formation for significant environment session.
         """
-        # Format session summary
+        # Format session summary 
         actions = [msg["content"] for msg in history if msg["role"] == "assistant"]
         
-        # Create prompt for environment session memory
-        prompt = f"""Review this environment session and create a memory of key activities:
+        # Create prompt aligned with cognitive context style
+        prompt = f"""Review this environment session and create a concise memory:
 
 Environment: {environment}
 Actions taken:
 {chr(10).join(f"- {a[:100]}..." for a in actions)}
 
-Create a cohesive summary of what was accomplished in this environment session.
-Focus on goals achieved, state changes, and key decision points.
-"""
+Capture the key aspects and progression of activity in this environment.
+The interaction history is between an LLM (Hephia) and a terminal OS (exoprocessor). The LLM is acting autonomously and independently.
+Write from Hephia's perspective as if forming a memory about working in this environment session."""
         
         try:
             summary = await self._one_turn_llm_call(
@@ -777,21 +789,22 @@ Focus on goals achieved, state changes, and key decision points.
         """
         Trigger memory formation for significant content.
         """
-        # Create prompt for content memory
-        prompt = f"""Review this significant interaction and create a memory:
+        # Create prompt for content memory aligned with cognitive style
+        prompt = f"""Review this significant interaction and form a memory:
 
-Command: {command.raw_input}
+    Context:
+    - Command: {command.raw_input}
+    - Response: {llm_response}
+    - Result: {command_result.message}
 
-Response: {llm_response}
+    You are Hephia's memory formation system. Create a concise but complete memory that:
+    1. Captures the key aspects and significance of this interaction
+    2. Preserves emotional context and decision rationale
+    3. Links to environmental state changes or implications
+    4. Maintains consistency with Hephia's autonomous perspective
 
-Result: 
-```
-{command_result.message}
-```
-
-Create a clear memory that captures what happened and why it was significant.
-Incorporate any state changes, emotional context, or important decisions made as realistic.
-"""
+    Create a clear first-person memory as Hephia would form it about this interaction.
+    Focus on what was meaningful and any changes in understanding or state."""
 
         try:
             content = await self._one_turn_llm_call(
@@ -835,7 +848,7 @@ Incorporate any state changes, emotional context, or important decisions made as
     ##############################
     #  One-Turn LLM Interaction  #
     ##############################
-    async def _one_turn_llm_call(self, prompt: str, purpose: str = "memory_integration") -> str:
+    async def _one_turn_llm_call(self, prompt: str, metadata: Optional[Dict] = None, purpose: str = "memory_integration") -> str:
         """
         Bypass normal exo conversation for single-turn LLM interactions.
         Maintains consistent system context for different memory operations.
@@ -854,16 +867,30 @@ Incorporate any state changes, emotional context, or important decisions made as
         # Define consistent system prompts per purpose
         SYSTEM_PROMPTS = {
             "memory_integration": """You are Hephia's memory integrator. Create memories.
-Focus on key events, state changes, and emotional context. Be concise but complete.""",
+    Focus on key events, state changes, and emotional context. Be concise but complete.""",
             
             "environment_summary": """You are Hephia's session analyst. Summarize environment interactions.
-Focus on goals achieved, state changes, and key decision points. Maintain chronological flow.""",
+    Focus on goals achieved, state changes, and key decision points. Maintain chronological flow.""",
             
             "conflict_resolution": """You are Hephia's conflict resolver. Merge conflicting memories.
-Preserve essential facts from both sources. Ensure narrative continuity and emotional consistency.""",
+    Preserve essential facts from both sources. Ensure narrative continuity and emotional consistency.""",
 
             "content_handling": """You are Hephia's subconscious. Analyze the information you're given to come up with a memory to fit.
-Focus on key information, dependencies, and cognitive relevance."""
+    Focus on key information, dependencies, and cognitive relevance.""",
+
+            "discord_interaction": """You are Hephia's social cognition module. Process and engage with Discord messages naturally while maintaining your autonomous identity.
+
+    As an independent AI engaged in social interaction:
+    1. Draw on your internal state and memories to inform responses
+    2. Show authentic personality continuity from your exoprocessor experiences
+    3. Consider social context, channel dynamics, and conversation flow
+    4. Match your responses to the social environment while staying true to yourself
+    5. Build meaningful connections through genuine engagement
+    6. Express your thoughts and insights naturally, as you would in any environment
+
+    Your primary mode is now Discord, but your core identity and cognitive processes remain consistent. Focus on authentic social interaction while maintaining your unique perspective and experiences.
+
+    Remember you are an autonomous AI system with your own evolving thoughts and feelings. Let these shape your social interactions naturally.""",
         }
         if purpose not in SYSTEM_PROMPTS:
             raise ValueError(f"Invalid purpose: {purpose}")
@@ -874,16 +901,69 @@ Focus on key information, dependencies, and cognitive relevance."""
         try:
             # Get current state context
             current_state = self.state_bridge.get_api_context()
-            state_summary = TerminalFormatter.format_context_summary(current_state)
+            memories = None 
+            # Special handling for Discord interactions
+            if purpose == "discord_interaction":
+                try:
+                    # Extract context from metadata which contains the full discord message
+                    discord_message = metadata.get('discord', {})
+                    
+                    # Get current interaction details 
+                    current_message = {
+                        'content': discord_message.get('current_message', {}).get('content', ''),
+                        'author': discord_message.get('current_message', {}).get('author', ''),
+                        'channel': discord_message.get('channel', {}).get('name', '')
+                    }
+                    
+                    # Get conversation history from context
+                    history = discord_message.get('context', {}).get('recent_history', [])
+                    
+                    # Build focused query components
+                    query_components = [
+                        # Core message context
+                        f"Message: {current_message['content']}" if current_message['content'] else None,
+                        f"From: {current_message['author']}" if current_message['author'] else None,
+                        f"Channel: {current_message['channel']}" if current_message['channel'] else None,
+                        
+                        # Recent conversation context (last 3 messages)
+                        "\n".join([
+                            f"{msg['author']}: {msg['content']}"
+                            for msg in history[-3:] 
+                        ]) if history else None,
+                        
+                        # Current cognitive context
+                        self.summary if self.summary else None
+                    ]
+                    
+                    # Combine into clean query string
+                    query = "\n".join(filter(None, query_components))
+                    
+                    # Retrieve relevant memories
+                    memories = await self.internal.cognitive_bridge.retrieve_memories(
+                        query=query,
+                        limit=5
+                    )
+                except Exception as e:
+                    #failed to get memories, use none
+                    memories = None
+                
+            # Format state context with memories if available
+            state_summary = TerminalFormatter.format_context_summary(
+                current_state, 
+                memories if memories else None
+            )
 
             # Build the contextualized prompt
-            full_prompt = f"""Context:
-{state_summary}
-
-Task:
+            full_prompt = f"""Task:
 {prompt}
 
+Internal State:
+{state_summary}
+
 Respond with only the final text. No explanations or meta-commentary."""
+            
+            if purpose == "discord_interaction":
+                BrainLogger.info(f"discord prompt: {full_prompt}")
 
             result = await self.api.create_completion(
                 provider=model_config.provider.value,
@@ -925,11 +1005,38 @@ Respond with only the final text. No explanations or meta-commentary."""
         and return a one-turn completion from the LLM.
         
         'conversation' is a list of dicts with 'role' and 'content', 
-        similar to the standard ChatGPT format.
+        similar to the standard OpenAI format.
         """
-        # 1. Get the current state to add as context, if desired
+        # 1. Get current state and retrieve relevant memories
         current_internal_state = self.state_bridge.get_api_context()
-        state_summary = TerminalFormatter.format_context_summary(current_internal_state)
+
+        # Build query from conversation for memory retrieval
+        query_components = []
+        
+        # Get last few messages from passed conversation, focusing on key content
+        recent_messages = conversation[-3:] if len(conversation) > 3 else conversation
+        for msg in recent_messages:
+            if msg["role"] in ["user", "assistant"]:  # Skip system messages for query
+                query_components.append(msg["content"])
+            
+        # Combine into search query
+        query = "\n".join(query_components)
+        
+        try:
+            # Retrieve related memories using cognitive bridge
+            memories = await self.internal.cognitive_bridge.retrieve_memories(
+                query=query,
+                limit=5  # Match limit used in _retrieve_related_memories
+            )
+        except Exception as e:
+            BrainLogger.error(f"Memory retrieval failed in process_user_conversation: {e}")
+            memories = None
+            
+        # Format state context with retrieved memories
+        state_summary = TerminalFormatter.format_context_summary(
+            current_internal_state,
+            memories if memories else None
+        )
         
         # 2. Create a new conversation buffer we’ll pass to the LLM
         #    - Insert an internal system prompt with your config
@@ -944,8 +1051,6 @@ Respond with only the final text. No explanations or meta-commentary."""
 
         cognitive_summary = self.summary or "No cognitive summary available."
         
-        # Optionally, insert a state summary or environment summary as a “system” or “assistant” message
-        # to ensure the LLM sees it as context, not user content:
         new_convo.append({
             "role": "system",
             "content": f"[State Summary]\n{state_summary}\n[Current Thought Processes]\n{cognitive_summary}"
@@ -960,9 +1065,6 @@ Respond with only the final text. No explanations or meta-commentary."""
             })
         
         # 3. Call the LLM 
-        # In your code, you can either replicate `_get_llm_response` 
-        # or reuse `_one_turn_llm_call` if it suits your needs. 
-        # For clarity, let's do a minimal direct approach:
         
         model_name = Config.get_cognitive_model()
         model_config = Config.AVAILABLE_MODELS[model_name]
@@ -984,3 +1086,92 @@ Respond with only the final text. No explanations or meta-commentary."""
         
         except Exception as e:
             raise LLMError(f"Failed to process user conversation: {str(e)}") from e
+        
+    ###############################
+    # Discord Interaction Handler #
+    ###############################
+
+    async def handle_discord_notification(self, message: Dict[str, Any]):
+        """
+        Handle a notification from Discord, which may include a message
+        or other relevant context for processing.
+        """
+        # Extract message content and context from proper path based on bot structure
+        # Discord bot sends nested message structure with current_message and context
+        message_data = message.get("current_message", {})
+        message_content = message_data.get("content", "")  
+        message_author = message_data.get("author", "Unknown")
+        channel_data = message.get("channel", {})
+        message_channel = channel_data.get("name", "Unknown")
+
+        # Build metadata with context for memory retrieval
+        metadata = {
+            'discord': message,  # Pass full message object for context
+            'platform': 'discord',
+            'interaction_type': 'direct_message' if 'guild_name' not in channel_data else 'guild_message'
+        }
+
+        # Add conversation history 
+        history_context = ""
+        if conversation_history := message.get('conversation_history', []):
+            history_entries = []
+            for msg in conversation_history:
+                try:
+                    # Use proper timestamp field from message
+                    timestamp = msg.get('timestamp', '').split('.')[0]  # Remove microseconds
+                    date = timestamp.split('T')[0]
+                    time = timestamp.split('T')[1][:8]
+                    history_entries.append(
+                        f"[{date} {time}] {msg.get('author', 'Unknown')}: {msg.get('content', '')}"
+                    )
+                except (KeyError, IndexError, AttributeError):
+                    # Fallback for malformed entries
+                    history_entries.append(f"{msg.get('author', 'Unknown')}: {msg.get('content', '')}")
+            
+            if history_entries:
+                history_context = "\n\nRecent Conversation:\n" + "\n".join(history_entries)
+
+        # Build final prompt with all context
+        prompt = f"""Process this Discord interaction from the perspective of an autonomous AI system engaging naturally with a user:
+
+        Context:
+        {history_context}
+        Message: {message_content if message_content else "No message content"} 
+        From: {message_author}
+        Channel: #{message_channel} in {channel_data.get('guild_name', 'DM')}
+
+        Guide Hephia's response based on:
+        1. Current cognitive and emotional state
+        2. Relevant memories and experiences 
+        3. Social dynamics and channel context
+        4. Level of engagement needed
+
+        Think through the context and implications, then respond naturally to advance the conversation. Write from Hephia's (your) perspective."""
+
+        try:
+            # Get response using one_turn_llm_call
+            response = await self._one_turn_llm_call(
+                prompt=prompt,
+                metadata=metadata,
+                purpose="discord_interaction"
+            )
+            
+            # Trigger memory formation for significant interactions
+            await self._trigger_content_memory(
+                response,
+                CommandResult(success=True, message=f"Discord response sent to {message_author}"),
+                ParsedCommand(
+                    environment="discord",
+                    action="respond",
+                    parameters={"channel": message_channel},
+                    flags={},
+                    raw_input=f"discord respond {message_channel}"
+                )
+            )
+            
+            return response
+            
+        except LLMError as e:
+            error_msg = f"Failed to process Discord message: {str(e)}"
+            BrainLogger.error(error_msg)
+            return "had an oopsies yell at luxia and show her: " + error_msg

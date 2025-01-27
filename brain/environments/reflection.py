@@ -204,7 +204,7 @@ class ReflectEnvironment(BaseEnvironment):
                     
                     # Format recent memory descriptions
                     descriptions = []
-                    for node in nodes:
+                    for node in recent_nodes:
                         if isinstance(node, dict):
                             content = node.get('content', 'No content available')
                             descriptions.append(f"• {content}")
@@ -223,7 +223,7 @@ class ReflectEnvironment(BaseEnvironment):
                         data={
                             "limit": limit,
                             "node_count": len(recent_nodes),
-                            "node_ids": [n.get('node_id', 'N/A') for n in nodes]
+                            "node_ids": [n.get('node_id', 'N/A') for n in recent_nodes]
                         }
                     )
                 except Exception as e:

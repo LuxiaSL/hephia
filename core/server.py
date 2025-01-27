@@ -10,6 +10,7 @@ for real-time state updates.
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import aiohttp
 from typing import List, Dict, Any
 import asyncio
 import time
@@ -26,6 +27,7 @@ from config import Config
 from brain.exo_processor import ExoProcessor
 from brain.environments.environment_registry import EnvironmentRegistry
 from api_clients import APIManager
+from loggers import SystemLogger
 
 class CommandRequest(BaseModel):
     """Model for incoming commands."""
@@ -44,6 +46,20 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     stream: bool = False
+
+class DiscordInbound(BaseModel):
+    channel_id: str
+    message_id: str
+    author: str
+    author_id: str
+    content: str
+    timestamp: str
+    context: Dict[str, Any]
+
+class DiscordChannelUpdate(BaseModel):
+    channel_id: str
+    channel_name: str
+    new_message_count: int
 
 class HephiaServer:
     """
@@ -109,8 +125,12 @@ class HephiaServer:
             and returns the next assistant response.
             """
             try:
+                # Log and notify about the incoming message snippet
+                snippet = request.messages[-1].content[:30] if request.messages else "No content"
+                SystemLogger.info(f"Received conversation snippet: {snippet}")
+                self.exo_processor.notifications.append(f"Conversation message snippet: {snippet}")
+
                 messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
-        
                 response_text = await self.exo_processor.process_user_conversation(messages)
                 
                 # Return a standard ChatCompletion-like JSON response
@@ -120,16 +140,16 @@ class HephiaServer:
                     "created": int(time.time()),
                     "model": 'hephia',
                     "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": response_text
-                        },
-                        "finish_reason": "stop"
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": response_text
+                    },
+                    "finish_reason": "stop"
                     }]
                 }
             except Exception as e:
-                print(f"Error processing conversation: {e}")
+                SystemLogger.error(f"Error processing conversation: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
             
         @self.app.post("/v1/prune_conversation")
@@ -138,11 +158,82 @@ class HephiaServer:
             self.exo_processor.prune_conversation()
             return {"status": "success"}
             
-        
         @self.app.get("/state")
         async def get_state():
             """Get current system state."""
             return self.state_bridge.get_api_context()
+        
+        @self.app.post("/discord_inbound")
+        async def discord_inbound(payload: DiscordInbound):
+            try:
+                SystemLogger.info("Received new Discord message.")
+                
+                # Prepare context for the AI
+                message_context = {
+                    'current_message': {
+                        'id': payload.message_id,
+                        'author': f"<@{payload.author_id}>",  # Discord mention format
+                        'author_id': payload.author_id,
+                        'content': payload.content,
+                        'timestamp': payload.timestamp
+                    },
+                    'channel': {
+                        'id': payload.channel_id,
+                        'name': payload.context.get('channel_name'),
+                        'guild_name': payload.context.get('guild_name'),
+                        'recent_activity': payload.context.get('message_count')
+                    },
+                    'conversation_history': payload.context.get('recent_history', [])
+                }
+                SystemLogger.debug(f"Discord message context: {message_context}")
+                response_text = await self.exo_processor.handle_discord_notification(message_context)
+                SystemLogger.debug(f"AI response: {response_text[:100]}...")
+
+                # Format notification for LLM consumption
+                notification_text = (
+                    f"Discord update: Replied to {payload.author} in channel {payload.channel_id}\n"
+                    f"- Message ID: {payload.message_id}\n"
+                    f"- User said: {payload.content[:100]}{'...' if len(payload.content) > 100 else ''}\n"
+                    f"- My response: {response_text[:50]}{'...' if len(response_text) > 50 else ''}"
+                )
+                SystemLogger.info(notification_text)
+                self.exo_processor.notifications.append(notification_text)
+
+                discord_response = {
+                    "channel_id": payload.channel_id,
+                    "content": response_text
+                }
+
+                # Use a dedicated aiohttp session for this request
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{Config.DISCORD_BOT_URL}/channels/{payload.channel_id}/send_message",
+                        json=discord_response,
+                        timeout=10.0
+                    ) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            SystemLogger.error(f"Failed to send Discord response: {error_text}")
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"Failed to send response to Discord: {error_text}"
+                            )
+
+                    return {"status": "ok"}
+                
+            except Exception as e:
+                SystemLogger.error(f"Error processing Discord message: {str(e)}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        @self.app.post("/discord_channel_update")
+        async def discord_channel_update(payload: DiscordChannelUpdate):
+            notification = (
+                f"New messages detected in Discord channel {payload.channel_name} "
+                f"(ID: {payload.channel_id})"
+            )
+            self.exo_processor.notifications.append(notification)
+            
+            return {"status": "ok"}
     
     def setup_event_handlers(self):
         """Set up handlers for system events."""

@@ -291,6 +291,19 @@ class CognitiveMemory:
 
         global_event_dispatcher.add_listener('cognitive:memory:conflict_resolved', self.on_conflict_resolved)
 
+        global_event_dispatcher.add_listener(
+            'memory:echo_requested',
+            lambda event: asyncio.create_task(
+                self.trigger_echo(
+                    self._get_node_by_id(event.data["node_id"]),
+                    event.data["similarity"],
+                    event.data["given_state"],
+                    event.data["query_text"],
+                    event.data["query_embedding"]
+                )
+            )
+        )
+
     async def request_memory_formation(self, event: Event):
         """
         First half of memory formation - requests content generation from ExoProcessor
@@ -488,17 +501,21 @@ class CognitiveMemory:
             retrieval_scores.sort(key=lambda x: x[1], reverse=True)
             
             # Trigger echos on top results
+            # Trigger top_k results via events instead of direct tasks
             top_results = retrieval_scores[:top_k]
             for node, similarity, *_ in top_results:
-                asyncio.create_task(self.trigger_echo(
-                        node,
-                        similarity,
-                        comparison_state=given_state,
-                        query_text=query,
-                        query_embedding=query_embedding
-                    )
-                )
-            
+                # Dispatch event for echo processing
+                global_event_dispatcher.dispatch_event(Event(
+                    "memory:echo_requested",
+                    {
+                        "node_id": node.node_id,  
+                        "similarity": similarity,
+                        "given_state": given_state,
+                        "query_text": query,
+                        "query_embedding": query_embedding
+                    }
+                ))
+
             if return_details:
                 # Return both nodes and their detailed metrics
                 nodes = [n for n, _, _ in top_results]

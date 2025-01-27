@@ -13,6 +13,7 @@ from .search import SearchEnvironment
 from .web import WebEnvironment
 from .meditation import MeditateEnvironment
 from .reflection import ReflectEnvironment
+from .discord import DiscordEnvironment
 from api_clients import APIManager
 from brain.commands.model import (
     CommandDefinition,
@@ -39,6 +40,7 @@ class EnvironmentRegistry:
         self.register_environment("web", WebEnvironment())
         self.register_environment("meditate", MeditateEnvironment(self.cognitive_bridge))
         self.register_environment("reflect", ReflectEnvironment(self.cognitive_bridge))
+        self.register_environment("discord", DiscordEnvironment())
     
     def register_environment(self, name: str, environment: BaseEnvironment):
         """Register a new environment."""

@@ -84,7 +84,8 @@ class EventDispatcher:
         # Log events that don't start with any filtered prefixes
         if self.event_filter:
             if not any(event.event_type.startswith(prefix + ':') for prefix in self.event_filter):
-                EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
+                if not event.event_type == "memory:echo_requested":
+                    EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
 
         # Log events that start with any selected prefixes
         if self.event_select:

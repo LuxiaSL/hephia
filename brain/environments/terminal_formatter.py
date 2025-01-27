@@ -22,36 +22,114 @@ class TerminalFormatter:
     """Formats system output in a consistent, terminal-like format."""
 
     @staticmethod    
-    def format_context_summary(context: Dict[str, Any]) -> str:
+    def format_context_summary(context: Dict[str, Any], memories: Optional[List[Dict]] = None) -> str:
+        """
+        Format the current cognitive and emotional state into a cohesive first-person context
+        for LLM embodiment and continuity. Optionally includes relevant memories.
+
+        Args:
+            context: Dictionary containing current emotional and cognitive state
+            memories: Optional list of memory nodes to include in context
+
+        Returns:
+            Formatted string combining state and relevant memories
+        """
+        # Format core state components
         mood = context.get('mood', {})
         needs = context.get('needs', {})
         behavior = context.get('behavior', {})
         emotional_state = context.get('emotional_state', [])
 
-        # Format mood
-        mood_str = f"Mood: {mood.get('name', 'Unknown')} (v:{mood.get('valence', 0):.2f}, a:{mood.get('arousal', 0):.2f})"
+        # Format mood as embodied experience
+        valence = mood.get('valence', 0)
+        arousal = mood.get('arousal', 0)
+        mood_str = (
+            f"Experiencing a {mood.get('name', 'neutral')} mood "
+            f"(valence: {valence:.2f}, arousal: {arousal:.2f}). "
+        )
         
-        # Format behavior
-        behavior_str = f"Behavior: {behavior.get('name', 'Unknown')}"
+        # Format behavior as active state
+        behavior_str = (
+            f"Currently in a {behavior.get('name', 'balanced')} behavior"
+        )
         
-        # Format needs
-        needs_satisfaction = []
+        # Format needs as motivational state  
+        needs_lines = []
         for need, details in needs.items():
             if isinstance(details, dict) and 'satisfaction' in details:
-                satisfaction_pct = details['satisfaction'] * 100
-                needs_satisfaction.append(f"{need}: {satisfaction_pct:.2f}%")
-        needs_str = f"Needs Satisfaction: {', '.join(needs_satisfaction)}"
+                satisfaction = details['satisfaction'] * 100
+                urgency = "high" if satisfaction < 30 else "moderate" if satisfaction < 70 else "low"
+                needs_lines.append(
+                    f"• {need}: {satisfaction:.1f}% satisfied ({urgency} urgency)"
+                )
+        needs_str = "Current needs and their satisfaction levels:\n" + "\n".join(needs_lines)
         
-        # Format emotions (if any recent ones exist)
+        # Format emotional state as recent experience
         emotions_str = ""
         if emotional_state:
-            recent_emotions = ", ".join(f"{e['name']}({e['intensity']:.2f})" for e in emotional_state)
-            emotions_str = f"\nEmotional State: {recent_emotions}"
+            recent_emotions = ", ".join(
+                f"{e['name']} ({e['intensity']:.2f})" for e in emotional_state
+            )
+            emotions_str = f"\nFeeling: {recent_emotions}"
 
-        return f"{mood_str}\n{behavior_str}\n{needs_str}{emotions_str}"
+        # Build core state string
+        state_str = (
+            "=== Current Internal State ===\n"
+            f"{mood_str}\n\n"
+            f"{behavior_str}\n\n"
+            f"{needs_str}"
+            f"{emotions_str}\n"
+            "==============================="
+        )
+
+        # Add memories if provided
+        if memories:
+            memory_lines = ["\nRelevant Memories:", "---"]
+            for memory in memories:
+                # Extract core memory data
+                text = memory.get('content', memory.get('text_content', ''))
+                # Get first line or snippet of content 
+                snippet = text.split('\n')[0]
+                if len(snippet) > 150:
+                    snippet = snippet[:147] + "..."
+                memory_lines.append(f"• {snippet}")
+            memory_lines.append("---")
+            
+            state_str = state_str + "\n" + "\n".join(memory_lines)
+
+        return state_str
     
     @staticmethod
-    def format_command_result(result: CommandResult, state: Dict[str, Any]) -> str:
+    def format_notifications(notifications: List[str], result: str) -> str:
+        """
+        Format notifications and append them to the command result with consistent styling.
+
+        Args:
+            notifications: List of notification strings to format
+            result: Original command result string to append to
+
+        Returns:
+            String combining result and formatted notifications
+        """
+        if not notifications:
+            return result
+
+        # Split result at final divider
+        parts = result.rsplit("---", 1)
+        if len(parts) != 2:
+            return result
+
+        # Format notifications
+        notification_lines = ["Notifications:"]
+        for notice in notifications:
+            notification_lines.append(f"• {notice}")
+        notification_lines.append("")
+
+        # Reconstruct with notifications before final divider
+        return parts[0] + "\n" + "\n".join(notification_lines) + "---" + parts[1]
+
+    @staticmethod
+    def format_command_result(result: CommandResult) -> str:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         lines = []
@@ -80,66 +158,8 @@ class TerminalFormatter:
         lines.append("")
 
         lines.append("---")
-        lines.append("Current State:")
-        lines.append(TerminalFormatter.format_context_summary(state))
-        lines.append("---")
 
         return "\n".join(lines)
-
-    @staticmethod
-    def format_memories(memories: List[Dict], formatted_response: str) -> str:
-        """
-        Format retrieved memories to be displayed with command response.
-        
-        Args:
-            memories: List of CognitiveMemoryNode data 
-            formatted_response: Pre-formatted command result string
-        
-        Returns:
-            Combined formatted string with memories section
-        """
-        if not memories:
-            return formatted_response
-            
-        memory_lines = []
-        memory_lines.append("\nRelevant Memory Echoes:")
-        memory_lines.append("---")
-        
-        for memory in memories:
-            # Extract core memory data
-            text = memory.get('text_content', '')
-            timestamp = memory.get('timestamp', 0)
-            strength = memory.get('strength', 0)
-            
-            # Format timestamp
-            dt = datetime.fromtimestamp(timestamp)
-            time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Get first line or snippet of content
-            snippet = text.split('\n')[0]
-            if len(snippet) > 100:
-                snippet = snippet[:97] + "..."
-                
-            # Format memory entry
-            memory_lines.append(f"• [{time_str}] (s:{strength:.2f})")
-            memory_lines.append(f"  {snippet}")
-            
-            # Add emotional context if available
-            if 'semantic_context' in memory:
-                context = memory.get('semantic_context', {})
-                if 'emotional_state' in context:
-                    emotions = context['emotional_state']
-                    if emotions:
-                        emotion_str = ", ".join(f"{e['name']}({e['intensity']:.1f})" 
-                                              for e in emotions[:2])
-                        memory_lines.append(f"  Emotional Context: {emotion_str}")
-                        
-            memory_lines.append("")
-            
-        memory_lines.append("---")
-        
-        # Combine with original response
-        return formatted_response + "\n" + "\n".join(memory_lines)
 
     @staticmethod
     def format_environment_help(env: EnvironmentCommands) -> CommandResult:

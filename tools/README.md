@@ -1,6 +1,6 @@
 # Hephia Tools
 
-This directory contains utility scripts for managing Hephia's cognitive processing.
+This directory contains assorted utility scripts for managing Hephia's cognitive processing.
 
 ## Available Tools
 
@@ -10,12 +10,15 @@ This directory contains utility scripts for managing Hephia's cognitive processi
 
 - **clear_data.py**: Entirely wipe each database. Optionally, use --include-logs to also wipe logs if desired.
 
+- **discord_bot.py**: need to run this if you'd like to connect to discord; refer to [discord_bot.md] for more info. 
+
 ## Usage
 
-Simply run the desired Python script from the command line while the server is up:
+Simply run the desired Python script from another command line while the server is up:
 
 ```bash
-python prune.py
-python talk.py 
-python clear_data.py (optionally --include-tags) 
+python tools\\prune.py
+python tools\\talk.py 
+python tools\\clear_data.py (optionally --include-tags) 
+python tools\\discord_bot.py
 ```

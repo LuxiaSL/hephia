@@ -40,20 +40,11 @@ class LogManager:
             logger = logging.getLogger(logger_name)
             logger.setLevel(logging.DEBUG)
             
-            # File handler
-            file_handler = logging.FileHandler(log_file)
+            # File handler with UTF-8 encoding
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
             
             for handler in logger.handlers[:]:
                 if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
                     logger.removeHandler(handler)
-        
-        # Instead of adding console handlers, we'll only log critical errors to stderr
-        error_console = logging.StreamHandler(sys.stderr)
-        error_console.setLevel(logging.CRITICAL)
-        error_console.setFormatter(ConsoleFormatter())
-        
-        # Only add stderr handler to system logger for critical errors
-        system_logger = logging.getLogger('hephia.system')
-        system_logger.addHandler(error_console)
