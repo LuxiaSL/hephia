@@ -9,6 +9,7 @@ nltk
 pydantic
 numpy
 sentence-transformers
+discord.py
 
 # Curses on Windows vs. non-Windows
 windows-curses; sys_platform == "win32"

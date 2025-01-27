@@ -39,7 +39,7 @@ python
 Configure your environment:
 1. Copy `.env.example` to `.env`
 2. Add required API tokens for your providers
-3. Include Perplexity token for full functionality
+3. Include Perplexity token & [Discord Setup](tools/discord_bot.md) for full functionality
 
 ### Running
 Launch the system:

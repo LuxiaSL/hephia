@@ -10,7 +10,7 @@ This directory contains assorted utility scripts for managing Hephia's cognitive
 
 - **clear_data.py**: Entirely wipe each database. Optionally, use --include-logs to also wipe logs if desired.
 
-- **discord_bot.py**: need to run this if you'd like to connect to discord; refer to [discord_bot.md] for more info. 
+- **discord_bot.py**: need to run this if you'd like to connect to discord; refer to [Discord Setup](discord_bot.md) for more info. 
 
 ## Usage
 
