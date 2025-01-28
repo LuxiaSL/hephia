@@ -168,8 +168,6 @@ class BrainLogger:
             f"Processed Command: {strip_emojis(str(processed)) if processed else None}\n"
             f"Validation: {strip_emojis(str(validation_result)) if validation_result else 'Success'}"
         )
-        if processed:
-            logger.info(f"Command: {strip_emojis(str(processed))}")
         if validation_result:
             logger.warning(f"Command failed: {strip_emojis(str(validation_result))}")
     

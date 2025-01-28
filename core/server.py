@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from core.timer import TimerCoordinator
 from core.state_bridge import StateBridge
 from core.event_bridge import EventBridge
+from core.discord_service import DiscordService
 from event_dispatcher import global_event_dispatcher, Event
 from internal.internal import Internal
 from config import Config
@@ -71,15 +72,19 @@ class HephiaServer:
         self.app = FastAPI(title="Hephia Server")
         self.setup_middleware()
         self.active_connections: List[WebSocket] = []
+        self.timer = TimerCoordinator()
+        self.discord_service = DiscordService()
 
-        # Core systems
         self.api = APIManager.from_env()
         self.internal = Internal(self.api)
         self.state_bridge = StateBridge(internal=self.internal)
         self.event_bridge = EventBridge(state_bridge=self.state_bridge)
-        self.timer = TimerCoordinator()
-        self.environment_registry = EnvironmentRegistry(self.api, cognitive_bridge=self.internal.cognitive_bridge)
 
+        self.environment_registry = EnvironmentRegistry(
+            self.api,
+            cognitive_bridge=self.internal.cognitive_bridge,
+            discord_service=self.discord_service
+        )
         self.exo_processor = ExoProcessor(
             api_manager=self.api,
             state_bridge=self.state_bridge,
@@ -193,33 +198,18 @@ class HephiaServer:
                 notification_text = (
                     f"Discord update: Replied to {payload.author} in channel {payload.channel_id}\n"
                     f"- Message ID: {payload.message_id}\n"
-                    f"- User said: {payload.content[:100]}{'...' if len(payload.content) > 100 else ''}\n"
+                    f"- User said: {payload.content[:150]}{'...' if len(payload.content) > 150 else ''}\n"
                     f"- My response: {response_text[:50]}{'...' if len(response_text) > 50 else ''}"
                 )
                 SystemLogger.info(notification_text)
                 self.exo_processor.notifications.append(notification_text)
 
-                discord_response = {
-                    "channel_id": payload.channel_id,
-                    "content": response_text
-                }
+                await self.discord_service.send_message(
+                    channel_id=payload.channel_id,
+                    content=response_text
+                )
 
-                # Use a dedicated aiohttp session for this request
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{Config.DISCORD_BOT_URL}/channels/{payload.channel_id}/send_message",
-                        json=discord_response,
-                        timeout=10.0
-                    ) as resp:
-                        if resp.status != 200:
-                            error_text = await resp.text()
-                            SystemLogger.error(f"Failed to send Discord response: {error_text}")
-                            raise HTTPException(
-                                status_code=500,
-                                detail=f"Failed to send response to Discord: {error_text}"
-                            )
-
-                    return {"status": "ok"}
+                return {"status": "ok"}
                 
             except Exception as e:
                 SystemLogger.error(f"Error processing Discord message: {str(e)}")
@@ -259,6 +249,9 @@ class HephiaServer:
             # init exo
             await self.exo_processor.initialize()
             asyncio.create_task(self.exo_processor.start())
+
+            # init discord
+            await self.discord_service.initialize()
             
             # simple periodic internal timers
             self.timer.add_task(
@@ -292,6 +285,7 @@ class HephiaServer:
             self.internal.stop()
             await self.exo_processor.stop()
             await self.state_bridge._save_session()
+            await self.discord_service.cleanup()
 
         except Exception as e:
             self.logger.error(f"Error during shutdown: {str(e)}")

@@ -130,7 +130,7 @@ class MeditateEnvironment(BaseEnvironment):
                 duration = flags.get("duration", 1)
                 
                 # Request state influence through cognitive bridge
-                result = await self.cognitive_bridge.meditate_on_state(
+                result = self.cognitive_bridge.meditate_on_state(
                     state,
                     intensity,
                     duration

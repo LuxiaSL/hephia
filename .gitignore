@@ -55,3 +55,6 @@ data/
 
 # i should probably know what this is but i dont but i assume it's chill
 .coverage
+
+#admin tools
+analyze_database.py

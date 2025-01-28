@@ -1,8 +1,6 @@
 from typing import Dict, Any, List, Optional
-import aiohttp
-import asyncio
-from .base_environment import BaseEnvironment
 
+from .base_environment import BaseEnvironment
 from brain.commands.model import (
     CommandDefinition,
     Parameter,
@@ -12,6 +10,8 @@ from brain.commands.model import (
     CommandValidationError
 )
 
+from core.discord_service import DiscordService
+
 class DiscordEnvironment(BaseEnvironment):
     """
     Environment for communicating with the local Discord bot server.
@@ -20,9 +20,9 @@ class DiscordEnvironment(BaseEnvironment):
     and retrieving specific messages or channel histories.
     """
 
-    def __init__(self, bot_server_url: str = "http://localhost:9001"):
-        self.bot_server_url = bot_server_url.rstrip("/")
+    def __init__(self, discord_service: DiscordService):
         super().__init__()
+        self.discord_service = discord_service
         self.help_text = """
         The discord environment lets you communicate with Discord.
         You can list guilds, list channels, read messages, or post messages.
@@ -216,24 +216,6 @@ class DiscordEnvironment(BaseEnvironment):
                     suggested_commands=["discord help", "discord list_guilds"],
                     error=error
                 )
-        except aiohttp.ClientError as ce:
-            error = CommandValidationError(
-                message=str(ce),
-                suggested_fixes=[
-                    "Check if Discord bot server is running",
-                    "Verify bot server URL is correct",
-                    "Check network connectivity"
-                ],
-                related_commands=["discord list_guilds", "help"],
-                examples=["discord list_guilds"]
-            )
-            return CommandResult(
-                success=False,
-                message=f"Network error contacting Discord bot server: {ce}",
-                suggested_commands=["discord list_guilds", "help"],
-                error=error,
-                data={"error_type": "network", "error_details": str(ce)}
-            )
         except CommandValidationError as cve:
             return CommandResult(
                 success=False,
@@ -258,45 +240,38 @@ class DiscordEnvironment(BaseEnvironment):
             )
 
     async def _list_guilds(self) -> CommandResult:
-        url = f"{self.bot_server_url}/guilds"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    error = CommandValidationError(
-                        message=f"Failed to list guilds: HTTP {resp.status}",
-                        suggested_fixes=["Check bot permissions", "Verify bot is running"],
-                        related_commands=["discord help"],
-                        examples=["discord list_guilds"]
-                    )
-                    return CommandResult(
-                        success=False,
-                        message=f"Failed to list guilds: {resp.status}",
-                        suggested_commands=["discord help"],
-                        error=error,
-                        data={"status_code": resp.status}
-                    )
-                data = await resp.json()
-                
-                # Format the message for direct LLM consumption
-                lines = ["Available Discord Servers:"]
-                lines.append("---")
-                for guild in data:
-                    lines.append(f"• {guild.get('name', 'Unnamed')} (ID: {guild['id']})")
-                    # Add member count if available
-                    if 'member_count' in guild:
-                        lines.append(f"  Members: {guild['member_count']}")
-                lines.append("---")
-                lines.append("Use 'discord list_channels <guild_id>' to see available channels")
-                
-                return CommandResult(
-                    success=True,
-                    message="\n".join(lines),
-                    data=data,
-                    suggested_commands=[
-                        f"discord list_channels {guild['id']}" 
-                        for guild in data[:3]  # Suggest first 3 guilds
-                    ]
-                )
+        data, status_code = await self.discord_service.list_guilds()
+        if status_code != 200 or data is None:
+            error = CommandValidationError(
+                message=f"Failed to list guilds: HTTP {status_code}",
+                suggested_fixes=["Check bot permissions", "Verify bot is running"],
+                related_commands=["discord help"],
+                examples=["discord list_guilds"]
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to list guilds: {status_code}",
+                suggested_commands=["discord help"],
+                error=error,
+                data={"status_code": status_code}
+            )
+
+        lines = ["Available Discord Servers:", "---"]
+        for guild in data:
+            lines.append(f"• {guild.get('name', 'Unnamed')} (ID: {guild['id']})")
+            if 'member_count' in guild:
+                lines.append(f"  Members: {guild['member_count']}")
+        lines.append("---")
+        lines.append("Use 'discord list_channels <guild_id>' to see available channels")
+
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f"discord list_channels {guild['id']}" for guild in data[:3]
+            ]
+        )
 
     async def _list_channels(self, params: List[str]) -> CommandResult:
         if len(params) < 1:
@@ -314,53 +289,48 @@ class DiscordEnvironment(BaseEnvironment):
             )
 
         guild_id = params[0]
-        # Changed URL to match Discord bot's endpoint structure
-        url = f"{self.bot_server_url}/guilds/{guild_id}/channels"
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    error = CommandValidationError(
-                        message=f"Failed to list channels: HTTP {resp.status}",
-                        suggested_fixes=["Check guild ID", "Verify bot permissions"],
-                        related_commands=["discord list_guilds"],
-                        examples=["discord list_channels <valid_guild_id>"]
-                    )
-                    return CommandResult(
-                        success=False,
-                        message=f"Failed to list channels: {resp.status}",
-                        suggested_commands=["discord list_guilds"],
-                        error=error,
-                        data={"status_code": resp.status, "guild_id": guild_id}
-                    )
-                data = await resp.json()
+        data, status_code = await self.discord_service.list_channels(guild_id)
+        if status_code != 200 or data is None:
+            error = CommandValidationError(
+                message=f"Failed to list channels: HTTP {status_code}",
+                suggested_fixes=["Check guild ID", "Verify bot permissions"],
+                related_commands=["discord list_guilds"],
+                examples=["discord list_channels <valid_guild_id>"]
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to list channels: {status_code}",
+                suggested_commands=["discord list_guilds"],
+                error=error,
+                data={"status_code": status_code, "guild_id": guild_id}
+            )
 
-                # Format the message for direct LLM consumption
-                lines = ["Available Discord Channels:"]
-                lines.append("---")
-                for channel in data:
-                    # Basic channel info
-                    channel_type = channel.get('type', 'Unknown')
-                    lines.append(f"• {channel.get('name', 'Unnamed')} (ID: {channel['id']})")
-                    # Add channel details if available
-                    if channel.get('topic'):
-                        lines.append(f"  Topic: {channel['topic']}")
-                    if channel.get('nsfw'):
-                        lines.append("  [NSFW]")
-                    # Add channel type
-                    lines.append(f"  Type: {channel_type}")
-                lines.append("---")
-                lines.append("Use 'discord get_history <channel_id>' to view message history")
+        # Format the message for direct LLM consumption
+        lines = ["Available Discord Channels:"]
+        lines.append("---")
+        for channel in data:
+            # Basic channel info
+            channel_type = channel.get('type', 'Unknown')
+            lines.append(f"• {channel.get('name', 'Unnamed')} (ID: {channel['id']})")
+            # Add channel details if available
+            if channel.get('topic'):
+                lines.append(f"  Topic: {channel['topic']}")
+            if channel.get('nsfw'):
+                lines.append("  [NSFW]")
+            # Add channel type
+            lines.append(f"  Type: {channel_type}")
+        lines.append("---")
+        lines.append("Use 'discord get_history <channel_id>' to view message history")
 
-                return CommandResult(
-                    success=True,
-                    message="\n".join(lines),
-                    data=data,
-                    suggested_commands=[
-                        f"discord get_history {channel['id']}"
-                        for channel in data[:3]  # Suggest first 3 channels
-                    ]
-                )
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f"discord get_history {channel['id']}"
+                for channel in data[:3]  # Suggest first 3 channels
+            ]
+        )
 
     async def _get_message(self, params: List[str]) -> CommandResult:
         if len(params) < 2:
@@ -378,52 +348,46 @@ class DiscordEnvironment(BaseEnvironment):
             )
 
         channel_id, message_id = params
-        # Updated URL to match discord_bot.py's endpoint structure
-        url = f"{self.bot_server_url}/channels/{channel_id}/messages/{message_id}"
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    error = CommandValidationError(
-                        message=f"Failed to get message: HTTP {resp.status}",
-                        suggested_fixes=["Check message ID", "Verify channel access"],
-                        related_commands=["discord get_history"],
-                        examples=["discord get_history <channel_id>"]
-                    )
-                    return CommandResult(
-                        success=False,
-                        message=f"Failed to get message: {resp.status}",
-                        suggested_commands=["discord get_history <channel_id>"],
-                        error=error,
-                        data={"status_code": resp.status, "channel_id": channel_id, "message_id": message_id}
-                    )
-                data = await resp.json()
-                
-                # Format message data for LLM consumption
-                lines = ["Discord Message:"]
-                lines.append("---")
-                # Updated to match discord_bot.py's response format
-                lines.append(f"Author: {data.get('author', 'Unknown')}")
-                lines.append(f"Channel ID: {channel_id}")
-                lines.append(f"Sent at: {data.get('timestamp', 'Unknown')}")
-                lines.append("")
-                lines.append("Content:")
-                lines.append(data.get('content', 'No content'))
-                
-                lines.append("---")
-                lines.append("Available Actions:")
-                lines.append("• Get channel history")
-                lines.append("• Send a reply")
+        channel_id, message_id = params
+        data, status_code = await self.discord_service.get_message(channel_id, message_id)
+        if status_code != 200 or data is None:
+            error = CommandValidationError(
+                message=f"Failed to get message: HTTP {status_code}",
+                suggested_fixes=["Check message ID", "Verify channel access"],
+                related_commands=["discord get_history"],
+                examples=["discord get_history <channel_id>"]
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to get message: {status_code}",
+                suggested_commands=["discord get_history <channel_id>"],
+                error=error,
+                data={"status_code": status_code, "channel_id": channel_id, "message_id": message_id}
+            )
 
-                return CommandResult(
-                    success=True,
-                    message="\n".join(lines),
-                    data=data,
-                    suggested_commands=[
-                        f"discord get_history {channel_id}",
-                        f"discord send_message {channel_id} \"@{data.get('author', 'Unknown')} ...\""
-                    ]
-                )
+        # Format message data for LLM consumption
+        lines = ["Discord Message:"]
+        lines.append("---")
+        lines.append(f"Author: {data.get('author', 'Unknown')}")
+        lines.append(f"Channel ID: {channel_id}")
+        lines.append(f"Sent at: {data.get('timestamp', 'Unknown')}")
+        lines.append("Content:")
+        lines.append(data.get('content', 'No content'))
+        
+        lines.append("---")
+        lines.append("Available Actions:")
+        lines.append("• Get channel history")
+        lines.append("• Send a reply")
+
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f"discord get_history {channel_id}",
+                f"discord send_message {channel_id} \"@{data.get('author', 'Unknown')} ...\""
+            ]
+        )
 
     async def _get_history(self, params: List[str], flags: Dict[str, Any]) -> CommandResult:
         if len(params) < 1:
@@ -441,89 +405,84 @@ class DiscordEnvironment(BaseEnvironment):
             )
 
         channel_id = params[0]
-        limit = flags.get("limit", 50)  # Changed default to 50 to match discord_bot.py
-        url = f"{self.bot_server_url}/channels/{channel_id}/history?limit={limit}"
-
+        limit = flags.get("limit", 50)
+        data, status_code = await self.discord_service.get_history(channel_id, limit)
+        if status_code != 200 or data is None:
+            error = CommandValidationError(
+                message=f"Failed to get history: HTTP {status_code}",
+                suggested_fixes=["Check channel ID", "Verify channel access"],
+                related_commands=["discord list_channels"],
+                examples=["discord get_history <valid_channel_id>"]
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to get channel history: {status_code}",
+                suggested_commands=["discord list_channels"],
+                error=error,
+                data={"status_code": status_code, "channel_id": channel_id}
+            )
+            
         # Constants for message formatting
         MAX_MSG_LENGTH = 500  # Characters per message
         MAX_TOTAL_TOKENS = 2000  # Reserve room for other content
         MAX_TOTAL_CHARS = MAX_TOTAL_TOKENS * 4  
+
+        # Format messages for LLM consumption
+        lines = ["Discord Channel History:"]
+        lines.append("---")
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    error = CommandValidationError(
-                        message=f"Failed to get history: HTTP {resp.status}",
-                        suggested_fixes=["Check channel ID", "Verify channel access"],
-                        related_commands=["discord list_channels"],
-                        examples=["discord get_history <valid_channel_id>"]
-                    )
-                    return CommandResult(
-                        success=False,
-                        message=f"Failed to get channel history: {resp.status}",
-                        suggested_commands=["discord list_channels"],
-                        error=error,
-                        data={"status_code": resp.status, "channel_id": channel_id}
-                    )
-                
-                data = await resp.json()
-                
-                # Format messages for LLM consumption
-                lines = ["Discord Channel History:"]
-                lines.append("---")
-                
-                # Pre-format all messages
-                formatted_messages = []
-                for msg in data:
-                    try:
-                        timestamp = msg.get('timestamp', '')[:16]  # YYYY-MM-DD HH:MM
-                    except:
-                        timestamp = 'Unknown time'
-                        
-                    author = msg.get('author', 'Unknown')
-                    content = msg.get('content', '').replace('\n', ' ')
-                    if len(content) > MAX_MSG_LENGTH:
-                        content = content[:MAX_MSG_LENGTH-3] + "..."
-                        
-                    msg_line = f"{msg['id']} {author} [{timestamp}]: {content}"
-                    formatted_messages.append(msg_line)
+        # Pre-format all messages
+        formatted_messages = []
+        for msg in data:
+            try:
+                timestamp = msg.get('timestamp', '')[:16]  # YYYY-MM-DD HH:MM
+            except:
+                timestamp = 'Unknown time'
+            
+            author = msg.get('author', 'Unknown')
+            content = msg.get('content', '').replace('\n', ' ')
+            if len(content) > MAX_MSG_LENGTH:
+                content = content[:MAX_MSG_LENGTH-3] + "..."
+            
+            msg_line = f"{msg['id']} {author} [{timestamp}]: {content}"
+            formatted_messages.append(msg_line)
 
-                # Start from the most recent messages and work backwards
-                total_chars = len("\n".join(lines))
-                message_count = 0
-                truncated = False
+        # Start from the most recent messages and work backwards
+        total_chars = len("\n".join(lines))
+        message_count = 0
+        truncated = False
 
-                # Process messages from newest to oldest, but will display oldest to newest
-                kept_messages = []
-                for msg_line in reversed(formatted_messages):
-                    if total_chars + len(msg_line) + 2 > MAX_TOTAL_CHARS:
-                        truncated = True
-                        break
-                        
-                    kept_messages.append(msg_line)
-                    total_chars += len(msg_line) + 1
-                    message_count += 1
+        # Process messages from newest to oldest, but will display oldest to newest
+        kept_messages = []
+        for msg_line in reversed(formatted_messages):
+            if total_chars + len(msg_line) + 2 > MAX_TOTAL_CHARS:
+                truncated = True
+                break
+            
+            kept_messages.append(msg_line)
+            total_chars += len(msg_line) + 1
+            message_count += 1
 
-                # Add messages in chronological order (oldest first)
-                lines.extend(reversed(kept_messages))
+        # Add messages in chronological order (oldest first)
+        lines.extend(reversed(kept_messages))
 
-                # Add summary footer
-                lines.append("---")
-                status = f"Showing {message_count} of {len(data)} messages"
-                if truncated:
-                    status += " (older messages truncated to conserve tokens)"
-                lines.append(status)
-                lines.append(f"Channel ID: {channel_id}")
-                
-                return CommandResult(
-                    success=True,
-                    message="\n".join(lines),
-                    data=data,
-                    suggested_commands=[
-                        f"discord send_message {channel_id} \"Reply...\"",
-                        f"discord get_history {channel_id} --limit={min(100, limit + 10)}"
-                    ]
-                )
+        # Add summary footer
+        lines.append("---")
+        status = f"Showing {message_count} of {len(data)} messages"
+        if truncated:
+            status += " (older messages truncated to conserve tokens)"
+        lines.append(status)
+        lines.append(f"Channel ID: {channel_id}")
+        
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f"discord send_message {channel_id} \"Reply...\"",
+                f"discord get_history {channel_id} --limit={min(100, limit + 10)}"
+            ]
+        )
 
     async def _send_message(self, params: List[str]) -> CommandResult:
         if len(params) < 2:
@@ -541,48 +500,39 @@ class DiscordEnvironment(BaseEnvironment):
             )
 
         channel_id, content = params
-        # Updated URL to match discord_bot.py's endpoint structure
-        url = f"{self.bot_server_url}/channels/{channel_id}/send_message"
-        # Payload matches discord_bot.py's expected format
-        payload = {"content": content}
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as resp:
-                if resp.status != 200:
-                    error = CommandValidationError(
-                        message=f"Failed to send message: HTTP {resp.status}",
-                        suggested_fixes=["Check channel ID", "Verify bot permissions"],
-                        related_commands=["discord list_channels"],
-                        examples=['discord send_message <valid_channel_id> "Hello"']
-                    )
-                    return CommandResult(
-                        success=False,
-                        message=f"Failed to send message: {resp.status}",
-                        suggested_commands=["discord list_channels"],
-                        error=error,
-                        data={"status_code": resp.status, "channel_id": channel_id}
-                    )
-                
-                data = await resp.json()
-                
-                # Format response for LLM consumption
-                lines = ["Message Sent Successfully:"]
-                lines.append("---")
-                lines.append(f"Channel ID: {channel_id}")
-                lines.append(f"Content: {content[:100]}{'...' if len(content) > 100 else ''}")
-                if 'message_id' in data:  # Updated to match discord_bot.py's response format
-                    lines.append(f"Message ID: {data['message_id']}")
-                lines.append("---")
-                lines.append("Available Actions:")
-                lines.append("• View channel history")
-                lines.append("• Send another message")
-                
-                return CommandResult(
-                    success=True,
-                    message="\n".join(lines),
-                    data=data,
-                    suggested_commands=[
-                        f"discord get_history {channel_id}",
-                        f"discord send_message {channel_id} \"Another message...\"",
-                    ]
-                )
+        data, status_code = await self.discord_service.send_message_immediate(channel_id, content)
+
+        if status_code != 200 or data is None:
+            error = CommandValidationError(
+                message=f"Failed to send message: HTTP {status_code}",
+                suggested_fixes=["Check channel ID", "Verify bot permissions"],
+                related_commands=["discord list_channels"],
+                examples=['discord send_message <valid_channel_id> "Hello"']
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to send message: {status_code}",
+                suggested_commands=["discord list_channels"],
+                error=error,
+                data={"status_code": status_code, "channel_id": channel_id}
+            )
+
+        lines = ["Message Sent Successfully:", "---"]
+        lines.append(f"Channel ID: {channel_id}")
+        lines.append(f"Content: {content[:100]}{'...' if len(content) > 100 else ''}")
+        if 'message_id' in data:
+            lines.append(f"Message ID: {data['message_id']}")
+        lines.append("---")
+        lines.append("Available Actions:")
+        lines.append("• View channel history")
+        lines.append("• Send another message")
+
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f"discord get_history {channel_id}",
+                f"discord send_message {channel_id} \"Another message...\""
+            ]
+        )

@@ -7,9 +7,10 @@ import asyncio
 import json
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import sqlite3
+import zlib
 
 from event_dispatcher import global_event_dispatcher, Event
 from internal.internal import Internal
@@ -47,7 +48,12 @@ class StateBridge:
         self.persistent_state: Optional[PersistentState] = None
         self.state_lock = asyncio.Lock()
         self.db_path = 'data/server_state.db'
-    
+        self.last_vacuum_time = datetime.min
+        self.last_cleanup_time = datetime.min
+        self.vacuum_interval = timedelta(minutes=30)  # VACUUM every 30 mins
+        self.max_states = 50  # Reduced from 100 to keep DB smaller
+        self.last_state_hash = None  # For detecting significant state changes
+        
     async def initialize(self):
         """Initialize state management and restore previous session if available."""
         await self._init_database()
@@ -79,6 +85,9 @@ class StateBridge:
                     brain_state=loaded_state.brain_state if loaded_state else {},
                     timestamp=datetime.now()
                 )
+
+                # Set initial state hash
+                self.last_state_hash = self._compute_state_hash(self.persistent_state)
                 
                 # Save initial state
                 await self._save_session()
@@ -130,12 +139,36 @@ class StateBridge:
 
     def _collect_session_state(self) -> Dict[str, Any]:
         """Collect complete session state from all internal modules."""
-        return {
+        raw_state = {
             'needs': self.internal.needs_manager.get_needs_state(),
             'behavior': self.internal.behavior_manager.get_behavior_state(),
             'emotions': self.internal.emotional_processor.get_emotional_state(),
             'mood': self.internal.mood_synthesizer.get_mood_state()
         }
+        
+        # Optimize emotional vectors storage
+        if 'emotions' in raw_state and 'active_vectors' in raw_state['emotions']:
+            # Filter vectors by significance
+            significant_vectors = [
+                vector for vector in raw_state['emotions']['active_vectors']
+                if vector.get('intensity', 0) > 0.1  # Only keep vectors with meaningful intensity
+            ]
+            # Sort by intensity and keep top N most significant
+            significant_vectors.sort(key=lambda x: x.get('intensity', 0), reverse=True)
+            raw_state['emotions']['active_vectors'] = significant_vectors[:100]  # Limit to 100 most significant vectors
+            
+        return raw_state
+    
+    def _compute_state_hash(self, state: PersistentState) -> str:
+        """Compute a hash of the significant parts of state to detect meaningful changes."""
+        # Focus on key state elements that would constitute a meaningful change
+        key_elements = {
+            'emotions': state.session_state.get('emotions', {}).get('current_state', {}),
+            'needs': state.session_state.get('needs', {}),
+            'mood': state.session_state.get('mood', {}),
+            'behavior': state.session_state.get('behavior', {})
+        }
+        return str(hash(json.dumps(key_elements, sort_keys=True)))
 
     def get_api_context(self) -> Dict[str, Any]:
         """Get current processed state for API consumption."""
@@ -148,21 +181,33 @@ class StateBridge:
         async with self.state_lock:
             try:
                 # Update persistent state
-                self.persistent_state = PersistentState(
+                new_state = PersistentState(
                     session_state=self._collect_session_state(),
                     brain_state=self.persistent_state.brain_state if self.persistent_state else {},
                     timestamp=datetime.now()
                 )
+
+                # Compute new state hash
+                new_hash = self._compute_state_hash(new_state)
                 
-                # Save to database
-                await self._save_session()
-                
-                # Broadcast API context
-                global_event_dispatcher.dispatch_event(
-                    Event("state:changed", {
-                        "context": self.internal_context.get_api_context()
-                    })
-                )
+                # Only announce & save if state has changed significantly
+                if new_hash != self.last_state_hash:
+                    self.persistent_state = new_state
+                    self.last_state_hash = new_hash
+                    await self._save_session()
+
+                    # Cleanup old states periodically
+                    if (not hasattr(self, 'last_cleanup_time') or 
+                        datetime.now() - self.last_cleanup_time >= timedelta(minutes=5)):
+                        await self._cleanup_old_states()
+                        self.last_cleanup_time = datetime.now()
+
+                    # Broadcast API context
+                    global_event_dispatcher.dispatch_event(
+                        Event("state:changed", {
+                            "context": self.internal_context.get_api_context()
+                        })
+                    )
             except Exception as e:
                 print(f"Error updating state: {e}")
                 raise
@@ -174,19 +219,21 @@ class StateBridge:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # Add compression flag to schema
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_state (
                 id INTEGER PRIMARY KEY,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                session_state TEXT,
-                brain_state TEXT
+                session_state BLOB,  -- Changed to BLOB for compressed data
+                brain_state TEXT,
+                compressed BOOLEAN DEFAULT 0
             )
         """)
         conn.commit()
         conn.close()
 
     async def _save_session(self):
-        """Save current session state to database."""
+        """Save current session state to database with compression."""
         if not self.persistent_state:
             return
             
@@ -194,13 +241,18 @@ class StateBridge:
         cursor = conn.cursor()
         
         try:
+            # Compress session state (which includes the large vectors)
+            session_json = json.dumps(self.persistent_state.session_state)
+            compressed_session = zlib.compress(session_json.encode())
+            
             cursor.execute("""
-                INSERT INTO system_state (timestamp, session_state, brain_state)
-                VALUES (?, ?, ?)
+                INSERT INTO system_state (timestamp, session_state, brain_state, compressed)
+                VALUES (?, ?, ?, ?)
             """, (
                 self.persistent_state.timestamp.isoformat(),
-                json.dumps(self.persistent_state.session_state),
-                json.dumps(self.persistent_state.brain_state)
+                compressed_session,
+                json.dumps(self.persistent_state.brain_state),
+                True
             ))
             conn.commit()
         finally:
@@ -213,7 +265,7 @@ class StateBridge:
         
         try:
             cursor.execute("""
-                SELECT timestamp, session_state, brain_state
+                SELECT timestamp, session_state, brain_state, compressed
                 FROM system_state
                 ORDER BY timestamp DESC
                 LIMIT 1
@@ -221,14 +273,20 @@ class StateBridge:
             
             row = cursor.fetchone()
             if row:
-                timestamp, session_state, brain_state = row
+                timestamp, session_state, brain_state, compressed = row
+                
+                # Decompress session state if needed
+                if compressed:
+                    session_state = zlib.decompress(session_state).decode()
+                
                 brain_state = json.loads(brain_state)
+                session_state = json.loads(session_state)
                 
                 # Validate brain state structure
                 validated_brain_state = self._validate_brain_state(brain_state)
                 
                 return PersistentState(
-                    session_state=json.loads(session_state),
+                    session_state=session_state,
                     brain_state=validated_brain_state or [], 
                     timestamp=datetime.fromisoformat(timestamp)
                 )
@@ -238,23 +296,34 @@ class StateBridge:
         return None
 
     async def _cleanup_old_states(self):
-        """Clean up old state entries from database."""
+        """Clean up old state entries and maintain database health."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            cursor.execute("""
+            # Delete old states
+            cursor.execute(f"""
                 DELETE FROM system_state 
                 WHERE id NOT IN (
                     SELECT id 
                     FROM system_state 
                     ORDER BY timestamp DESC 
-                    LIMIT 100
+                    LIMIT {self.max_states}
                 )
             """)
             
-            if cursor.rowcount > 0:
-                print(f"Cleaned up {cursor.rowcount} old state entries")
+            deleted_count = cursor.rowcount
+            if deleted_count > 0:
+                print(f"Cleaned up {deleted_count} old state entries")
+            
             conn.commit()
+            
+            # Check if VACUUM is needed
+            current_time = datetime.now()
+            if current_time - self.last_vacuum_time >= self.vacuum_interval:
+                cursor.execute("VACUUM")  # Reclaim space and defragment
+                self.last_vacuum_time = current_time
+                print("Database VACUUM completed")
+                
         finally:
             conn.close()

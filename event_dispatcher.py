@@ -84,7 +84,7 @@ class EventDispatcher:
         # Log events that don't start with any filtered prefixes
         if self.event_filter:
             if not any(event.event_type.startswith(prefix + ':') for prefix in self.event_filter):
-                if not event.event_type == "memory:echo_requested":
+                if not event.event_type == "memory:echo_requested" or not event.event_type == "cognitive:context_update":
                     EventLogger.log_event_dispatch(event.event_type, event.data, event.metadata)
 
         # Log events that start with any selected prefixes

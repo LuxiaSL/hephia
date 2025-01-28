@@ -708,7 +708,7 @@ class NotesEnvironment(BaseEnvironment):
                 content.append(
                     f"ID: {note[0]}\n"
                     f"Created: {note[2]}\n"
-                    f"Content: {note[1][:50]}...\n"
+                    f"Content: {note[1][:75]}...\n"
                     f"Tags: {note[-1] or 'none'}\n"
                 )
 

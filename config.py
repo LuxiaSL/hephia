@@ -170,6 +170,10 @@ class Config:
         """Get the embedding type configuration from env or default."""
         return os.getenv("USE_LOCAL_EMBEDDING", "True").lower() in ("true", "1", "yes")
     
+    @classmethod
+    def get_discord_enabled(cls) -> bool:
+        return os.getenv("ENABLE_DISCORD", "False").lower() in ("true", "1", "yes")
+    
     DISCORD_BOT_URL = "http://localhost:9001"
 
     # internal timers (in seconds)

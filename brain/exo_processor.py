@@ -108,6 +108,22 @@ class ExoProcessor:
             "memory:content_requested",
             lambda event: asyncio.create_task(self._handle_content_request(event))
         )
+        global_event_dispatcher.add_listener(
+            "cognitive:significance_check",
+            lambda event: asyncio.create_task(self.check_significance(
+                event.data["command"],
+                event.data["llm_response"],
+                event.data["command_result"]
+            ))
+        )
+        global_event_dispatcher.add_listener(
+            "discord:notification",
+            lambda event: asyncio.create_task(self.handle_discord_notification(event.data))
+        )
+        global_event_dispatcher.add_listener(
+            "discord:memory:request_formation",
+            lambda event: asyncio.create_task(self.handle_discord_memory_request(event))
+        )
 
     async def process_turn(self) -> Optional[str]:
         """
@@ -125,14 +141,32 @@ class ExoProcessor:
         try:
             async with asyncio.timeout(self.llm_timeout.total_seconds()):
                 # first, retrieve the working state
-                current_state = self.state_bridge.get_api_context()
+                current_state = None
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        BrainLogger.debug(f"Retrieving state (attempt {attempt + 1}/{max_retries})")
+                        current_state = self.state_bridge.get_api_context()
+                        if current_state:
+                            break
+                    except Exception as e:
+                        if attempt == max_retries - 1:
+                            BrainLogger.error(f"Failed to retrieve state after {max_retries} attempts: {e}")
+                            raise
+                        BrainLogger.warning(f"State retrieval attempt {attempt + 1} failed: {e}, retrying...")
+                        await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+                
+                if not current_state:
+                    raise RuntimeError("Failed to retrieve valid state")
 
                 # Get LLM response
+                BrainLogger.debug("Getting LLM response")
                 llm_response = await self._get_llm_response(
                     current_state, 
                     self.relevant_memories if self.relevant_memories else None
                 )
 
+                BrainLogger.debug("Processing LLM response")
                 # Process into command
                 command, error = await self.command_preprocessor.preprocess_command(
                     llm_response,
@@ -145,12 +179,15 @@ class ExoProcessor:
                     self._add_to_history("assistant", llm_response)
                     self._add_to_history("user", error_message)
                     await self.announce_cognitive_context()
+                    BrainLogger.log_turn_end(False, error_message)
                     return error_message
                 
                 # Execute command
+                BrainLogger.debug(f"Executing command")
                 result = await self._execute_command(command, current_state)
 
                 # Command succeeded, format response and continue processing
+                BrainLogger.debug(f"Formatting command result")
                 formatted_response = TerminalFormatter.format_command_result(result)
 
                 # format notifications
@@ -164,6 +201,7 @@ class ExoProcessor:
                 self.last_successful_turn = datetime.now()
 
                 # Retrieve memories for next turn
+                BrainLogger.debug("Retrieving related memories")
                 memories = await self._retrieve_related_memories(
                     llm_response=llm_response,
                     command_result=result,
@@ -174,9 +212,18 @@ class ExoProcessor:
                     self.relevant_memories = memories
 
                 # significance check for new memories
-                await self.check_significance(command, llm_response, result)
+                BrainLogger.debug("Dispatching significance check")
+                global_event_dispatcher.dispatch_event(Event(
+                    "cognitive:significance_check",
+                    {
+                        "command": command,
+                        "llm_response": llm_response,
+                        "command_result": result
+                    }
+                ))
 
                 # Announce cognitive context
+                BrainLogger.debug("Announcing cognitive context")
                 await self.announce_cognitive_context()
 
                 BrainLogger.log_turn_end(True)
@@ -189,7 +236,7 @@ class ExoProcessor:
             BrainLogger.log_turn_end(False, str(e))
             return None
 
-    async def _get_llm_response(self, state, memories) -> Dict:
+    async def _get_llm_response(self, state, memories: Optional[List[Dict]] = None) -> Dict:
         """
         Get next action from LLM, incorporating current state context.
         Creates a temporary message list that includes state context
@@ -202,12 +249,14 @@ class ExoProcessor:
         model_name = Config.get_cognitive_model()
         model_config = Config.AVAILABLE_MODELS[model_name]
         
-        # Create state context message using formatter
+        # Create state context message using formatter, memories are optional
         state_context = {
             "role": "system", 
-            "content": TerminalFormatter.format_context_summary(state, memories if memories else None)
+            "content": TerminalFormatter.format_context_summary(
+                state,
+                memories  
+            )
         }
-        
         # Structure temporary history with system messages first
         temp_history = [
             self.conversation_history[0], 
@@ -215,6 +264,7 @@ class ExoProcessor:
             *self.conversation_history[1:] 
         ]
 
+        BrainLogger.debug("Firing out to API for process_turn")
         return await self.api.create_completion(
             provider=model_config.provider.value,
             model=model_config.model_id,
@@ -322,13 +372,17 @@ class ExoProcessor:
     ##############################
     # Cognitive Context Managers #
     ##############################
-    async def _summarize_conversation(self, window_size: int = 10) -> str:
+    async def _summarize_conversation(self, window_size: int = 20, timeout: float = 30.0) -> str:
         """
         Create a concise summary of the last N messages using a lightweight LLM
         to maintain cognitive continuity without expensive processing.
         """
         # Get recent messages
         recent = self.conversation_history[-window_size:]
+
+        # If there's no history, return early
+        if not recent:
+            return "No conversation history available."
         
         # Format conversation for summary with clearer role names
         conversation_text = "\n".join(
@@ -341,41 +395,56 @@ class ExoProcessor:
         model_config = Config.AVAILABLE_MODELS[model_name]
         
         # Create summarization prompt
-        prompt = f"""Create a one paragraph summary of this conversation:
-{conversation_text}
-
-Keep focus on key points and changes. Be concise and clear. Think of summarizing the 'current train of thought' ongoing for Hephia.
-The message history you're given is between an LLM (Hephia) and a terminal OS (exoprocessor). The LLM is acting autonomously and independently.
-Summarize actions in first person perspective, as if you were Hephia summarizing the ongoings."""
+        prompt = f"Create a one paragraph summary of this conversation: {conversation_text}"
+        
+        system_prompt = """You are a concise conversation summarizer. Keep focus on key points and changes. 
+Be concise and clear. Think of summarizing the 'current train of thought' ongoing for Hephia.
+The message history you're given is between an LLM (Hephia) and a terminal OS (exoprocessor). 
+Your response will be used to maintain cognitive continuity across instances.
+The LLM is acting autonomously and independently.
+Summarize actions in first person perspective, as if you were Hephia summarizing the events.
+Return only the summary. Cite names and key details directly."""
 
         try:
             # Make lightweight LLM call
-            summary = await self.api.create_completion(
-                provider=model_config.provider.value,
-                model=model_config.model_id,
-                messages=[
-                    {"role": "system", "content": "You are a concise conversation summarizer."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,  # Lower temperature for more consistent summaries
-                max_tokens=200,  # Limit length
-                return_content_only=True
-            )
-            return summary
-
+            BrainLogger.debug("Creating conversation summary")
+            
+            async with asyncio.timeout(timeout):
+                summary = await self.api.create_completion(
+                    provider=model_config.provider.value,
+                    model=model_config.model_id,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=200,
+                    return_content_only=True
+                )
+                
+                BrainLogger.debug("Conversation summary received")
+                return summary
+        except asyncio.TimeoutError:
+            BrainLogger.error(f"Timeout generating conversation summary after {timeout}s")
+            return self.summary if self.summary else "Summary generation timed out."
         except Exception as e:
             BrainLogger.error(f"Error in conversation summarization: {e}")
             # Fallback if LLM call fails
-            return f"Summary of last {len(recent)} messages: Error generating summary"
+            return f"Error generating summary"
 
     async def announce_cognitive_context(self) -> None:
         """
         Dispatch event containing raw conversation history and summary
         for state bridge and internal systems to process.
         """
-        processed_state = await self._summarize_conversation()
-        #BrainLogger.debug(f"conversation history: {self.conversation_history}")
-        self.summary = processed_state
+        try:
+            processed_state = await self._summarize_conversation()
+            self.summary = processed_state
+        except Exception as e:
+            BrainLogger.error(f"Failed to generate summary: {e}")
+            processed_state = self.summary if self.summary else "Summary unavailable."
+        
+        # Always dispatch the event, even if summary fails
         global_event_dispatcher.dispatch_event(Event(
             "cognitive:context_update",
             {
@@ -876,7 +945,7 @@ Write from Hephia's perspective as if forming a memory about working in this env
     Preserve essential facts from both sources. Ensure narrative continuity and emotional consistency.""",
 
             "content_handling": """You are Hephia's subconscious. Analyze the information you're given to come up with a memory to fit.
-    Focus on key information, dependencies, and cognitive relevance.""",
+    Focus on key information, dependencies, and cognitive relevance. Cite nouns and proper nouns directly for easier recall later""",
 
             "discord_interaction": """You are Hephia's social cognition module. Process and engage with Discord messages naturally while maintaining your autonomous identity.
 
@@ -1156,18 +1225,16 @@ Respond with only the final text. No explanations or meta-commentary."""
                 purpose="discord_interaction"
             )
             
-            # Trigger memory formation for significant interactions
-            await self._trigger_content_memory(
-                response,
-                CommandResult(success=True, message=f"Discord response sent to {message_author}"),
-                ParsedCommand(
-                    environment="discord",
-                    action="respond",
-                    parameters={"channel": message_channel},
-                    flags={},
-                    raw_input=f"discord respond {message_channel}"
-                )
-            )
+            # Dispatch event for memory handling instead of direct trigger
+            global_event_dispatcher.dispatch_event(Event(
+                "discord:memory:request_formation",
+                {
+                    "response": response,
+                    "author": message_author,
+                    "channel": message_channel,
+                    "context": metadata  # Pass full context for memory formation
+                }
+            ))
             
             return response
             
@@ -1175,3 +1242,24 @@ Respond with only the final text. No explanations or meta-commentary."""
             error_msg = f"Failed to process Discord message: {str(e)}"
             BrainLogger.error(error_msg)
             return "had an oopsies yell at luxia and show her: " + error_msg
+        
+    async def handle_discord_memory_request(self, event: Event):
+        """Handle memory formation for Discord interactions asynchronously."""
+        response = event.data.get("response")
+        author = event.data.get("author")
+        channel = event.data.get("channel")
+        
+        await self._trigger_content_memory(
+            response,
+            CommandResult(
+                success=True, 
+                message=f"Discord response sent to {author}"
+            ),
+            ParsedCommand(
+                environment="discord",
+                action="respond", 
+                parameters={"channel": channel},
+                flags={},
+                raw_input=f"discord respond {channel}"
+            )
+        )

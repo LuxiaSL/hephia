@@ -229,7 +229,7 @@ class CognitiveBridge:
             ))
             return []
 
-    async def meditate_on_state(self, state: str, intensity: float, duration: int) -> Dict[str, Any]:
+    def meditate_on_state(self, state: str, intensity: float, duration: int) -> Dict[str, Any]:
         """
         Generate multi-system meditation effects.
         """

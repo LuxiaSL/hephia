@@ -106,14 +106,14 @@ class RealTimeDiscordBot(discord.Client):
         content = content.replace(bot_mention, f'@{self.user.name}')
         content = content.replace(bot_mention_bang, f'@{self.user.name}')
 
-        # Get recent message history for context (last 20 messages)
+        # Get recent message history for context (last 50 messages)
         try:
             print(f"[Bot] Fetching history before message {message.id}")
             history = []
             message_count = 0
             
             # First try to get messages from before the current message
-            async for hist_msg in message.channel.history(limit=20, before=message):
+            async for hist_msg in message.channel.history(limit=50, before=message):
                 message_count += 1
                 if hasattr(hist_msg.author, 'global_name'):
                     hist_author = hist_msg.author.name

@@ -299,7 +299,8 @@ class CognitiveMemory:
                     event.data["similarity"],
                     event.data["given_state"],
                     event.data["query_text"],
-                    event.data["query_embedding"]
+                    event.data["query_embedding"],
+                    event.data["precalculated_metrics"]
                 )
             )
         )
@@ -483,47 +484,47 @@ class CognitiveMemory:
             retrieval_scores = []
             
             for node in (n for n in self.nodes if not n.ghosted):
+                # Calculate metrics once per node
                 metrics = self.calculate_retrieval_metrics(
                     target_node=node,
                     comparison_state=given_state,
                     query_text=query,
                     query_embedding=query_embedding,
                     include_strength=True,
-                    detailed_metrics=return_details
+                    detailed_metrics=True  # Always get detailed metrics for echo
                 )
                 
-                if return_details:
-                    retrieval_scores.append((node, metrics['final_score'], metrics))
-                else:
-                    retrieval_scores.append((node, metrics))
+                # Store the full metrics dict in scores regardless of return_details
+                final_score = metrics['final_score'] if isinstance(metrics, dict) else metrics
+                retrieval_scores.append((node, final_score, metrics))
             
             # Sort by final score
             retrieval_scores.sort(key=lambda x: x[1], reverse=True)
             
-            # Trigger echos on top results
-            # Trigger top_k results via events instead of direct tasks
+            # Get top results
             top_results = retrieval_scores[:top_k]
-            for node, similarity, *_ in top_results:
-                # Dispatch event for echo processing
+            
+            # Trigger echos on top results, using stored metrics
+            for node, similarity, node_metrics in top_results:
                 global_event_dispatcher.dispatch_event(Event(
                     "memory:echo_requested",
                     {
-                        "node_id": node.node_id,  
+                        "node_id": node.node_id,
                         "similarity": similarity,
                         "given_state": given_state,
                         "query_text": query,
-                        "query_embedding": query_embedding
+                        "query_embedding": query_embedding,
+                        "precalculated_metrics": node_metrics  # Pass the stored metrics
                     }
                 ))
 
             if return_details:
                 # Return both nodes and their detailed metrics
-                nodes = [n for n, _, _ in top_results]
-                details = [d for _, _, d in top_results]
-                return nodes, details
+                return ([n for n, _, _ in top_results], 
+                       [m for _, _, m in top_results])
             else:
                 # Return just the nodes
-                return [n for n, _ in top_results]
+                return [n for n, _, _ in top_results]
 
         except Exception as e:
             self.logger.log_error(f"Failed to retrieve memories: {e}")
@@ -1674,12 +1675,13 @@ class CognitiveMemory:
     # 6) Echos
     # -------------------------------------------------------------------------
     def evaluate_echo(
-            self, 
-            node: CognitiveMemoryNode,
-            comparison_state: Optional[Dict[str, Any]] = None, 
-            query_text: Optional[str] = None, 
-            query_embedding: Optional[List[float]] = None
-        ) -> Tuple[CognitiveMemoryNode, float, List[Dict]]:
+        self, 
+        node: CognitiveMemoryNode,
+        comparison_state: Optional[Dict[str, Any]] = None, 
+        query_text: Optional[str] = None, 
+        query_embedding: Optional[List[float]] = None,
+        precalculated_metrics: Optional[Dict] = None
+    ) -> Tuple[CognitiveMemoryNode, float, List[Dict]]:
         """
         Evaluate node & related ghosts for echo potential using comprehensive retrieval metrics.
         Returns tuple of (selected_node, echo_intensity, evaluation_details).
@@ -1700,15 +1702,20 @@ class CognitiveMemory:
                 return None, 0.0, []
             
             # Evaluate parent node using full retrieval metrics
-            self.logger.debug(f"Debug - Evaluating parent node: {node.node_id}")
-            parent_metrics = self.calculate_retrieval_metrics(
-                target_node=node,
-                comparison_state=current_state,
-                include_strength=True,
-                detailed_metrics=True,
-                query_text=query_text,
-                query_embedding=query_embedding
-            )
+            if precalculated_metrics and not node.ghosted:
+                self.logger.debug(f"Using precalculated metrics for node {node.node_id}: {precalculated_metrics}")
+                # Use precalculated metrics when given for the parent node
+                parent_metrics = precalculated_metrics
+            else:
+                self.logger.debug(f"Debug - Evaluating parent node: {node.node_id}")
+                parent_metrics = self.calculate_retrieval_metrics(
+                    target_node=node,
+                    comparison_state=current_state,
+                    include_strength=True,
+                    detailed_metrics=True,
+                    query_text=query_text,
+                    query_embedding=query_embedding
+                )
             
             #print("Debug - Parent metrics:", parent_metrics)
             
@@ -1893,7 +1900,8 @@ class CognitiveMemory:
             intensity: float, 
             comparison_state: Optional[Dict[str, Any]] = None, 
             query_text: Optional[str] = None, 
-            query_embedding: Optional[List[float]] = None
+            query_embedding: Optional[List[float]] = None,
+            precalculated_metrics: Optional[Dict] = None
         ) -> None:
         """
         Orchestrate echo activation and handle strength adjustments based on 
@@ -1934,12 +1942,12 @@ class CognitiveMemory:
         if not query_embedding and query_text:
             query_embedding = self._generate_embedding(query_text)
             
-        selected_node, final_intensity, details = self.evaluate_echo(node, comparison_state, query_text, query_embedding)
+        selected_node, final_intensity, details = self.evaluate_echo(node, comparison_state, query_text, query_embedding, precalculated_metrics)
         if not selected_node:
             return
             
         node.last_accessed = time.time()
-        echo_window = 30  # seconds
+        echo_window = 180  # seconds
         
         if isinstance(selected_node, CognitiveMemoryNode):
             # Calculate time-based dampening
@@ -1949,7 +1957,7 @@ class CognitiveMemory:
                 selected_node.echo_dampening = 1.0
             else:
                 # Progressive dampening with floor
-                selected_node.echo_dampening = max(0.15, selected_node.echo_dampening * 0.85)
+                selected_node.echo_dampening = max(0.1, selected_node.echo_dampening * 0.75)
             
             # Apply dampening to final intensity
             final_intensity *= selected_node.echo_dampening
@@ -2001,7 +2009,21 @@ class CognitiveMemory:
     def jitter(self, node: CognitiveMemoryNode):
         """Re-evaluate node state and connections after echo effect."""
         self._evaluate_ghost_state(node)
-        self.update_connections(node)
+    
+        # Only get connections above meaningful threshold
+        significant_connections = {
+            nid: strength 
+            for nid, strength in node.connections.items() 
+            if strength > 0.4  # Adjust threshold as needed
+        }
+        
+        # Update connections with filter and skip reciprocal updates
+        self.update_connections(
+            node, 
+            connection_filter=significant_connections,
+            skip_reciprocal=True  # Avoid cascading during echo processing
+        )
+        
         self.detect_conflicts(node)
         self._update_node(node)
         
@@ -2755,7 +2777,12 @@ class CognitiveMemory:
         sum_exp = sum(exp_scores)
         return [e / sum_exp for e in exp_scores]
 
-    def update_connections(self, node: CognitiveMemoryNode) -> None:
+    def update_connections(
+        self, 
+        node: CognitiveMemoryNode, 
+        connection_filter: Optional[Dict[str, float]] = None,
+        skip_reciprocal: bool = False  # Add flag to prevent reciprocal updates during echo
+    ) -> None:
         """
         Update a node's connections based on current retrieval metrics.
         Handles ghost connections and potential resurrections.
@@ -2767,13 +2794,19 @@ class CognitiveMemory:
             return
             
         try:
-            # Get all potential connection candidates
-            candidates = [
-                n for n in self.nodes 
-                if (not n.ghosted or 
-                    (n.ghosted and n.strength > self.final_prune_threshold))
-                and n.node_id != node.node_id
-            ]
+            # Get candidates - either filtered or all potential
+            if connection_filter:
+                candidates = [
+                    n for n in self.nodes 
+                    if n.node_id in connection_filter
+                ]
+            else:
+                candidates = [
+                    n for n in self.nodes 
+                    if (not n.ghosted or 
+                        (n.ghosted and n.strength > self.final_prune_threshold))
+                    and n.node_id != node.node_id
+                ]
             
             old_connections = node.connections.copy()
             new_connections = {}
@@ -2811,9 +2844,12 @@ class CognitiveMemory:
                         new_connections[other.node_id] = weight
                         
                         # Update reciprocal connection
-                        if not other.ghosted:
-                            other.connections[node.node_id] = weight
-                            self._update_node(other)
+                        if not skip_reciprocal:
+                            for other_id, weight in new_connections.items():
+                                other = self._get_node_by_id(other_id)
+                                if not other.ghosted:
+                                    other.connections[node.node_id] = weight
+                                    self._update_node(other)
                     
                     # Handle significantly weakened connections
                     elif (other.node_id in old_connections and 

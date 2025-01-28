@@ -21,16 +21,19 @@ from brain.commands.model import (
     CommandValidationError
 )
 
+from config import Config
+
 class EnvironmentRegistry:
     """
     Manages and provides access to all available environments.
     """
     
-    def __init__(self, api_manager: APIManager, cognitive_bridge):
+    def __init__(self, api_manager: APIManager, cognitive_bridge, discord_service):
         """Initialize the environment registry."""
         self.environments: Dict[str, BaseEnvironment] = {}
         self.api_manager = api_manager
         self.cognitive_bridge = cognitive_bridge
+        self.discord_service = discord_service
         self.setup_environments()
     
     def setup_environments(self):
@@ -40,7 +43,8 @@ class EnvironmentRegistry:
         self.register_environment("web", WebEnvironment())
         self.register_environment("meditate", MeditateEnvironment(self.cognitive_bridge))
         self.register_environment("reflect", ReflectEnvironment(self.cognitive_bridge))
-        self.register_environment("discord", DiscordEnvironment())
+        if(Config.get_discord_enabled()):
+            self.register_environment("discord", DiscordEnvironment(self.discord_service))
     
     def register_environment(self, name: str, environment: BaseEnvironment):
         """Register a new environment."""

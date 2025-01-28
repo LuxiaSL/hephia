@@ -261,8 +261,8 @@ class OpenRouterClient(BaseAPIClient):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8000",
-            "X-Title": "Hephia Project"
+            "HTTP-Referer": "https://localhost:8000", 
+            "X-Title": "Hephia" 
         }
         if extra_headers:
             headers.update(extra_headers)
@@ -274,7 +274,7 @@ class OpenRouterClient(BaseAPIClient):
     async def create_completion(
         self,
         messages: List[Dict[str, str]],
-        model: str,
+        model: str = "openai/gpt-3.5-turbo",
         temperature: float = 0.7,
         max_tokens: int = 150,
         return_content_only: bool = False
@@ -286,6 +286,7 @@ class OpenRouterClient(BaseAPIClient):
             "temperature": temperature,
             "max_tokens": max_tokens
         }
+        
         response = await self._make_request("chat/completions", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
 

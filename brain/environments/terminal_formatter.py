@@ -90,8 +90,8 @@ class TerminalFormatter:
                 text = memory.get('content', memory.get('text_content', ''))
                 # Get first line or snippet of content 
                 snippet = text.split('\n')[0]
-                if len(snippet) > 150:
-                    snippet = snippet[:147] + "..."
+                if len(snippet) > 250:
+                    snippet = snippet[:247] + "..."
                 memory_lines.append(f"• {snippet}")
             memory_lines.append("---")
             
