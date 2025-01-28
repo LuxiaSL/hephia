@@ -1182,3 +1182,71 @@ class NotesEnvironment(BaseEnvironment):
             
         finally:
             conn.close()
+
+    async def _list_tags(self) -> CommandResult:
+        """List all available tags with usage counts."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT t.name, COUNT(nt.note_id) as usage_count
+                FROM tags t
+                LEFT JOIN note_tags nt ON t.id = nt.tag_id
+                GROUP BY t.name
+                ORDER BY usage_count DESC, t.name
+            """)
+            
+            tags = cursor.fetchall()
+            
+            if not tags:
+                return CommandResult(
+                    success=True,
+                    message="No tags found",
+                    suggested_commands=[
+                        'notes create "First note" --tags=example,first',
+                        'notes create "Tagged note"'
+                    ],
+                    data={"count": 0}
+                )
+            
+            # Format tag list with counts
+            content = ["Available tags:\n"]
+            for tag, count in tags:
+                content.append(f"{tag} ({count} notes)")
+
+            return CommandResult(
+                success=True,
+                message="\n".join(content),
+                suggested_commands=[
+                    "notes list --tag=" + tags[0][0],  # List notes with most used tag
+                    'notes create "New note" --tags=' + tags[0][0],
+                    "notes list"
+                ],
+                data={
+                    "tags": dict(tags),
+                    "count": len(tags)
+                }
+            )
+
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to list tags: {str(e)}",
+                error=CommandValidationError(
+                    message=f"Failed to list tags: {str(e)}",
+                    suggested_fixes=[
+                        "Check database connectivity",
+                        "Try again later"
+                    ],
+                    related_commands=["notes list", "notes create"],
+                    examples=["notes tags", "notes list"]
+                ),
+                suggested_commands=[
+                    "notes list",
+                    'notes create "New note"'
+                ]
+            )
+        
+        finally:
+            conn.close()

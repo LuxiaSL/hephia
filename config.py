@@ -179,12 +179,12 @@ class Config:
 
     # ExoProcessor settings
     EXO_MIN_INTERVAL = float(os.getenv("EXO_MIN_INTERVAL", "60.0"))
-    EXO_TIMEOUT = 75.0
-    LLM_TIMEOUT = 70.0     
+    EXO_TIMEOUT = 100.0
+    LLM_TIMEOUT = 90.0     
     EXO_MAX_MESSAGES = 30
 
     # lower = more memories, higher = less memories
-    MEMORY_SIGNIFICANCE_THRESHOLD = 0.7
+    MEMORY_SIGNIFICANCE_THRESHOLD = 0.75
     
     # Initial needs
     INITIAL_HUNGER = 0
