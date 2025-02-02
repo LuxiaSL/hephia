@@ -129,33 +129,49 @@ class HephiaServer:
             A conversation endpoint that accepts a full conversation history from the client
             and returns the next assistant response.
             """
+            if not request.messages:
+                raise HTTPException(status_code=400, detail="No messages provided")
+                
+            # Safely get snippet
             try:
-                # Log and notify about the incoming message snippet
                 snippet = request.messages[-1].content[:30] if request.messages else "No content"
                 SystemLogger.info(f"Received conversation snippet: {snippet}")
                 self.exo_processor.notifications.append(f"Conversation message snippet: {snippet}")
-
-                messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
-                response_text = await self.exo_processor.process_user_conversation(messages)
-                
-                # Return a standard ChatCompletion-like JSON response
-                return {
-                    "id": f"chat-{id(response_text)}",
-                    "object": "chat.completion", 
-                    "created": int(time.time()),
-                    "model": 'hephia',
-                    "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": response_text
-                    },
-                    "finish_reason": "stop"
-                    }]
-                }
             except Exception as e:
-                SystemLogger.error(f"Error processing conversation: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                SystemLogger.error(f"Error processing message snippet: {e}")
+
+            try:
+                messages = []
+                for msg in request.messages:
+                    if not msg.role or not msg.content:
+                        raise ValueError("Invalid message format - missing role or content")
+                    messages.append({
+                        "role": msg.role,
+                        "content": msg.content
+                    })
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid message format: {str(e)}")
+            
+            try:
+                response_text = await self.exo_processor.process_user_conversation(messages)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error processing conversation: {str(e)}")
+
+            # Return a standard ChatCompletion-like JSON response
+            return {
+                "id": f"chat-{id(response_text)}",
+                "object": "chat.completion", 
+                "created": int(time.time()),
+                "model": 'hephia',
+                "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": response_text
+                },
+                "finish_reason": "stop"
+                }]
+            }
             
         @self.app.post("/v1/prune_conversation")
         async def prune_conversation():

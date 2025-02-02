@@ -117,10 +117,6 @@ class ExoProcessor:
             ))
         )
         global_event_dispatcher.add_listener(
-            "discord:notification",
-            lambda event: asyncio.create_task(self.handle_discord_notification(event.data))
-        )
-        global_event_dispatcher.add_listener(
             "discord:memory:request_formation",
             lambda event: asyncio.create_task(self.handle_discord_memory_request(event))
         )
@@ -1078,6 +1074,8 @@ Respond with only the final text. No explanations or meta-commentary."""
         """
         # 1. Get current state and retrieve relevant memories
         current_internal_state = self.state_bridge.get_api_context()
+        if not current_internal_state:
+            raise LLMError("Failed to retrieve valid internal state")
 
         # Build query from conversation for memory retrieval
         query_components = []
