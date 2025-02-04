@@ -1,0 +1,518 @@
+"""
+\metrics\orchestrator.py
+
+Orchestrates the complete metrics calculation process for memory retrieval.
+Coordinates semantic, emotional, state, temporal, and strength calculations.
+
+Key capabilities:
+- Unified metrics calculation
+- Component management and coordination
+- Flexible configuration
+- Comprehensive error handling
+- Result normalization and weighting
+"""
+
+from typing import Dict, List, Optional, Any, Union
+from dataclasses import dataclass
+from enum import Enum, auto
+import time
+
+from .semantic import SemanticMetricsCalculator
+from .emotional import EmotionalMetricsCalculator, EmotionalStateSignature
+from .state import StateMetricsCalculator
+from .temporal import TemporalMetricsCalculator
+from .strength import StrengthMetricsCalculator
+from ..embedding_manager import EmbeddingManager
+
+from loggers.loggers import MemoryLogger
+
+class MetricComponent(Enum):
+    """Available metric calculation components."""
+    SEMANTIC = auto()
+    EMOTIONAL = auto()
+    STATE = auto()
+    TEMPORAL = auto()
+    STRENGTH = auto()
+
+@dataclass
+class MetricsConfiguration:
+    """Configuration for metrics calculation."""
+    enabled_components: List[MetricComponent] = None
+    component_weights: Dict[MetricComponent, float] = None
+    semantic_options: Dict[str, Any] = None
+    emotional_options: Dict[str, Any] = None
+    state_options: Dict[str, Any] = None
+    temporal_options: Dict[str, Any] = None
+    strength_options: Dict[str, Any] = None
+    detailed_metrics: bool = False
+    include_strength: bool = True
+
+    def __post_init__(self):
+        """Set defaults if not provided."""
+        if self.enabled_components is None:
+            self.enabled_components = list(MetricComponent)
+            
+        if self.component_weights is None:
+            self.component_weights = {
+                MetricComponent.SEMANTIC: 0.4,
+                MetricComponent.EMOTIONAL: 0.2, 
+                MetricComponent.STATE: 0.225,
+                MetricComponent.TEMPORAL: 0.1,
+                MetricComponent.STRENGTH: 0.075
+            }
+            
+        # Initialize empty option dicts if None
+        self.semantic_options = self.semantic_options or {}
+        self.emotional_options = self.emotional_options or {}
+        self.state_options = self.state_options or {}
+        self.temporal_options = self.temporal_options or {}
+        self.strength_options = self.strength_options or {}
+
+class RetrievalMetricsOrchestrator:
+    """
+    Coordinates calculation of all retrieval metrics.
+    Acts as the central point for configuring and executing
+    memory similarity calculations.
+    """
+    
+    def __init__(
+        self,
+        body_memory_reference=None,
+        embedding_manager: Optional[EmbeddingManager] = None,
+        config: Optional[MetricsConfiguration] = None
+    ):
+        """
+        Initialize orchestrator with required components.
+        
+        Args:
+            embedding_manager: Optional, for semantic analysis
+            body_memory_reference: Optional reference to body memory system
+            config: Optional custom configuration
+        """
+        self.config = config or MetricsConfiguration()
+        self.logger = MemoryLogger
+        self.body_memory_reference = body_memory_reference
+        self.embedding_manager = embedding_manager
+        
+        # Initialize calculators
+        self.calculators = {}
+        
+        if (MetricComponent.SEMANTIC in self.config.enabled_components and 
+            self.embedding_manager is not None):
+            self.calculators[MetricComponent.SEMANTIC] = SemanticMetricsCalculator(
+                embedding_manager=self.embedding_manager
+            )
+            
+        if MetricComponent.EMOTIONAL in self.config.enabled_components:
+            self.calculators[MetricComponent.EMOTIONAL] = EmotionalMetricsCalculator()
+            
+        if MetricComponent.STATE in self.config.enabled_components:
+            self.calculators[MetricComponent.STATE] = StateMetricsCalculator(
+                emotional_calculator=self.calculators.get(MetricComponent.EMOTIONAL),
+                **self.config.state_options
+            )
+            
+        if MetricComponent.TEMPORAL in self.config.enabled_components:
+            self.calculators[MetricComponent.TEMPORAL] = TemporalMetricsCalculator(
+                **self.config.temporal_options
+            )
+            
+        if MetricComponent.STRENGTH in self.config.enabled_components:
+            self.calculators[MetricComponent.STRENGTH] = StrengthMetricsCalculator()
+
+    async def calculate_metrics(
+        self,
+        target_node: Any,
+        comparison_state: Dict[str, Any],
+        query_text: str,
+        query_embedding: List[float],
+        body_node_id: Optional[str] = None,
+        preserved_signature: Optional[EmotionalStateSignature] = None,
+        override_config: Optional[MetricsConfiguration] = None
+    ) -> Union[float, Dict[str, Any]]:
+        """
+        Calculate comprehensive retrieval metrics.
+        
+        Args:
+            target_node: Node to analyze
+            comparison_state: State to compare against
+            query_text: Optional text query
+            query_embedding: Optional pre-computed embedding
+            body_node_id: Optional body memory reference
+            preserved_signature: Optional preserved state signature
+            override_config: Optional config override for this calculation
+            
+        Returns:
+            Either final similarity score or detailed metrics dict
+            depending on configuration
+        """
+        try:
+            config = override_config or self.config
+            metrics = {}
+            
+            # 1. Semantic Metrics
+            if MetricComponent.SEMANTIC in config.enabled_components:
+                metrics['semantic'] = self._calculate_semantic_metrics(
+                    target_node,
+                    query_text,
+                    query_embedding,
+                    config.semantic_options
+                )
+                
+            # 2. Emotional Metrics
+            if MetricComponent.EMOTIONAL in config.enabled_components:
+                metrics['emotional'] = self._calculate_emotional_metrics(
+                    target_node,
+                    comparison_state,
+                    body_node_id,
+                    preserved_signature,
+                    config.emotional_options
+                )
+                
+            # 3. State Metrics
+            if MetricComponent.STATE in config.enabled_components:
+                metrics['state'] = self._calculate_state_metrics(
+                    target_node,
+                    comparison_state,
+                    body_node_id,
+                    preserved_signature,
+                    config.state_options
+                )
+                
+            # 4. Temporal Metrics
+            if MetricComponent.TEMPORAL in config.enabled_components:
+                metrics['temporal'] = self._calculate_temporal_metrics(
+                    target_node,
+                    config.temporal_options
+                )
+                
+            # 5. Strength Metrics (if enabled)
+            if (MetricComponent.STRENGTH in config.enabled_components and 
+                config.include_strength):
+                metrics['strength'] = self._calculate_strength_metrics(
+                    target_node,
+                    config.strength_options
+                )
+                
+            # Return detailed metrics or compute final score
+            if config.detailed_metrics:
+                return {
+                    'final_score': self._compute_final_score(metrics, config),
+                    'component_metrics': metrics,
+                    'component_weights': config.component_weights
+                }
+            else:
+                return self._compute_final_score(metrics, config)
+                
+        except Exception as e:
+            self.logger.log_error(f"Metrics calculation failed: {str(e)}")
+            if config.detailed_metrics:
+                return {
+                    'error': str(e),
+                    'final_score': 0.0,
+                    'component_metrics': {}
+                }
+            return 0.0
+
+    def _calculate_semantic_metrics(
+        self,
+        node: Any,
+        query_text: Optional[str],
+        query_embedding: Optional[List[float]],
+        options: Dict[str, Any]
+    ) -> Dict[str, float]:
+        """Calculate semantic metrics with error handling."""
+        try:
+            # Return default metrics for nodes without text content
+            if not hasattr(node, 'text_content') or node.text_content is None:
+                return {
+                    'embedding_similarity': 0.0,
+                    'text_similarity': 0.0,
+                    'combined_similarity': 0.0
+                }
+                
+            calculator = self.calculators[MetricComponent.SEMANTIC]
+            return calculator.calculate_metrics(
+                text_content=node.text_content,
+                embedding=node.embedding,
+                query_text=query_text,
+                query_embedding=query_embedding,
+                **options
+            )
+        except Exception as e:
+            self.logger.log_error(f"Semantic metrics failed: {str(e)}")
+            return {'error': str(e)}
+
+    def _calculate_emotional_metrics(
+        self,
+        node: Any,
+        comparison_state: Dict[str, Any],
+        body_node_id: Optional[str],
+        preserved_signature: Optional[EmotionalStateSignature],
+        options: Dict[str, Any]
+    ) -> Dict[str, float]:
+        """Calculate emotional metrics with error handling."""
+        try:
+            calculator = self.calculators[MetricComponent.EMOTIONAL]
+            return calculator.calculate_metrics(
+                node_state=node.raw_state,
+                comparison_state=comparison_state,
+                **options
+            )
+        except Exception as e:
+            self.logger.log_error(f"Emotional metrics failed: {str(e)}")
+            return {'error': str(e)}
+
+    def _calculate_state_metrics(
+        self,
+        node: Any,
+        comparison_state: Dict[str, Any],
+        body_node_id: Optional[str],
+        preserved_signature: Optional[EmotionalStateSignature],
+        options: Dict[str, Any]
+    ) -> Dict[str, Dict[str, float]]:
+        """Calculate state metrics with error handling."""
+        try:
+            calculator = self.calculators[MetricComponent.STATE]
+            return calculator.calculate_metrics(
+                node_state={
+                    'raw_state': node.raw_state,
+                    'processed_state': node.processed_state
+                },
+                comparison_state=comparison_state,
+                preserved_signature=preserved_signature,
+                **options
+            )
+        except Exception as e:
+            self.logger.log_error(f"State metrics failed: {str(e)}")
+            return {'error': str(e)}
+
+    def _calculate_temporal_metrics(
+        self,
+        node: Any,
+        options: Dict[str, Any]
+    ) -> Dict[str, float]:
+        """Calculate temporal metrics with error handling."""
+        try:
+            calculator = self.calculators[MetricComponent.TEMPORAL]
+            return calculator.calculate_metrics(
+                node_timestamp=node.timestamp,
+                last_accessed=getattr(node, 'last_accessed', None),
+                last_echo_time=getattr(node, 'last_echo_time', None),
+                echo_dampening=getattr(node, 'echo_dampening', None),
+                **options
+            )
+        except Exception as e:
+            self.logger.log_error(f"Temporal metrics failed: {str(e)}")
+            return {'error': str(e)}
+
+    def _calculate_strength_metrics(
+        self,
+        node: Any,
+        options: Dict[str, Any]
+    ) -> Dict[str, float]:
+        """Calculate strength/network metrics with error handling."""
+        try:
+            calculator = self.calculators[MetricComponent.STRENGTH]
+            # Get connected node strengths if possible
+            connected_strengths = []
+            if hasattr(node, '_get_node_by_id'):
+                connected_strengths = [
+                    n.strength for n in 
+                    [node._get_node_by_id(nid) for nid in node.connections.keys()]
+                    if n is not None
+                ]
+            
+            return calculator.calculate_metrics(
+                node_strength=node.strength,
+                connections=node.connections,
+                is_ghosted=node.ghosted,
+                ghost_nodes=node.ghost_nodes,
+                connected_strengths=connected_strengths,
+                **options
+            )
+        except Exception as e:
+            self.logger.log_error(f"Strength metrics failed: {str(e)}")
+            return {'error': str(e)}
+
+    def _compute_final_score(
+        self,
+        metrics: Dict[str, Any],
+        config: MetricsConfiguration
+    ) -> float:
+        """
+        Compute final similarity score from component metrics.
+        Handles missing metrics and applies component weights.
+        """
+        try:
+            score = 0.0
+            total_weight = 0.0
+            
+            for component, weight in config.component_weights.items():
+                if component.name.lower() not in metrics:
+                    continue
+                    
+                component_metrics = metrics[component.name.lower()]
+                if isinstance(component_metrics, dict):
+                    if 'error' in component_metrics:
+                        continue
+                        
+                    # Extract main score based on component type
+                    if component == MetricComponent.SEMANTIC:
+                        component_score = component_metrics.get('embedding_similarity', 0.0)
+                    elif component == MetricComponent.EMOTIONAL:
+                        component_score = component_metrics.get('vector_similarity', 0.0)
+                    elif component == MetricComponent.STATE:
+                        # Average sub-components
+                        sub_scores = []
+                        for sub_dict in component_metrics.values():
+                            if isinstance(sub_dict, dict):
+                                sub_scores.extend(
+                                    v for v in sub_dict.values() 
+                                    if isinstance(v, (int, float))
+                                )
+                        component_score = (
+                            sum(sub_scores) / len(sub_scores) 
+                            if sub_scores else 0.0
+                        )
+                    else:
+                        # Use first numeric value as score
+                        component_score = next(
+                            (v for v in component_metrics.values() 
+                             if isinstance(v, (int, float))),
+                            0.0
+                        )
+                        
+                    score += component_score * weight
+                    total_weight += weight
+                    
+            return score / total_weight if total_weight > 0 else 0.0
+            
+        except Exception as e:
+            self.logger.log_error(f"Final score computation failed: {str(e)}")
+            return 0.0
+        
+    async def compare_nodes(
+        self,
+        nodeA: Any,
+        nodeB: Any,
+        override_config: Optional[MetricsConfiguration] = None
+    ) -> Dict[str, float]:
+        """
+        Pairwise comparison of two nodes without using an external query.
+        Each node computes its detailed metrics using the other node's state
+        as the comparison_state. The result is a dissonance score per component.
+        
+        Returns:
+            Dict mapping component names ('semantic', 'emotional', etc.) to a
+            float representing the average absolute difference in that component.
+        """
+        # Ensure detailed metrics are enabled so we get component breakdowns.
+        config = override_config or self.config
+        # Force detailed_metrics on for this computation.
+        config.detailed_metrics = True
+
+        # For pairwise, we pass empty query info. The idea is that the node's own data
+        # and the other node's stored state (e.g., raw_state) will drive the comparison.
+        # For semantic comparison, use the other node's embedding
+        metricsA = await self.calculate_metrics(
+            target_node=nodeA,
+            comparison_state=getattr(nodeB, 'raw_state', {}),
+            query_text="",
+            query_embedding=getattr(nodeB, 'embedding', [0.0] * (nodeA.embedding.shape[0] if hasattr(nodeA, 'embedding') else 0)),
+            override_config=config
+        )
+        metricsB = await self.calculate_metrics(
+            target_node=nodeB,
+            comparison_state=getattr(nodeA, 'raw_state', {}),
+            query_text="",
+            query_embedding=getattr(nodeA, 'embedding', [0.0] * (nodeB.embedding.shape[0] if hasattr(nodeB, 'embedding') else 0)),
+            override_config=config
+        )
+
+        # Extract detailed component metrics.
+        detailedA = metricsA.get('component_metrics', {})
+        detailedB = metricsB.get('component_metrics', {})
+
+        dissonance = {}
+        # Iterate over the expected components.
+        for component in config.component_weights.keys():
+            comp_key = component.name.lower()
+            compA_val = detailedA.get(comp_key, {})
+            compB_val = detailedB.get(comp_key, {})
+            # Compute a difference value between the two component dicts.
+            dissonance[comp_key] = self._compare_component_dicts(compA_val, compB_val)
+        return dissonance
+
+    def _compare_component_dicts(self, dataA: Any, dataB: Any) -> float:
+        """
+        Recursively compare two data structures (expected to be dicts or numeric values)
+        and return an average absolute difference.
+        
+        If both values are numeric, the difference is the absolute difference.
+        If they are dicts, we compute the difference over their union of keys.
+        Otherwise, if one or both values are missing or non-numeric, we assume zero.
+        """
+        # If both are numeric values, return absolute difference.
+        if isinstance(dataA, (int, float)) and isinstance(dataB, (int, float)):
+            return abs(dataA - dataB)
+        
+        # If both are dicts, compare recursively key by key.
+        if isinstance(dataA, dict) and isinstance(dataB, dict):
+            differences = []
+            all_keys = set(dataA.keys()) | set(dataB.keys())
+            for key in all_keys:
+                diff = self._compare_component_dicts(
+                    dataA.get(key, 0),
+                    dataB.get(key, 0)
+                )
+                differences.append(diff)
+            return sum(differences) / len(differences) if differences else 0.0
+        
+        # For any non-numeric and non-dict types, return 0 difference.
+        return 0.0
+
+    def update_configuration(
+        self,
+        new_config: MetricsConfiguration
+    ) -> None:
+        """
+        Update orchestrator configuration and reinitialize calculators as needed.
+        
+        Args:
+            new_config: New configuration to apply
+        """
+        # Store old config for comparison
+        old_components = set(self.config.enabled_components)
+        
+        # Update config
+        self.config = new_config
+        
+        # Check for calculator changes
+        new_components = set(new_config.enabled_components)
+        removed = old_components - new_components
+        added = new_components - old_components
+        
+        # Remove disabled calculators
+        for component in removed:
+            self.calculators.pop(component, None)
+            
+        # Initialize new calculators
+        for component in added:
+            if component == MetricComponent.SEMANTIC:
+                self.calculators[component] = SemanticMetricsCalculator(
+                    embedding_manager=self.embedding_manager
+                )
+            elif component == MetricComponent.EMOTIONAL:
+                self.calculators[component] = EmotionalMetricsCalculator()
+            elif component == MetricComponent.STATE:
+                self.calculators[component] = StateMetricsCalculator(
+                    emotional_calculator=self.calculators.get(MetricComponent.EMOTIONAL),
+                    **self.config.state_options
+                )
+            elif component == MetricComponent.TEMPORAL:
+                self.calculators[component] = TemporalMetricsCalculator(
+                    **self.config.temporal_options
+                )
+            elif component == MetricComponent.STRENGTH:
+                self.calculators[component] = StrengthMetricsCalculator()

@@ -50,14 +50,15 @@ class StateBridge:
         self.db_path = 'data/server_state.db'
         self.last_vacuum_time = datetime.min
         self.last_cleanup_time = datetime.min
-        self.vacuum_interval = timedelta(minutes=30)  # VACUUM every 30 mins
-        self.max_states = 50  # Reduced from 100 to keep DB smaller
-        self.last_state_hash = None  # For detecting significant state changes
-        
+        self.vacuum_interval = timedelta(minutes=10) 
+        self.cleanup_interval = timedelta(minutes=5) 
+        self.max_states = 5
+        self.last_state_hash = None
+
     async def initialize(self):
         """Initialize state management and restore previous session if available."""
         await self._init_database()
-        await self._cleanup_old_states()
+        await self._cleanup_old_states(force=True)  # force initial cleanup
         
         if self.internal:
             try:
@@ -93,11 +94,12 @@ class StateBridge:
                 await self._save_session()
 
                 self.setup_event_listeners()
-                
+
+                context = await self.internal_context.get_api_context()
                 # Notify system with API context
                 global_event_dispatcher.dispatch_event(
                     Event("state:initialized", {
-                        "context": self.internal_context.get_api_context()
+                        "context": context
                     })
                 )
             except Exception as e:
@@ -170,10 +172,10 @@ class StateBridge:
         }
         return str(hash(json.dumps(key_elements, sort_keys=True)))
 
-    def get_api_context(self) -> Dict[str, Any]:
+    async def get_api_context(self) -> Dict[str, Any]:
         """Get current processed state for API consumption."""
         if self.internal:
-            return self.internal_context.get_api_context()
+            return await self.internal_context.get_api_context()
         return {}
 
     async def update_state(self):
@@ -197,15 +199,15 @@ class StateBridge:
                     await self._save_session()
 
                     # Cleanup old states periodically
-                    if (not hasattr(self, 'last_cleanup_time') or 
-                        datetime.now() - self.last_cleanup_time >= timedelta(minutes=5)):
+                    if datetime.now() - self.last_cleanup_time >= self.cleanup_interval:
                         await self._cleanup_old_states()
                         self.last_cleanup_time = datetime.now()
 
                     # Broadcast API context
+                    context = await self.internal_context.get_api_context()
                     global_event_dispatcher.dispatch_event(
                         Event("state:changed", {
-                            "context": self.internal_context.get_api_context()
+                            "context": context
                         })
                     )
             except Exception as e:
@@ -218,13 +220,19 @@ class StateBridge:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        # Add compression flag to schema
+
+        # Enable auto_vacuum mode (if not already set).
+        cursor.execute("PRAGMA auto_vacuum")
+        mode = cursor.fetchone()[0]
+        if mode == 0:
+            cursor.execute("PRAGMA auto_vacuum = FULL")
+            print("Auto-vacuum set to FULL.")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_state (
                 id INTEGER PRIMARY KEY,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                session_state BLOB,  -- Changed to BLOB for compressed data
+                session_state BLOB,
                 brain_state TEXT,
                 compressed BOOLEAN DEFAULT 0
             )
@@ -233,18 +241,14 @@ class StateBridge:
         conn.close()
 
     async def _save_session(self):
-        """Save current session state to database with compression."""
         if not self.persistent_state:
             return
-            
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
         try:
-            # Compress session state (which includes the large vectors)
             session_json = json.dumps(self.persistent_state.session_state)
             compressed_session = zlib.compress(session_json.encode())
-            
             cursor.execute("""
                 INSERT INTO system_state (timestamp, session_state, brain_state, compressed)
                 VALUES (?, ?, ?, ?)
@@ -295,35 +299,32 @@ class StateBridge:
         
         return None
 
-    async def _cleanup_old_states(self):
-        """Clean up old state entries and maintain database health."""
+    async def _cleanup_old_states(self, force: bool = False):
+        """
+        Delete old state entries, keeping only the most recent self.max_states entries.
+        Optionally, force cleanup regardless of the cleanup interval.
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
         try:
-            # Delete old states
+            # Delete states older than the most recent self.max_states
             cursor.execute(f"""
                 DELETE FROM system_state 
                 WHERE id NOT IN (
-                    SELECT id 
-                    FROM system_state 
+                    SELECT id FROM system_state 
                     ORDER BY timestamp DESC 
                     LIMIT {self.max_states}
                 )
             """)
-            
             deleted_count = cursor.rowcount
             if deleted_count > 0:
                 print(f"Cleaned up {deleted_count} old state entries")
-            
             conn.commit()
-            
-            # Check if VACUUM is needed
+
             current_time = datetime.now()
-            if current_time - self.last_vacuum_time >= self.vacuum_interval:
-                cursor.execute("VACUUM")  # Reclaim space and defragment
+            if force or current_time - self.last_vacuum_time >= self.vacuum_interval:
+                cursor.execute("VACUUM")
                 self.last_vacuum_time = current_time
                 print("Database VACUUM completed")
-                
         finally:
             conn.close()

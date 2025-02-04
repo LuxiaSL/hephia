@@ -27,8 +27,8 @@ class LogManager:
             
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # Setup all file handlers first
-        loggers = {
+        # Define logger configuration: each logger gets a FileHandler with UTF-8.
+        config = {
             'hephia.internal': (internal_dir / f"internal_{timestamp}.log", InternalFormatter()),
             'hephia.system': (system_dir / f"system_{timestamp}.log", InternalFormatter()),
             'hephia.brain': (exoloop_dir / f"brain_{timestamp}.log", ExoLoopFormatter()),
@@ -36,7 +36,7 @@ class LogManager:
             'hephia.events': (event_dir / f"events_{timestamp}.log", EventFormatter())
         }
         
-        for logger_name, (log_file, formatter) in loggers.items():
+        for logger_name, (log_file, formatter) in config.items():
             logger = logging.getLogger(logger_name)
             logger.setLevel(logging.DEBUG)
             
@@ -45,6 +45,8 @@ class LogManager:
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
             
+            # Remove any default stream handlers to prevent unwanted console output.
+            # If you wish to add a console handler later, use our SafeStreamHandler.
             for handler in logger.handlers[:]:
                 if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
                     logger.removeHandler(handler)

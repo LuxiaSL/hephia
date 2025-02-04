@@ -131,8 +131,26 @@ class CommandPreprocessor:
             )
 
     def _extract_command(self, text: str) -> Optional[str]:
-        """Extract actual command from potentially hallucinated output."""
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        """Extract actual command from potentially hallucinated output including markdown."""
+        # First handle common markdown patterns
+        if text.startswith('```'):
+            # Extract content from code blocks
+            matches = re.findall(r'```(?:\w+)?\n(.*?)```', text, re.DOTALL)
+            if matches:
+                text = matches[0].strip()
+        elif text.startswith('`'):
+            # Extract content from inline code
+            matches = re.findall(r'`(.*?)`', text)
+            if matches:
+                text = matches[0].strip()
+
+        # Split and clean lines
+        lines = [
+            re.sub(r'^[\s>*-]+', '', line.strip())  # Remove markdown list/quote markers
+            for line in text.split('\n') 
+            if line.strip()
+        ]
+        
         if not lines:
             return None
             
@@ -143,21 +161,54 @@ class CommandPreprocessor:
         if len(lines) == 1:
             return first_line
             
-        # For multi-line input
+        # For multi-line input (especially useful for notes)
         command = first_line
-        additional_content = ' '.join(
-            line for line in remaining_lines 
-            if not self._detect_hallucination(line)
-        ).strip()
+        
+        # Check if this is a notes command that accepts multiline content
+        is_note_command = any(command.startswith(prefix) for prefix in 
+                            ['notes create', 'notes edit', 'notes update'])
+        
+        # Join non-hallucinated lines with proper spacing
+        additional_content = []
+        for line in remaining_lines:
+            if not self._detect_hallucination(line):
+                if is_note_command:
+                    # For note commands, preserve all formatting including empty lines
+                    additional_content.append(line)
+                else:
+                    # For other commands, normalize spacing
+                    clean_line = line.strip()
+                    if clean_line:
+                        additional_content.append(clean_line)
         
         if additional_content:
+            # Handle quotes properly for multiline content
             if '"' in command:
-                # Insert content before last quote
-                last_quote = command.rindex('"')
-                return f"{command[:last_quote]} {additional_content}{command[last_quote:]}"
-            return f"{command} {additional_content}"
+                try:
+                    # Find the opening quote position
+                    parts = command.split('"', 2)
+                    if len(parts) >= 2:
+                        prefix = parts[0]  # Command part before content
+                        if is_note_command:
+                            # Preserve formatting for note content
+                            content = '\n'.join(additional_content)
+                            return f'{prefix}"{content}"'
+                        else:
+                            # Join with spaces for regular commands
+                            content = ' '.join(additional_content)
+                            return f'{prefix}"{content}"'
+                except Exception:
+                    # Fallback to simple concatenation if quote handling fails
+                    return f"{command} {' '.join(additional_content)}"
             
+            # No quotes - simple concatenation
+            if is_note_command:
+                return f'{command} "{" ".join(additional_content)}"'
+            return f"{command} {' '.join(additional_content)}"
+                
         return command
+    
+
 
     def _parse_command(self, command: str) -> ParsedCommand:
         """Parse command string into structured format."""
@@ -230,6 +281,10 @@ class CommandPreprocessor:
         # First check basic environment/command validity
         if not command.environment:
             return GlobalCommands.is_global_command(command.action)
+        
+        # Handle environment-level help command
+        if command.action == GlobalCommands.HELP:
+            return True
         
         if command.environment not in available_commands:
             return False
@@ -433,10 +488,13 @@ Rules:
         Raises:
             ValueError: If command contains unsafe patterns
         """
-        # Remove ANSI escape sequences
-        command = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', command)
+        # Remove markdown artifacts
+        command = re.sub(r'^[`*_~]+|[`*_~]+$', '', command)  # Remove surrounding markdown
+        command = re.sub(r'^\s*[\-\*\+]\s+', '', command)    # Remove list markers
+        command = re.sub(r'^\s*>\s+', '', command)           # Remove quote markers
         
-        # Remove common terminal artifacts
+        # Original sanitization
+        command = re.sub(r'\x1b\[[0-9;]*[mGKHF]', '', command)
         command = re.sub(r'^\s*[$>]\s*', '', command)
         
         # Don't strip quotes that are part of command parameters

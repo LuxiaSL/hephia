@@ -1,6 +1,7 @@
 # modules/behaviors/behavior.py
 
 from abc import ABC, abstractmethod
+from typing import Optional
 from event_dispatcher import global_event_dispatcher, Event
 
 class Behavior(ABC):
@@ -16,6 +17,7 @@ class Behavior(ABC):
             behavior_manager (BehaviorManager): Reference to the BehaviorManager.
         """
         self.behavior_manager = behavior_manager
+        self.name: Optional[str] = None
         self.active = False
 
     @abstractmethod

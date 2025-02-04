@@ -9,7 +9,9 @@ clean separation between mechanical and cognitive layers.
 import asyncio
 from typing import Dict, List, Any, Optional
 from event_dispatcher import Event, global_event_dispatcher
-from internal.modules.memory.cognitive_memory_node import CognitiveMemoryNode
+from internal.modules.memory.memory_system import MemorySystemOrchestrator
+from internal.modules.memory.nodes.cognitive_node import CognitiveMemoryNode
+from ...internal_context import InternalContext
 
 import time
 
@@ -21,18 +23,16 @@ class CognitiveBridge:
     reflection, and meditation effects without direct state manipulation.
     """
     
-    def __init__(self, internal_context, cognitive_memory, body_memory):
+    def __init__(self, internal_context: InternalContext, MemorySystemOrchestrator: MemorySystemOrchestrator):
         """
         Initialize the bridge with required system references.
 
         Args:
             internal_context: Access to system state
-            cognitive_memory: CognitiveMemory manager
-            body_memory: BodyMemory manager
+            MemorySystemOrchestrator: Access to memory system
         """
         self.internal_context = internal_context
-        self.cognitive_memory = cognitive_memory
-        self.body_memory = body_memory
+        self.memory_system = MemorySystemOrchestrator
         self.cognitive_state = {"raw": [], "processed": {}}
         self.setup_event_listeners()
 
@@ -55,7 +55,7 @@ class CognitiveBridge:
             raise
 
     def get_cognitive_state(self) -> Dict[str, Any]:
-        if not hasattr(self.cognitive_state, 'raw') or self.cognitive_state.raw is None:
+        if not self.cognitive_state.get("raw_state") or self.cognitive_state.raw is None:
             return {"raw_state": [], "processed_state": "System initializing"} 
         else:
             return {"raw_state": self.cognitive_state.raw, "processed_state": self.cognitive_state.processed}
@@ -70,59 +70,61 @@ class CognitiveBridge:
         Returns:
             Optional[CognitiveMemoryNode]: The requested node if found, None otherwise
         """
-        return self.cognitive_memory._get_node_by_id(node_id)
+        return self.memory_system._get_node_by_id(node_id)
 
     async def reflect_on_topic(self, topic: str, depth: int) -> List[Dict[str, Any]]:
         """
         Search memory for nodes related to topic, triggering echo effects.
-
-        Args:
-            topic: Search topic/theme
-            depth: How deep to traverse connections
-
-        Returns:
-            List[Dict]: Formatted memory summaries
         """
         try:
-            # Initial search
-            matching_nodes = self.cognitive_memory.retrieve_memories(topic, self.internal_context.get_memory_context(is_cognitive=True), 5)
-            if not matching_nodes:
+            # Get memory context state
+            context_state = await self.internal_context.get_memory_context(is_cognitive=True)
+            
+            # Use the memory system's reflection method
+            reflection_results = await self.memory_system.reflect_on_memories(
+                topic=topic,
+                depth=depth,
+                context_state=context_state
+            )
+
+            # Guard against None or empty results
+            if not reflection_results:
                 return []
 
+            # Format results for API consistency
             results = []
-            for node in matching_nodes:
-                # Skip if node is not a CognitiveMemoryNode instance
-                if not isinstance(node, CognitiveMemoryNode):
+            for reflection in reflection_results:
+                try:
+                    memory_data = {
+                        'id': reflection.get('node_id'),
+                        'content': reflection.get('content'),
+                        'timestamp': reflection.get('timestamp'),
+                        'relevance': reflection.get('relevance', 0.0),
+                        'connections': []
+                    }
+                    
+                    # Safely process connections
+                    if 'connected_memories' in reflection:
+                        connected = reflection['connected_memories']
+                        if isinstance(connected, list):
+                            memory_data['connections'] = [
+                                {
+                                    'id': conn.get('node_id'),
+                                    'content': conn.get('content', 'No content available'),
+                                    'weight': conn.get('connection_strength', 0.0),
+                                    'depth': conn.get('depth', 1)
+                                }
+                                for conn in connected
+                                if isinstance(conn, dict)
+                            ]
+                    
+                    # Only append if we have valid content
+                    if memory_data.get('content'):
+                        results.append(memory_data)
+                        
+                except Exception as node_error:
+                    self.logger.error(f"Error processing reflection node: {node_error}")
                     continue
-                # Get connected nodes if depth > 1
-                if depth > 1:
-                    connections = self.cognitive_memory.traverse_connections(
-                        node,
-                        include_body=True,
-                        max_depth=depth,
-                        min_weight=0.3
-                    )
-                    # Format connected nodes
-                    connected = []
-                    for depth_level, nodes in connections.items():
-                        for connected_node, weight, _ in nodes:
-                            connected.append({
-                                'id': connected_node.node_id,
-                                'content': connected_node.text_content if hasattr(connected_node, 'text_content') 
-                                         else f"Body State at {connected_node.timestamp}",
-                                'weight': weight,
-                                'depth': depth_level
-                            })
-
-                # Format result
-                memory_data = {
-                    'id': node.node_id,
-                    'content': node.text_content,
-                    'timestamp': node.timestamp,
-                    'strength': node.strength,
-                    'connections': connected if depth > 1 else []
-                }
-                results.append(memory_data)
 
             return results
 
@@ -131,12 +133,12 @@ class CognitiveBridge:
                 "cognitive:error",
                 {"message": f"Reflection failed: {str(e)}"}
             ))
+            self.logger.error(f"Reflection error: {str(e)}")
             return []
 
     async def retrieve_memories(self, query: str, limit: int = 5, context_state: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Helper method to retrieve memories using cognitive memory's retrieval system.
-        Handles the query, state context and formatting of results.
 
         Args:
             query: Search query/topic
@@ -148,22 +150,30 @@ class CognitiveBridge:
         """
         try:
             if not context_state:
-                context_state = self.internal_context.get_memory_context(is_cognitive=True)
-            # Get memories from cognitive system
+                context_state = await self.internal_context.get_memory_context(is_cognitive=True)
+
+            # Use memory system's cognitive retrieval method
+            memories = await self.memory_system.retrieve_cognitive_memories(
+                query=query,
+                comparison_state=context_state,
+                top_k=limit,
+                return_details=True
+            )
             
-            raw_state = context_state["raw_state"]
-            memories = self.cognitive_memory.retrieve_memories(query, context_state, limit)
-            if not memories:
+            if not memories or not memories[0]:  # Check both memories and metrics
                 return []
 
-            # Format results
+            nodes, metrics = memories
+            
+            # Format results with metrics data
             results = []
-            for node in memories:
+            for node, metric_data in zip(nodes, metrics):
                 memory_data = {
                     'id': node.node_id,
                     'content': node.text_content,
                     'timestamp': node.timestamp,
-                    'strength': node.strength
+                    'strength': node.strength,
+                    'relevance': metric_data['final_score']
                 }
                 results.append(memory_data)
 
@@ -198,16 +208,35 @@ class CognitiveBridge:
         Retrieve and echo recent cognitive memories.
         """
         try:
-            recent = self.cognitive_memory.get_recent_memories(limit)
-            if not recent:  # Handle empty results
+            # Use async method from memory system
+            recent = await self.memory_system.get_recent_memories(
+                count=limit,
+                network_type="cognitive",
+                include_ghosted=False
+            )
+            
+            if not recent:
                 return []
 
             results = []
+            context_state = await self.internal_context.get_memory_context(is_cognitive=True)
+
             for node in recent:
                 if not isinstance(node, CognitiveMemoryNode):
-                    continue  # Skip invalid nodes
-                # Trigger memory echo (needed, get_recent_memories doesn't do this)
-                await self.cognitive_memory.trigger_echo(node, 0.75)  # Base intensity
+                    continue
+
+                # Request echo effect through event system
+                global_event_dispatcher.dispatch_event(Event(
+                    "memory:echo_requested",
+                    {
+                        "node_id": node.node_id,
+                        "similarity": 0.75,  # Base recall intensity
+                        "given_state": context_state,
+                        "query_text": "recent_memory_recall",
+                        "query_embedding": None,
+                        "precalculated_metrics": None
+                    }
+                ))
 
                 # Format with rounded timestamp
                 time_diff = time.time() - node.timestamp
@@ -215,9 +244,10 @@ class CognitiveBridge:
                 
                 results.append({
                     'id': node.node_id,
-                    'content': node.text_content if hasattr(node, 'text_content') 
-                            else f"Non-textual memory ({node.__class__.__name__})",
-                    'time': formatted_time
+                    'content': node.text_content,
+                    'time': formatted_time,
+                    'strength': node.strength,
+                    'source': node.formation_source
                 })
 
             return results
@@ -316,49 +346,38 @@ class CognitiveBridge:
     async def absorb_memory(self, memory_id: str, intensity: float) -> Dict[str, Any]:
         """
         Deep focus on specific memory with amplified echo effects.
-        abstract away the memory id at some point to choices of memory that relate to id in the environment
+        Abstracts memory interaction through the memory system orchestrator.
         """
         try:
-            node = self.cognitive_memory._get_node_by_id(memory_id)
-            if not node:
-                return None
-
-            # Record access and trigger amplified echo
-            node.last_accessed = time.time()
-            await self.cognitive_memory.trigger_echo(node, intensity * 1.5)
-
-            # Get connected nodes with looser restrictions
-            connections = self.cognitive_memory.traverse_connections(
-                node,
-                include_body=True,
-                max_depth=2,
-                min_weight=0.2
+            # Use memory system's meditation method instead of direct manipulation
+            meditation_result = await self.memory_system.meditate_on_memory(
+                memory_id=memory_id,
+                intensity=intensity,
+                duration=5  # Default duration for absorption
             )
 
-            # Process connected nodes
-            for depth, nodes in connections.items():
-                for connected_node, weight, _ in nodes:
-                    await self.cognitive_memory.trigger_echo(
-                        connected_node,
-                        intensity * weight * 0.7
-                    )
+            if not meditation_result:
+                return None
 
-            # Format result
+            # Format result using meditation data
             result = {
-                "content": node.text_content,
+                "content": meditation_result.get("content"),
                 "effects": ["Memory becoming clearer"],
                 "connected_effects": []
             }
 
-            # Add emotional context if available
-            if "emotional_vectors" in node.raw_state:
-                emotions = node.raw_state["emotional_vectors"]
-                if emotions:
-                    strongest = max(emotions, key=lambda e: e.get("intensity", 0))
-                    result["dominant_feeling"] = strongest.get("name", "emotion")
-                    result["effects"].append(
-                        f"Strong echo of {strongest.get('name', 'emotion')}"
-                    )
+            # Process connected memories from meditation result
+            if "connected_memories" in meditation_result:
+                for connection in meditation_result["connected_memories"]:
+                    result["connected_effects"].append({
+                        "content": connection["content"],
+                        "strength": connection["connection_strength"],
+                        "depth": connection["depth"]
+                    })
+
+            # Include echo effects if available
+            if "echo_effects" in meditation_result:
+                result["effects"].extend(meditation_result["echo_effects"])
 
             return result
 
@@ -367,7 +386,7 @@ class CognitiveBridge:
                 "cognitive:error",
                 {"message": f"Memory absorption failed: {str(e)}"}
             ))
-        return None
+            return None
 
     async def _handle_memory_formation(self, event: Event):
         """Handle memory formation requests from ExoProcessor."""
@@ -403,15 +422,21 @@ class CognitiveBridge:
         """Form memory from environment session."""
         try:
             # Get current state context
-            current_state = self.internal_context.get_memory_context()
-
-            # Create memory node
-            await self.cognitive_memory.form_memory(
-                text_content=summary,
-                raw_state=current_state['raw_state'],
-                processed_state=current_state['processed_state'],
-                formation_source='environment_transition'
-            )
+            context = await self.internal_context.get_memory_context(is_cognitive=True)
+            
+            # Request memory formation through the memory system
+            global_event_dispatcher.dispatch_event(Event(
+                "memory:formation_requested",
+                {
+                    "event_type": "environment_transition",
+                    "event_data": {
+                        "environment": environment,
+                        "summary": summary,
+                        "history": history,
+                        "context": context
+                    }
+                }
+            ))
         except Exception as e:
             global_event_dispatcher.dispatch_event(Event(
                 "cognitive:error",
@@ -428,15 +453,22 @@ class CognitiveBridge:
         """Form memory from significant content."""
         try:
             # Get current state context
-            current_state = self.internal_context.get_memory_context()
+            context = await self.internal_context.get_memory_context(is_cognitive=True)
             
-            # Create memory node
-            await self.cognitive_memory.form_memory(
-                text_content=content,
-                raw_state=current_state['raw_state'],
-                processed_state=current_state['processed_state'],
-                formation_source='content_significance'
-            )
+            # Request memory formation through the memory system
+            global_event_dispatcher.dispatch_event(Event(
+                "memory:formation_requested",
+                {
+                    "event_type": "content_significance",
+                    "event_data": {
+                        "content": content,
+                        "command": command,
+                        "response": response,
+                        "result": result,
+                        "context": context
+                    }
+                }
+            ))
         except Exception as e:
             global_event_dispatcher.dispatch_event(Event(
                 "cognitive:error",

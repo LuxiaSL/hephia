@@ -1,10 +1,14 @@
 # modules/behaviors/behavior_manager.py
 
+from typing import Optional
+from .behavior import Behavior
 from .idle import IdleBehavior
 from .walk import WalkBehavior
 from .chase import ChaseBehavior
 from .sleep import SleepBehavior
 from .relax import RelaxBehavior
+from ..needs.needs_manager import NeedsManager
+from ...internal_context import InternalContext
 from event_dispatcher import global_event_dispatcher, Event
 import time
 import random
@@ -93,7 +97,7 @@ class BehaviorManager:
         }
     }
     
-    def __init__(self, internal_context, needs_manager):
+    def __init__(self, internal_context: InternalContext, needs_manager: NeedsManager):
         """
         Initializes the BehaviorManager.
 
@@ -103,7 +107,7 @@ class BehaviorManager:
         """
         self.internal_context = internal_context
         self.needs_manager = needs_manager
-        self.current_behavior = None
+        self.current_behavior: Optional[Behavior] = None
         self.locked_until = 0
         self.locked_by = None
 
@@ -126,7 +130,7 @@ class BehaviorManager:
 
         global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
 
-    def _handle_memory_echo(self, event):
+    async def _handle_memory_echo(self, event):
         """
         Handle memory echo effects on behavior by creating a light behavioral resonance
         based on remembered states.
@@ -151,7 +155,7 @@ class BehaviorManager:
             self.locked_by = 'memory_echo'
         else:
             # Force behavior recheck with current context
-            self.determine_behavior(event)
+            await self.determine_behavior(event)
 
     def update(self):
         """
@@ -207,7 +211,7 @@ class BehaviorManager:
                 self.locked_until = float('inf')
                 self.locked_by = 'forced'
 
-    def determine_behavior(self, event):
+    async def determine_behavior(self, event):
         """
         Determines the appropriate behavior based on the current state and event.
 
@@ -219,7 +223,7 @@ class BehaviorManager:
 
         current_needs = self.internal_context.get_current_needs()
         current_mood = self.internal_context.get_current_mood()
-        recent_emotions = self.internal_context.get_recent_emotions()
+        recent_emotions = await self.internal_context.get_recent_emotions()
         
         new_behavior = self._calculate_behavior(event_type, event_data, current_needs, current_mood, recent_emotions)
 

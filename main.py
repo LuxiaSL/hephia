@@ -3,11 +3,13 @@ Main entry point for Hephia.
 Initializes and runs the complete system with all necessary checks and monitoring.
 """
 
+from __future__ import annotations
 import asyncio
 import uvicorn
 import threading
 from dotenv import load_dotenv
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -17,18 +19,22 @@ from loggers import LogManager
 from event_dispatcher import global_event_dispatcher
 from display.hephia_tui import handle_cognitive_event, handle_state_event, start_monitor
 
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 LogManager.setup_logging()
 
-def setup_data_directory():
+
+def setup_data_directory() -> None:
     """Ensure data directory exists."""
     Path('data').mkdir(exist_ok=True)
 
-def validate_configuration():
+
+def validate_configuration() -> bool:
     """Validate LLM configuration and environment variables."""
-    errors = []
-    
+    errors: list[str] = []
+
     # Map providers to their environment variable names
-    provider_env_vars = {
+    provider_env_vars: dict[ProviderType, str] = {
         ProviderType.OPENPIPE: "OPENPIPE_API_KEY",
         ProviderType.OPENAI: "OPENAI_API_KEY",
         ProviderType.ANTHROPIC: "ANTHROPIC_API_KEY",
@@ -36,32 +42,32 @@ def validate_configuration():
         ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
         ProviderType.PERPLEXITY: "PERPLEXITY_API_KEY",
         ProviderType.CHAPTER2: "CHAPTER2_API_KEY",
+        # Note: If you have two different keys for CHAPTER2, adjust the mapping accordingly.
         ProviderType.CHAPTER2: "CHAPTER2_SOCKET_PATH"
     }
-    
+
     # Validate model configurations
     for role in ['cognitive', 'validation', 'fallback', 'summary']:
         model_name = getattr(Config, f'get_{role}_model')()
-        
         if model_name not in Config.AVAILABLE_MODELS:
             errors.append(f"Invalid {role} model configuration: {model_name}")
             continue
-            
+
         model_config = Config.AVAILABLE_MODELS[model_name]
-        env_var = provider_env_vars[model_config.provider]
-        
-        if not os.getenv(env_var):
+        env_var = provider_env_vars.get(model_config.provider)
+        if not env_var or not os.getenv(env_var):
             errors.append(f"Missing {env_var} for {role} model ({model_name})")
-    
+
     if errors:
         print("\nConfiguration errors:")
         for error in errors:
             print(f"  • {error}")
         return False
-    
+
     return True
 
-async def main():
+
+async def main() -> None:
     """Initialize and run the complete Hephia system."""
     print(f"""
 ╔═══════════════════════════════════════════════╗
@@ -70,46 +76,43 @@ async def main():
 ╚═══════════════════════════════════════════════╝
 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     """)
-    
+
     # Load environment variables
     load_dotenv()
-    
+
     if not validate_configuration():
         return
-    
+
     # Setup directory structure
     setup_data_directory()
-    
+
     print("\nInitializing systems...")
-    
+
     try:
-        # Initialize server
-        server = HephiaServer()
+        # Initialize server using the async factory method
+        server = await HephiaServer.create()
 
         # Start interface in a separate thread
         vis_thread = threading.Thread(target=start_monitor, daemon=True)
         vis_thread.start()
 
         # Hook up event handlers
-        # Cognitive context handler
         global_event_dispatcher.add_listener(
             "cognitive:context_update",
             lambda event: handle_cognitive_event(event)
         )
-
-        # System state handler 
         global_event_dispatcher.add_listener(
             "state:changed",
             lambda event: handle_state_event(event)
         )
-        
+
         print("""
 Hephia is now active! 
 
 Press Ctrl+C to shutdown gracefully
         """)
 
-        # Configure and run FastAPI server
+        # Configure and run FastAPI server via uvicorn
         config = uvicorn.Config(
             app=server.app,
             host="0.0.0.0",
@@ -117,10 +120,9 @@ Press Ctrl+C to shutdown gracefully
             reload=Config.DEBUG if hasattr(Config, 'DEBUG') else False,
             log_level="info"
         )
-        
         uvicorn_server = uvicorn.Server(config)
         await uvicorn_server.serve()
-        
+
     except KeyboardInterrupt:
         print("\n\n🌙 Shutting down Hephia...")
         await server.shutdown()
@@ -129,5 +131,18 @@ Press Ctrl+C to shutdown gracefully
         print(f"\n❌ Fatal error occurred: {e}")
         raise
 
+async def shutdown_all_tasks():
+    # Get a set of all tasks (excluding the current one)
+    tasks = {t for t in asyncio.all_tasks() if t is not asyncio.current_task()}
+    if tasks:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    finally:
+        # This ensures that any lingering tasks are cancelled.
+        loop = asyncio.get_running_loop()
+        loop.run_until_complete(shutdown_all_tasks())

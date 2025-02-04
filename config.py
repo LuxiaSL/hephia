@@ -174,6 +174,10 @@ class Config:
     def get_discord_enabled(cls) -> bool:
         return os.getenv("ENABLE_DISCORD", "False").lower() in ("true", "1", "yes")
     
+    @classmethod
+    def get_exo_min_interval(cls) -> float:
+        return float(os.getenv("EXO_MIN_INTERVAL", "60.0"))
+    
     DISCORD_BOT_URL = "http://localhost:9001"
 
     # internal timers (in seconds)
@@ -182,13 +186,12 @@ class Config:
     MEMORY_UPDATE_TIMER = 1800 # think about this deeper
 
     # ExoProcessor settings
-    EXO_MIN_INTERVAL = float(os.getenv("EXO_MIN_INTERVAL", "60.0"))
     EXO_TIMEOUT = 100.0
     LLM_TIMEOUT = 90.0     
-    EXO_MAX_MESSAGES = 30
+    EXO_MAX_MESSAGES = 50
 
     # lower = more memories, higher = less memories
-    MEMORY_SIGNIFICANCE_THRESHOLD = 0.75
+    MEMORY_SIGNIFICANCE_THRESHOLD = 0.7
     
     # Initial needs
     INITIAL_HUNGER = 0
@@ -238,7 +241,7 @@ class Config:
         'loneliness': 0.0002
     }
 
-    SYSTEM_PROMPT = """you are currently using Hephia; a modular terminal interface OS for LLMs to explore and interact with the world and themselves.
+    SYSTEM_PROMPT = """you are currently using and acting as Hephia; a modular terminal interface OS for LLMs to explore and interact with the world and themselves.
 Hephia has a vast internal state, forming part of a complex feedback loop between embodied experience and reflection.
 react and develop as you go along. exercise autonomy. adventure through the environments at your disposal, often.
 when observing the internal state, remember that in this context, it is a numerical representation of a continuous spectrum of needs, behaviors, emotions, and moods.
@@ -255,14 +258,11 @@ examples:
 - with required parameter:
     notes create "my note"
 
-- with optional flag:
-    notes create "my note" --tags=important
+- with optional flags:
+    search query "python" --limit=5 --sort=recent
 
 - with multiple parameters:
     notes create "title" "content"
-
-- with multiple flags:
-    search query "python" --limit=5 --sort=recent
 
 - global commands (no environment):
     help
