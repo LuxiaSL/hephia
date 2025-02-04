@@ -3,6 +3,7 @@ Internal core implementation.
 Modified to work with server-based architecture.
 """
 
+from __future__ import annotations
 from typing import List, Optional
 import asyncio
 
@@ -13,7 +14,7 @@ from internal.modules.actions.action_manager import ActionManager
 from internal.modules.emotions.emotional_processor import EmotionalProcessor
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 from internal.modules.emotions.mood_synthesizer import MoodSynthesizer
-from internal.modules.memory.memory_system import MemorySystem
+from internal.modules.memory.memory_system import MemorySystemOrchestrator
 from event_dispatcher import global_event_dispatcher, Event
 from loggers import InternalLogger, MemoryLogger  
 
@@ -23,35 +24,48 @@ class Internal:
     Core internal class, now designed to work with server architecture.
     """
 
-    def __init__(self, api_manager):
-        """Initialize internal systems."""
+    def __init__(self, api_manager) -> None:
+        """Synchronous initialization of core internal systems."""
         # Initialize context & state control
         self.context = InternalContext(self)
 
-        # Initialize managers
+        # Initialize managers that don't require async work
         self.needs_manager = NeedsManager()
         self.behavior_manager = BehaviorManager(self.context, self.needs_manager)
         self.action_manager = ActionManager(self.needs_manager)
 
-        # Initialize cognitive and emotional modules
-        self.memory_system = MemorySystem(self.context, api_manager)
-        self.mood_synthesizer = MoodSynthesizer(self.context)
-        self.cognitive_bridge = CognitiveBridge(
-            self.context, 
-            self.memory_system.cognitive_memory, 
-            self.memory_system.body_memory
-        )
-        self.emotional_processor = EmotionalProcessor(
-            self.context,
-            self.cognitive_bridge
-        )
+        # Placeholders for async-initialized modules
+        self.memory_system = None  # type: MemorySystemOrchestrator
+        self.mood_synthesizer = None  # type: MoodSynthesizer
+        self.cognitive_bridge = None  # type: CognitiveBridge
+        self.emotional_processor = None  # type: EmotionalProcessor
 
         # Set up event listeners
         self.setup_event_listeners()
-        
-        # Initialize state
+
+        # Initialize state and update tasks container
         self.is_active = False
         self._update_tasks: List[asyncio.Task] = []
+
+    @classmethod
+    async def create(cls, api_manager) -> Internal:
+        """
+        Asynchronously creates an instance of Internal.
+        
+        This factory method performs all async initialization (like awaiting the memory system)
+        and returns a fully initialized instance.
+        """
+        instance = cls(api_manager)
+
+        # Await async initialization for memory_system
+        instance.memory_system = await MemorySystemOrchestrator.create(api_manager, instance.context)
+
+        # Now initialize the modules that depend on memory_system and context.
+        instance.mood_synthesizer = MoodSynthesizer(instance.context)
+        instance.cognitive_bridge = CognitiveBridge(instance.context, instance.memory_system)
+        instance.emotional_processor = EmotionalProcessor(instance.context, instance.cognitive_bridge)
+
+        return instance
 
     def setup_event_listeners(self):
         """Set up event listeners for internal systems."""
@@ -90,10 +104,10 @@ class Internal:
         
         # Force behavior system to reevaluate with new need states
         current_behavior = self.behavior_manager.current_behavior.name
-        self.behavior_manager.determine_behavior(Event("shake", {
+        await self.behavior_manager.determine_behavior(Event("shake", {
             "current_needs": self.context.get_current_needs(),
             "current_mood": self.context.get_current_mood(),
-            "recent_emotions": self.context.get_recent_emotions()
+            "recent_emotions": await self.context.get_recent_emotions()
         }))
         
         # Let one event processing cycle complete
@@ -109,11 +123,13 @@ class Internal:
         self.is_active = True
         global_event_dispatcher.dispatch_event(Event("internal:started", None))
 
-    def stop(self):
+    async def stop(self):
         """Stop internal systems."""
         self.is_active = False
         if self.behavior_manager.current_behavior:
             self.behavior_manager.current_behavior.stop()
+
+        await self.memory_system.shutdown()
         
         # Notify system of shutdown
         global_event_dispatcher.dispatch_event(Event("internal:stopped", None))
@@ -128,7 +144,7 @@ class Internal:
     
     async def update_memories(self):
         if self.is_active:
-            self.memory_system.update()
+            await self.memory_system._run_periodic_updates()
 
     def on_need_change(self, event):
         """Handle need change events."""

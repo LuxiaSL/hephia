@@ -6,7 +6,7 @@ between the internal systems, LLM brain, and external interfaces.
 It manages both HTTP endpoints for commands and WebSocket connections
 for real-time state updates.
 """
-
+from __future__ import annotations
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -67,8 +67,8 @@ class HephiaServer:
     Main server class coordinating all Hephia's systems.
     """
     
-    def __init__(self):
-        """Initialize the server and its components."""
+    def __init__(self) -> None:
+        """Synchronous constructor; assign default or placeholder values."""
         self.app = FastAPI(title="Hephia Server")
         self.setup_middleware()
         self.active_connections: List[WebSocket] = []
@@ -76,26 +76,43 @@ class HephiaServer:
         self.discord_service = DiscordService()
 
         self.api = APIManager.from_env()
-        self.internal = Internal(self.api)
-        self.state_bridge = StateBridge(internal=self.internal)
-        self.event_bridge = EventBridge(state_bridge=self.state_bridge)
+        # Placeholders for async components.
+        self.internal = None  # type: Internal
+        self.state_bridge = None  # type: StateBridge
+        self.event_bridge = None  # type: EventBridge
+        self.environment_registry = None  # type: EnvironmentRegistry
+        self.exo_processor = None  # type: ExoProcessor
 
-        self.environment_registry = EnvironmentRegistry(
-            self.api,
-            cognitive_bridge=self.internal.cognitive_bridge,
-            discord_service=self.discord_service
-        )
-        self.exo_processor = ExoProcessor(
-            api_manager=self.api,
-            state_bridge=self.state_bridge,
-            environment_registry=self.environment_registry,
-            internal=self.internal
-        )
+        self.logger = SystemLogger
 
-        self.setup_routes()
-        self.setup_event_handlers()
+    @classmethod
+    async def create(cls) -> HephiaServer:
+        """
+        Asynchronously create and initialize a HephiaServer instance.
+        """
+        instance = cls()
+        # Initialize async components:
+        # Use the async factory method for Internal, for example.
+        instance.internal = await Internal.create(instance.api)
+        instance.state_bridge = StateBridge(internal=instance.internal)
+        instance.event_bridge = EventBridge(state_bridge=instance.state_bridge)
+        instance.environment_registry = EnvironmentRegistry(
+            instance.api,
+            cognitive_bridge=instance.internal.cognitive_bridge,
+            discord_service=instance.discord_service
+        )
+        instance.exo_processor = ExoProcessor(
+            api_manager=instance.api,
+            state_bridge=instance.state_bridge,
+            environment_registry=instance.environment_registry,
+            internal=instance.internal
+        )
+        # Now that all components are in place, setup routes and event handlers.
+        instance.setup_routes()
+        instance.setup_event_handlers()
+        return instance
     
-    def setup_middleware(self):
+    def setup_middleware(self) -> None:
         """Configure server middleware."""
         self.app.add_middleware(
             CORSMiddleware,
@@ -105,7 +122,7 @@ class HephiaServer:
             allow_headers=["*"],
         )
     
-    def setup_routes(self):
+    def setup_routes(self) -> None:
         """Configure server routes."""
         
         @self.app.on_event("startup")
@@ -131,8 +148,8 @@ class HephiaServer:
             """
             try:
                 # Log and notify about the incoming message snippet
-                snippet = request.messages[-1].content[:30] if request.messages else "No content"
-                SystemLogger.info(f"Received conversation snippet: {snippet}")
+                snippet = request.messages[-1].content[:1000] if request.messages else "No content"
+                SystemLogger.info(f"Talking with your current user: {snippet}")
                 self.exo_processor.notifications.append(f"Conversation message snippet: {snippet}")
 
                 messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
@@ -166,7 +183,7 @@ class HephiaServer:
         @self.app.get("/state")
         async def get_state():
             """Get current system state."""
-            return self.state_bridge.get_api_context()
+            return await self.state_bridge.get_api_context()
         
         @self.app.post("/discord_inbound")
         async def discord_inbound(payload: DiscordInbound):
@@ -225,7 +242,7 @@ class HephiaServer:
             
             return {"status": "ok"}
     
-    def setup_event_handlers(self):
+    def setup_event_handlers(self) -> None:
         """Set up handlers for system events."""
         # Create tasks for async handlers
         global_event_dispatcher.add_listener(
@@ -265,12 +282,6 @@ class HephiaServer:
                 interval=Config.EMOTION_UPDATE_TIMER,
                 callback=self.internal.update_emotions
             )
-
-            self.timer.add_task(
-                name="memories_update",
-                interval=Config.MEMORY_UPDATE_TIMER,
-                callback=self.internal.update_memories
-            )
             
             # Start timer
             asyncio.create_task(self.timer.run())
@@ -282,7 +293,7 @@ class HephiaServer:
         """Clean shutdown of all systems."""
         try:
             self.timer.stop()
-            self.internal.stop()
+            await self.internal.stop()
             await self.exo_processor.stop()
             await self.state_bridge._save_session()
             await self.discord_service.cleanup()
@@ -303,7 +314,7 @@ class HephiaServer:
         
         try:
             # Send initial state
-            initial_state = self.state_bridge.get_api_context()
+            initial_state = await self.state_bridge.get_api_context()
             await websocket.send_json({
                 "type": "initial_state",
                 "data": initial_state

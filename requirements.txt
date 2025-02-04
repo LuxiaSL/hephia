@@ -10,6 +10,7 @@ pydantic
 numpy
 sentence-transformers
 discord.py
+aiosqlite
 
 # Curses on Windows vs. non-Windows
 windows-curses; sys_platform == "win32"

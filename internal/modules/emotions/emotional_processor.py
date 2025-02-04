@@ -11,6 +11,8 @@ Vectors accumulate and decay naturally, simulating the ebb and flow of emotional
 """
 
 from event_dispatcher import global_event_dispatcher, Event
+from ..cognition.cognitive_bridge import CognitiveBridge
+from ...internal_context import InternalContext
 import time
 import copy
 
@@ -247,7 +249,7 @@ class EmotionalProcessor:
         }
     }
 
-    def __init__(self, internal_context, cognitive_bridge):
+    def __init__(self, internal_context: InternalContext, cognitive_bridge: CognitiveBridge) -> None:
         """
         Initializes the EmotionalProcessor with context access and processing capabilities.
 
@@ -301,7 +303,7 @@ class EmotionalProcessor:
             "emotion": aggregate_vector
         }))
 
-    def process_event(self, event):
+    async def process_event(self, event):
         """
         Processes an event through the emotional pipeline.
 
@@ -328,7 +330,7 @@ class EmotionalProcessor:
 
         # Apply dampening
         category = self._categorize_vector(initial_vector.valence, initial_vector.arousal)
-        dampening = self._calculate_dampening(category)
+        dampening = await self._calculate_dampening(category)
         initial_vector.intensity *= dampening
 
         # Add initial vector to stimulus
@@ -340,7 +342,7 @@ class EmotionalProcessor:
         }))
 
         # Process sequential influences on the same vector
-        self._process_influences(initial_vector)
+        await self._process_influences(initial_vector)
 
         # After processing all influences, dispatch final aggregate state
         # Recalculate overall emotional state 
@@ -356,13 +358,13 @@ class EmotionalProcessor:
             source_data={'initial_trigger': initial_vector.source_data}
         )
 
-        global_event_dispatcher.dispatch_event_sync(Event("emotion:finished", {
+        global_event_dispatcher.dispatch_event(Event("emotion:finished", {
             "emotion": final_state,
             "initial": initial_vector
         }))
 
     
-    def _process_influences(self, vector):
+    async def _process_influences(self, vector):
         """
         Processes mood and behavior influences on the given vector.
        
@@ -386,7 +388,7 @@ class EmotionalProcessor:
             # Calculate and apply dampening
             mood_intensity = self._calculate_intensity('mood', mood_vector_data)
             category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
-            dampening = self._calculate_dampening(category)
+            dampening = await self._calculate_dampening(category)
            
             # Apply influence
             influenced_vector.apply_influence(rel_valence, rel_arousal, mood_intensity * dampening)
@@ -414,7 +416,7 @@ class EmotionalProcessor:
            
             behavior_intensity = self._calculate_intensity('behavior', behavior_vector_data)
             category = self._categorize_vector(influenced_vector.valence, influenced_vector.arousal)
-            dampening = self._calculate_dampening(category)
+            dampening = await self._calculate_dampening(category)
            
             influenced_vector.apply_influence(rel_valence, rel_arousal, behavior_intensity * dampening)
            
@@ -533,7 +535,7 @@ class EmotionalProcessor:
             return 0.2  # Adjust as needed
         return 0.1  # Default minimal intensity
 
-    def _calculate_dampening(self, category):
+    async def _calculate_dampening(self, category):
         """
         Calculates dampening based on recent similar emotions.
         
@@ -546,7 +548,7 @@ class EmotionalProcessor:
         Returns:
             float: Dampening factor between 0.0 and 1.0
         """
-        recent_emotions = self.internal_context.get_recent_emotions()
+        recent_emotions = await self.internal_context.get_recent_emotions()
         similar_count = sum(
             1 for emotion in recent_emotions
             if emotion and 'valence' in emotion and 'arousal' in emotion and
@@ -655,7 +657,7 @@ class EmotionalProcessor:
             
             self.current_stimulus.add_vector(vector)
 
-    def _handle_memory_echo(self, event):
+    async def _handle_memory_echo(self, event):
         """
         Processes memory echo events into emotional influences.
         Memory echoes are resonance effects from recalled emotional states.
@@ -693,7 +695,7 @@ class EmotionalProcessor:
         
         # Apply echo-specific dampening
         category = self._categorize_vector(echo_vector.valence, echo_vector.arousal)
-        echo_dampening = self._calculate_dampening(category) * 0.7  # Echo specific reduction
+        echo_dampening = await self._calculate_dampening(category) * 0.7  # Echo specific reduction
         echo_vector.intensity *= echo_dampening
         
         # Add echo vector to current stimulus
@@ -706,9 +708,9 @@ class EmotionalProcessor:
         }))
         
         # Process influences on echo vector
-        self._process_influences(echo_vector)
+        await self._process_influences(echo_vector)
 
-    def process_meditation(self, event):
+    async def process_meditation(self, event):
         """Processes meditation events for emotional influence."""
         try:
             meditation_data = event.data
@@ -739,7 +741,7 @@ class EmotionalProcessor:
 
                 # Apply meditation-specific dampening
                 category = self._categorize_vector(meditation_vector.valence, meditation_vector.arousal)
-                meditation_dampening = self._calculate_dampening(category) * 0.8
+                meditation_dampening = await self._calculate_dampening(category) * 0.8
                 meditation_vector.intensity *= meditation_dampening
 
                 # Add meditation vector to current stimulus
@@ -752,7 +754,7 @@ class EmotionalProcessor:
                 }))
 
                 # Process influences on meditation vector
-                self._process_influences(meditation_vector)
+                await self._process_influences(meditation_vector)
 
         except Exception as e:
             print(f"Error processing meditation: {str(e)}")

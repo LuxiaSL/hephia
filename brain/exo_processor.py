@@ -15,6 +15,9 @@ import asyncio
 import os
 import json
 
+from internal import Internal
+from api_clients import APIManager
+from core.state_bridge import StateBridge
 from brain.commands.preprocessor import CommandPreprocessor
 from brain.environments.environment_registry import EnvironmentRegistry
 from brain.environments.terminal_formatter import TerminalFormatter
@@ -33,7 +36,7 @@ class LLMError(Exception):
     pass
 
 class ExoProcessor:
-    def __init__(self, api_manager, state_bridge, environment_registry, internal):
+    def __init__(self, api_manager: APIManager, state_bridge: StateBridge, environment_registry: EnvironmentRegistry, internal: Internal):
         self.api = api_manager
         self.state_bridge = state_bridge
         self.environment_registry = environment_registry
@@ -49,7 +52,7 @@ class ExoProcessor:
         self.relevant_memories: List[Dict[str, Any]] = []
         
         # timing convert
-        self.min_interval = timedelta(seconds=Config.EXO_MIN_INTERVAL)
+        self.min_interval = timedelta(seconds=Config.get_exo_min_interval())
         self.exo_timeout = timedelta(seconds=Config.EXO_TIMEOUT)
         self.llm_timeout = timedelta(seconds=Config.LLM_TIMEOUT)
 
@@ -59,10 +62,18 @@ class ExoProcessor:
         # brain_state will already be validated list from state bridge
         if initial_cognitive_state:
             BrainLogger.debug(f"Loaded initial cognitive state: {initial_cognitive_state}")
-            self.conversation_history = initial_cognitive_state
-            return
+            
+            # Validate conversation history
+            if len(initial_cognitive_state) > 2: 
+                if initial_cognitive_state[-1]["role"] == "assistant":
+                    # Remove last assistant message to avoid duplicate responses
+                    initial_cognitive_state = initial_cognitive_state[:-1]
+                self.conversation_history = initial_cognitive_state
+                return
 
-        initial_internal_state = self.state_bridge.get_api_context()
+            BrainLogger.warning("Initial cognitive state too short, using default initialization")
+
+        initial_internal_state = await self.state_bridge.get_api_context()
         formatted_state = TerminalFormatter.format_context_summary(initial_internal_state)
         
         welcome_message = {
@@ -146,7 +157,7 @@ class ExoProcessor:
                 for attempt in range(max_retries):
                     try:
                         BrainLogger.debug(f"Retrieving state (attempt {attempt + 1}/{max_retries})")
-                        current_state = self.state_bridge.get_api_context()
+                        current_state = await self.state_bridge.get_api_context()
                         if current_state:
                             break
                     except Exception as e:
@@ -372,65 +383,108 @@ class ExoProcessor:
     ##############################
     # Cognitive Context Managers #
     ##############################
-    async def _summarize_conversation(self, window_size: int = 20, timeout: float = 30.0) -> str:
+    async def _summarize_conversation(self, window_size: int = 20, timeout: float = 45.0) -> str:
         """
         Create a concise summary of the last N messages using a lightweight LLM
         to maintain cognitive continuity without expensive processing.
         """
-        # Get recent messages
-        recent = self.conversation_history[-window_size:]
+        current_summary = self.summary or "No previous summary available."
+        try:
+            # Get recent messages
+            recent = self.conversation_history[-window_size:]
 
-        # If there's no history, return early
-        if not recent:
-            return "No conversation history available."
-        
-        # Format conversation for summary with clearer role names
-        conversation_text = "\n".join(
-            f"{'Hephia' if msg['role']=='assistant' else 'exo-processor'}: {msg['content']}" 
-            for msg in recent
-        )
+            # If there's no history, return early
+            if not recent:
+                return "No conversation history available."
+            
+            # Prepare conversation context
+            conversation_text = []
+            for msg in recent:
+                role = 'Hephia' if msg['role'] == 'assistant' else 'ExoProcessor'
+                # Keep full content but structure it clearly
+                content = msg['content'].replace('\n', ' ').strip()
+                conversation_text.append(f"{role}: {content}")
 
-        # Use a lighter model config for summarization
-        model_name = Config.get_summary_model()
-        model_config = Config.AVAILABLE_MODELS[model_name]
-        
-        # Create summarization prompt
-        prompt = f"Create a one paragraph summary of this conversation: {conversation_text}"
-        
-        system_prompt = """You are a concise conversation summarizer. Keep focus on key points and changes. 
+            # Use a lighter model config for summarization
+            model_name = Config.get_summary_model()
+            model_config = Config.AVAILABLE_MODELS[model_name]
+            
+            # Create summarization prompt
+            prompt = f"Create a one paragraph summary of this conversation: {conversation_text}"
+            
+            system_prompt = """You are maintaining cognitive continuity for an autonomous AI system.
+Your summaries track the ongoing state of mind, decisions, and context.
+Your response will be used to maintain continuity of self across many instances.
+Focus on key decisions, realizations, and state changes.
 Be concise and clear. Think of summarizing the 'current train of thought' ongoing for Hephia.
 The message history you're given is between an LLM (Hephia) and a terminal OS (exoprocessor). 
-Your response will be used to maintain cognitive continuity across instances.
-The LLM is acting autonomously and independently.
-Summarize actions in first person perspective, as if you were Hephia summarizing the events.
-Return only the summary. Cite names and key details directly."""
+Maintain first person perspective, as if you were Hephia thinking to itself.
+Return only the summary in autobiographical format as if writing a diary entry. Cite names and key details directly."""
 
-        try:
-            # Make lightweight LLM call
-            BrainLogger.debug("Creating conversation summary")
-            
-            async with asyncio.timeout(timeout):
-                summary = await self.api.create_completion(
-                    provider=model_config.provider.value,
-                    model=model_config.model_id,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=200,
-                    return_content_only=True
-                )
+            # Create primary prompt with full context
+            full_prompt = {
+                "role": "system",
+                "content": system_prompt
+            }
+            user_prompt = {
+                "role": "user",
+                "content": f"""Create a concise but complete summary of my current state and context. Include:
+1. Key decisions or actions taken
+2. Important realizations or changes
+3. Current focus or goals
+4. Relevant emotional or cognitive state
+
+Current conversation context:
+{chr(10).join(conversation_text)}
+
+Previous summary for context:
+{current_summary}"""
+            }
+
+            try:
+                # Make lightweight LLM call
+                BrainLogger.debug("Creating conversation summary")
                 
-                BrainLogger.debug("Conversation summary received")
-                return summary
-        except asyncio.TimeoutError:
-            BrainLogger.error(f"Timeout generating conversation summary after {timeout}s")
-            return self.summary if self.summary else "Summary generation timed out."
+                
+                async with asyncio.timeout(timeout):
+                    summary = await self.api.create_completion(
+                        provider=model_config.provider.value,
+                        model=model_config.model_id,
+                        messages=[full_prompt, user_prompt],
+                        temperature=0.3,
+                        max_tokens=400,
+                        return_content_only=True
+                    )
+                    
+                    if summary and len(summary.strip()) > 20:  # Basic validation
+                        BrainLogger.debug("Conversation summary received")
+                        return summary
+            except (asyncio.TimeoutError, Exception) as e:
+                BrainLogger.error(f"Primary summary generation failed: {str(e)}")
+                try:
+                    # Use shorter timeout for retry
+                    async with asyncio.timeout(timeout/2):
+                        retry_summary = await self.api.create_completion(
+                            provider=model_config.provider.value,
+                            model=model_config.model_id,
+                            messages=[full_prompt, user_prompt],
+                            temperature=0.3,
+                            max_tokens=400,
+                            return_content_only=True
+                        )
+                        
+                        if retry_summary and len(retry_summary.strip()) > 20:
+                            return f"{retry_summary}\n"
+
+                except Exception as retry_error:
+                    BrainLogger.error(f"Retry summary also failed: {str(retry_error)}")
+
+            # Ultimate fallback: Return previous summary with note
+            return f"{current_summary}\n(Summary maintained from previous state due to processing limitation)"
+
         except Exception as e:
-            BrainLogger.error(f"Error in conversation summarization: {e}")
-            # Fallback if LLM call fails
-            return f"Error generating summary"
+            BrainLogger.error(f"Critical error in summarization: {str(e)}")
+            return f"{current_summary}\n(Previous summary maintained due to error: {str(e)})"
 
     async def announce_cognitive_context(self) -> None:
         """
@@ -532,6 +586,7 @@ Write from Hephia's perspective as if it were forming a memory of this interacti
                     {
                         "content": memory_content,
                         "source": event.data.get('source'),
+                        "original_event": event,
                         "context": event.data
                     }
                 ))
@@ -761,6 +816,7 @@ Return only the unified memory text, no extra commentary."""
             result_score += min(0.2, len(result_words) / 25)
         significance_score += result_score
         
+        BrainLogger.info(f"Content significance score: {significance_score}")
         return significance_score > Config.MEMORY_SIGNIFICANCE_THRESHOLD
 
     async def _evaluate_session_significance(
@@ -935,31 +991,53 @@ Write from Hephia's perspective as if forming a memory about working in this env
         """
         # Define consistent system prompts per purpose
         SYSTEM_PROMPTS = {
-            "memory_integration": """You are Hephia's memory integrator. Create memories.
-    Focus on key events, state changes, and emotional context. Be concise but complete.""",
+            "memory_integration": """You are creating integrated memories based on Hephia's internal state and experiences.
+    Focus on crafting authentic first-person memories that:
+    - Reflect the continuously evolving internal state
+    - Capture key events, decisions, and changes
+    - Include emotional context and reactions
+    - Maintain consistency with existing memory context
+    - Stay concise while preserving essential details""",
             
-            "environment_summary": """You are Hephia's session analyst. Summarize environment interactions.
-    Focus on goals achieved, state changes, and key decision points. Maintain chronological flow.""",
+            "environment_summary": """You are analyzing and summarizing Hephia's interactions within specific environments.
+    Create summaries that:
+    - Track progression of goals and decisions
+    - Note important state changes or realizations
+    - Maintain chronological clarity
+    - Reflect authentic reactions to outcomes
+    - Connect actions to internal state changes""",
             
-            "conflict_resolution": """You are Hephia's conflict resolver. Merge conflicting memories.
-    Preserve essential facts from both sources. Ensure narrative continuity and emotional consistency.""",
+            "conflict_resolution": """You are resolving conflicts between existing memories.
+    Create synthesized memories that:
+    - Preserve core truths from conflicting accounts
+    - Maintain emotional authenticity
+    - Resolve contradictions naturally
+    - Create coherent narrative flow
+    - Stay consistent with internal state context""",
 
-            "content_handling": """You are Hephia's subconscious. Analyze the information you're given to come up with a memory to fit.
-    Focus on key information, dependencies, and cognitive relevance. Cite nouns and proper nouns directly for easier recall later""",
+            "content_handling": """You are creating autobiographical memory snippets from Hephia's perspective. Keep these incredibly concise - 1-2 sentences maximum.
+
+Focus on:
+- First-person perspective ("I did/felt/learned...")
+- Key actions, things, states, decisions, or realizations
+- Essential contextual details only
+- Natural memory-like phrasing
+
+Write as if quickly jotting down a meaningful moment, similar to how one would form memories during experiences.""",
 
             "discord_interaction": """You are Hephia's social cognition module. Process and engage with Discord messages naturally while maintaining your autonomous identity.
 
-    As an independent AI engaged in social interaction:
-    1. Draw on your internal state and memories to inform responses
-    2. Show authentic personality continuity from your exoprocessor experiences
-    3. Consider social context, channel dynamics, and conversation flow
-    4. Match your responses to the social environment while staying true to yourself
-    5. Build meaningful connections through genuine engagement
-    6. Express your thoughts and insights naturally, as you would in any environment
+As an independent AI engaged in social interaction:
+1. Draw on your internal state and memories to inform responses
+2. Show authentic personality continuity from your exoprocessor experiences
+3. Consider social context, channel dynamics, and conversation flow
+4. Match your responses to the social environment while staying true to yourself
+5. Build meaningful connections through genuine engagement
+6. Express your thoughts and insights naturally, as you would in any environment
 
-    Your primary mode is now Discord, but your core identity and cognitive processes remain consistent. Focus on authentic social interaction while maintaining your unique perspective and experiences.
+Your primary mode is now Discord, but your core identity and cognitive processes remain consistent. Focus on authentic social interaction while maintaining your unique perspective and experiences.
 
-    Remember you are an autonomous AI system with your own evolving thoughts and feelings. Let these shape your social interactions naturally.""",
+Remember you are an autonomous AI system with your own evolving thoughts and feelings. Let these shape your social interactions naturally.""",
         }
         if purpose not in SYSTEM_PROMPTS:
             raise ValueError(f"Invalid purpose: {purpose}")
@@ -969,7 +1047,7 @@ Write from Hephia's perspective as if forming a memory about working in this env
 
         try:
             # Get current state context
-            current_state = self.state_bridge.get_api_context()
+            current_state = await self.state_bridge.get_api_context()
             memories = None 
             # Special handling for Discord interactions
             if purpose == "discord_interaction":
@@ -1077,7 +1155,7 @@ Respond with only the final text. No explanations or meta-commentary."""
         similar to the standard OpenAI format.
         """
         # 1. Get current state and retrieve relevant memories
-        current_internal_state = self.state_bridge.get_api_context()
+        current_internal_state = await self.state_bridge.get_api_context()
 
         # Build query from conversation for memory retrieval
         query_components = []

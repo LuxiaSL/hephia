@@ -2,25 +2,31 @@
 """
 InternalContext module.
 
-Provides an access layer to retrieve the internal's current internal state, such as mood,
-behavior, and needs. It acts as a snapshot provider without managing or storing
-the actual state values.
+Provides an access layer to retrieve the internal's current state (mood, behavior, needs, etc.)
+and memory context. This version is updated to work with the async MemorySystemOrchestrator.
 """
-from config import Config
+
 import time
+from typing import TYPE_CHECKING
+from config import Config
+
+if TYPE_CHECKING:
+    from internal import Internal
+
 
 class InternalContext:
-
-    def __init__(self, internal):
+    def __init__(self, internal: "Internal") -> None:
         """
         Initializes the InternalContext with a reference to the internal instance.
-
+        
         Args:
             internal (Internal): The internal instance.
         """
         self.internal = internal
+        self._recent_emotions_cache = None
+        self._recent_emotions_cache_timestamp = 0.0
 
-    def get_api_context(self):
+    async def get_api_context(self) -> dict:
         """Gets complete JSON-serializable context with type verification."""
         try:
             # Get mood state
@@ -28,8 +34,8 @@ class InternalContext:
             current_mood = mood.get_current_mood()
             mood_data = {
                 'name': mood.get_current_mood_name(),
-                'valence': float(current_mood.valence),  # Ensure numeric
-                'arousal': float(current_mood.arousal)   # Ensure numeric
+                'valence': float(current_mood.valence),
+                'arousal': float(current_mood.arousal)
             }
             
             # Get behavior state
@@ -39,8 +45,8 @@ class InternalContext:
                 'active': behavior is not None
             }
             
-            # Get emotional state from body memory's current state
-            emotional_state = self.get_recent_emotions(use_timeframe=True)
+            # Get emotional state from recent body memories (await the async call)
+            emotional_state = await self.get_recent_emotions(use_timeframe=True)
             
             # Get needs state
             needs = self.internal.needs_manager.get_needs_summary()
@@ -54,61 +60,89 @@ class InternalContext:
         except Exception as e:
             print(f"DEBUG - Error in get_api_context: {str(e)}")
             raise
-        
-    def get_recent_emotions(self, use_timeframe=False):
+
+    async def get_recent_emotions(self, use_timeframe: bool = False) -> list:
         """
-        Gets current emotional state from recent body memory nodes.
+        Gets current emotional state from recent body memory nodes,
+        and optionally current emotional stimuli, if they exist.
         
         Args:
-            use_timeframe (bool): If True, query by timeframe, otherwise get top 5 most recent
+            use_timeframe (bool): If True, query by timeframe; otherwise, get top 5 most recent.
         
         Returns:
-            list: List of active emotional states from recent memory
+            list: List of active emotional states from recent memory.
         """
         try:
-            emotional_state = []
-            
             if use_timeframe:
+                # Always bypass cache: perform a fresh query by time window.
                 current_time = time.time()
-                # Wide interval to catch any recent emotions
-                start_time = current_time - Config.EXO_MIN_INTERVAL * 1.75
-                
-                # Get nodes in timeframe
-                recent_nodes = self.internal.memory_system.body_memory.query_by_time_window(
+                start_time = current_time - Config.get_exo_min_interval() * 1.75
+                recent_nodes = await self.internal.memory_system.query_by_time_window(
                     start_time,
                     current_time,
+                    network_type="body",
                     include_ghosted=False
                 )
-            else:
-                # Get 5 most recent memories
-                recent_nodes = self.internal.memory_system.body_memory.get_recent_memories(
-                    count=5,
-                    include_ghosted=False
-                )
-            
-            # Extract emotional states from memory nodes
-            for node in recent_nodes:
-                # Get the aggregate emotional state from the memory node
-                if 'emotional_state' in node.processed_state:
-                    emotional_data = node.processed_state['emotional_state']
-                    # The first item is always the overall state, others are individual vectors
-                    if emotional_data and isinstance(emotional_data, list):
-                        aggregate_state = emotional_data[0]  # Get the overall emotional state
-                        if aggregate_state:
-                            emotional_state.append({
-                                'name': aggregate_state.get('name'),
-                                'intensity': float(aggregate_state.get('intensity', 0.0)),
-                                'valence': float(aggregate_state.get('valence', 0.0)), 
-                                'arousal': float(aggregate_state.get('arousal', 0.0))
-                            })
+                # Process and return the emotional state from recent_nodes.
+                emotional_state = []
+                for node in recent_nodes:
+                    if 'emotional_state' in node.processed_state:
+                        emotional_data = node.processed_state['emotional_state']
+                        if emotional_data and isinstance(emotional_data, list):
+                            aggregate_state = emotional_data[0]
+                            if aggregate_state:
+                                emotional_state.append({
+                                    'name': aggregate_state.get('name'),
+                                    'intensity': float(aggregate_state.get('intensity', 0.0)),
+                                    'valence': float(aggregate_state.get('valence', 0.0)), 
+                                    'arousal': float(aggregate_state.get('arousal', 0.0))
+                                })
+                return emotional_state
 
-            return emotional_state
-            
+            else:
+                # For the default case, use caching.
+                # Determine the latest timestamp from body memory nodes.
+                nodes = self.internal.memory_system.body_network.nodes.values()
+                latest_node_timestamp = max((node.timestamp for node in nodes), default=0.0)
+                
+                # If cache exists and nothing new has been added, return cached result.
+                if (
+                    self._recent_emotions_cache is not None and 
+                    latest_node_timestamp <= self._recent_emotions_cache_timestamp
+                ):
+                    return self._recent_emotions_cache
+
+                # Otherwise, perform the query for the top 5 most recent memories.
+                recent_nodes = await self.internal.memory_system.get_recent_memories(
+                    count=5,
+                    network_type="body",
+                    include_ghosted=False
+                )
+                emotional_state = []
+                for node in recent_nodes:
+                    if 'emotional_state' in node.processed_state:
+                        emotional_data = node.processed_state['emotional_state']
+                        if emotional_data and isinstance(emotional_data, list):
+                            aggregate_state = emotional_data[0]
+                            if aggregate_state:
+                                emotional_state.append({
+                                    'name': aggregate_state.get('name'),
+                                    'intensity': float(aggregate_state.get('intensity', 0.0)),
+                                    'valence': float(aggregate_state.get('valence', 0.0)), 
+                                    'arousal': float(aggregate_state.get('arousal', 0.0))
+                                })
+                
+                # Update cache.
+                self._recent_emotions_cache = emotional_state
+                self._recent_emotions_cache_timestamp = latest_node_timestamp
+                
+                return emotional_state
+
         except Exception as e:
             print(f"DEBUG - Error getting emotional state: {str(e)}")
             return []
 
-    def get_memory_context(self, is_cognitive=False):
+    async def get_memory_context(self, is_cognitive: bool = False) -> dict:
         """
         Gets raw and processed state context for memory formation.
         
@@ -116,44 +150,32 @@ class InternalContext:
         while processed state provides human-readable interpretations.
         
         Args:
-            get_cognitive (bool): Whether to include cognitive information
-            
+            is_cognitive (bool): Whether to include cognitive information.
+        
         Returns:
-            dict: Contains 'raw_state' and 'processed_state' sections with relevant data
+            dict: Contains 'raw_state' and 'processed_state' with relevant data.
         """
         try:
-            # Get current raw states
+            # Get current raw states from various managers
             raw_state = {
                 'needs': self.internal.needs_manager.get_needs_state(),
                 'behavior': self.internal.behavior_manager.get_behavior_state(),
                 'emotions': self.internal.emotional_processor.get_emotional_state(),
                 'mood': self.internal.mood_synthesizer.get_mood_state()
             }
-
             if is_cognitive:
+                # For cognitive context, get additional info from cognitive_bridge
                 cog_state = self.internal.cognitive_bridge.get_cognitive_state()
                 raw_state['cognitive'] = cog_state.get('raw_state', {})
-
-            # Get current processed/readable states
+            # Processed state: get readable versions
             current_mood = self.internal.mood_synthesizer.get_current_mood()
             current_behavior = self.internal.behavior_manager.current_behavior
-            
-            # Build emotional stimulus data for processed state
-            # NOTE: The EmotionalProcessor class doesn't expose these values as properties
-            # and relies on internal methods for categorization and naming
-            # Consider adding properties to EmotionalProcessor/EmotionalStimulus for:
-            # - emotion_name
-            # - emotion_category 
-            # - vector_categories
             emotional_state = []
             if hasattr(self.internal.emotional_processor, 'current_stimulus'):
                 stimulus = self.internal.emotional_processor.current_stimulus
-                
-                # Check if stimulus exists and has meaningful values
                 if stimulus and (abs(stimulus.valence) >= 0.001 or 
-                               abs(stimulus.arousal) >= 0.001 or 
-                               stimulus.intensity >= 0.001):
-                    # Get overall emotional state
+                                 abs(stimulus.arousal) >= 0.001 or 
+                                 stimulus.intensity >= 0.001):
                     overall_state = {
                         'name': self.internal.emotional_processor._get_emotion_name_by_category(
                             self.internal.emotional_processor._categorize_stimulus(stimulus)
@@ -163,22 +185,18 @@ class InternalContext:
                         'intensity': float(stimulus.intensity)
                     }
                     emotional_state.append(overall_state)
+                    for vector in stimulus.active_vectors:
+                        if vector.intensity >= 0.1:
+                            emotional_state.append({
+                                'name': vector.name,
+                                'category': self.internal.emotional_processor._categorize_vector(
+                                    vector.valence, vector.arousal
+                                ),
+                                'intensity': float(vector.intensity),
+                                'source': vector.source_type
+                            })
                 else:
-                    # Return an empty emotional state if no meaningful stimulus exists
                     emotional_state = []
-                
-                # Include active vector categories for detailed view
-                for vector in stimulus.active_vectors:
-                    if vector.intensity >= 0.1:  # Only include significant contributors
-                        emotional_state.append({
-                            'name': vector.name,
-                            'category': self.internal.emotional_processor._categorize_vector(
-                                vector.valence, vector.arousal
-                            ),
-                            'intensity': float(vector.intensity),
-                            'source': vector.source_type
-                        })
-
             processed_state = {
                 'mood': {
                     'name': self.internal.mood_synthesizer.get_current_mood_name(),
@@ -192,54 +210,36 @@ class InternalContext:
                 'needs': self.internal.needs_manager.get_needs_summary(),
                 'emotional_state': emotional_state
             }
-
             if is_cognitive:
-                processed_state['cognitive'] = cog_state.get('processed_state', {})
-
+                processed_state['cognitive'] = self.internal.cognitive_bridge.get_cognitive_state().get('processed_state', {})
             return {
                 'raw_state': raw_state,
                 'processed_state': processed_state
             }
-            
         except Exception as e:
             print(f"DEBUG - Error in get_memory_context: {str(e)}")
             raise
 
-    def get_current_mood(self):
-        """
-        Retrieves the internal's current mood from the MoodSynthesizer in a structured format.
+    async def get_full_context(self) -> dict:
+        """Retrieve the complete internal context."""
+        return {
+            'mood': self.get_current_mood(),
+            'recent_emotions': await self.get_recent_emotions(),
+            'needs': self.get_current_needs(),
+            'current_behavior': self.get_current_behavior()
+        }
 
-        Returns:
-            dict: A dictionary with the mood name and mood object.
-        """
+    def get_current_mood(self) -> dict:
+        """Retrieves the current mood."""
         return {
             "name": self.internal.mood_synthesizer.get_current_mood_name(),
             "mood_object": self.internal.mood_synthesizer.get_current_mood()
         }
 
     def get_current_behavior(self):
-        """
-        Retrieves the internal's current behavior from the BehaviorManager.
-
-        Returns:
-            Behavior: The current behavior of the internal.
-        """
+        """Retrieves the current behavior."""
         return self.internal.behavior_manager.get_current_behavior()
 
-    def get_current_needs(self):
-        """
-        Retrieves the internal's current needs from the NeedsManager.
-
-        Returns:
-            dict: A dictionary of need names to their current values and satisfaction levels
-        """
+    def get_current_needs(self) -> dict:
+        """Retrieves current needs summary."""
         return self.internal.needs_manager.get_needs_summary()
-
-    def get_full_context(self):
-        return {
-            'mood': self.get_current_mood(),
-            'recent_emotions': self.get_recent_emotions(),
-            'needs': self.get_current_needs(),
-            'current_behavior': self.get_current_behavior()
-        }
-

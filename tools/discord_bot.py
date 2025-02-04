@@ -1,11 +1,48 @@
 import os
-import discord
+import sys
+import logging
 import asyncio
 import aiohttp
-
+import discord
 from aiohttp import web
 from dotenv import load_dotenv
 from typing import Optional, List, Dict, Any
+from datetime import datetime
+
+###############################################################################
+# LOGGING SETUP
+###############################################################################
+
+# Create the logs directory if it doesn't exist
+LOG_DIR = "./data/logs/discord"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Create a timestamped log file
+timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_filename = os.path.join(LOG_DIR, f"discord_{timestamp_str}.log")
+
+logger = logging.getLogger("DiscordBotLogger")
+logger.setLevel(logging.DEBUG)  # Adjust level as needed (DEBUG, INFO, WARNING, etc.)
+
+# File handler
+file_handler = logging.FileHandler(log_filename)
+file_handler.setLevel(logging.DEBUG)
+file_format = logging.Formatter(
+    "[%(asctime)s] %(levelname)s in %(module)s:%(lineno)d: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+file_handler.setFormatter(file_format)
+logger.addHandler(file_handler)
+
+# Console handler (optional)
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_format = logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(message)s", 
+    datefmt="%H:%M:%S"
+)
+console_handler.setFormatter(console_format)
+logger.addHandler(console_handler)
 
 ###############################################################################
 # CONFIGURATION
@@ -16,10 +53,9 @@ DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Your bot's token
 HEPHIA_SERVER_URL = "http://localhost:8000"     # Where Hephia server listens
 BOT_HTTP_PORT = 9001                            # Port where *this* bot listens
 
-# For convenience, define a global reference to the bot, so HTTP handlers
-# can access it easily. We could also pass the bot object around, or attach
-# it to the app object.
-bot: "RealTimeDiscordBot" = None  
+# For convenience, define a global reference to the bot
+bot: "RealTimeDiscordBot" = None
+persistent_session: aiohttp.ClientSession = None  # We'll reuse this session for all outbound requests
 
 ###############################################################################
 # REAL-TIME DISCORD BOT (CLIENT)
@@ -33,9 +69,11 @@ class RealTimeDiscordBot(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.new_messages = {}
+        # We'll store the persistent aiohttp session reference
+        self.session = kwargs.get("session", None)
 
     async def on_ready(self):
-        print(f"[Bot] Logged in as {self.user} (id={self.user.id})")
+        logger.info(f"[Bot] Logged in as {self.user} (id={self.user.id})")
         await initialize_message_cache(self)
 
     async def on_message(self, message: discord.Message):
@@ -43,15 +81,16 @@ class RealTimeDiscordBot(discord.Client):
         Called whenever a new message is created in Discord.
         Tracks message counts per channel and notifies when thresholds are reached.
         """
-        print(f"got a new message from {message.author.name}")
-        # 1) Initialize channel counter if it doesn't exist
         channel_id = str(message.channel.id)
+        logger.debug(f"[Bot] New message in {message.channel.name} from {message.author.name}")
+
+        # 1) Initialize channel counter if it doesn't exist
         if channel_id not in self.new_messages:
             self.new_messages[channel_id] = 0
 
         # 2) Ignore messages from ourselves or system messages
         if message.author == self.user:
-            self.new_messages[str(message.channel.id)] = 0
+            self.new_messages[channel_id] = 0
             return
         
         # 3) Increment message counter for this channel
@@ -65,7 +104,7 @@ class RealTimeDiscordBot(discord.Client):
         
         # 5) Always forward if bot is mentioned
         if self.user.mentioned_in(message):
-            print("got a mention")
+            logger.info(f"[Bot] Mention detected in channel {message.channel.name}")
             await self.forward_to_hephia(message)
             # new hephia message requested, reset counter for channel
             self.new_messages[channel_id] = 0
@@ -74,29 +113,41 @@ class RealTimeDiscordBot(discord.Client):
         """
         Notifies Hephia server about high message count in a channel.
         """
-        async with aiohttp.ClientSession() as session:
-            url = f"{HEPHIA_SERVER_URL}/discord_channel_update"
-            data = {
-                "channel_id": str(channel.id),
-                "new_message_count": count,
-                "channel_name": channel.name
-            }
-            try:
-                await session.post(url, json=data)
-            except Exception as e:
-                print(f"[Bot] Failed to notify about high message count: {e}")
+        if not self.session:
+            logger.error("[Bot] Session not defined, cannot notify high message count.")
+            return
+        
+        url = f"{HEPHIA_SERVER_URL}/discord_channel_update"
+        data = {
+            "channel_id": str(channel.id),
+            "new_message_count": count,
+            "channel_name": channel.name
+        }
+        try:
+            async with self.session.post(url, json=data) as resp:
+                if resp.status != 200:
+                    err = await resp.text()
+                    logger.warning(f"[Bot] High message count notification failed: {resp.status} {err}")
+                else:
+                    logger.debug("[Bot] High message count notification successful")
+        except Exception as e:
+            logger.exception(f"[Bot] Failed to notify about high message count: {e}")
 
     async def forward_to_hephia(self, message: discord.Message):
         """
         Forwards a Discord message to Hephia's /discord_inbound endpoint.
         Includes recent message history for context.
         """
-        print(f"[Bot] Forwarding message from {message.author.name} in {message.channel.name}")
+        logger.info(f"[Bot] Forwarding message from {message.author.name} in {message.channel.name}")
+
+        if not self.session:
+            logger.error("[Bot] Session not defined, cannot forward message.")
+            return
 
         # Get the proper user reference format
         if hasattr(message.author, 'global_name'):  # New Discord system
             author_ref = message.author.name
-        else:  # Legacy Discord system 
+        else:  # Legacy Discord system
             author_ref = f"{message.author.display_name}#{message.author.discriminator}"
 
         # Clean up message content
@@ -108,11 +159,10 @@ class RealTimeDiscordBot(discord.Client):
 
         # Get recent message history for context (last 50 messages)
         try:
-            print(f"[Bot] Fetching history before message {message.id}")
+            logger.debug(f"[Bot] Fetching message history for context before {message.id}")
             history = []
             message_count = 0
             
-            # First try to get messages from before the current message
             async for hist_msg in message.channel.history(limit=50, before=message):
                 message_count += 1
                 if hasattr(hist_msg.author, 'global_name'):
@@ -132,16 +182,15 @@ class RealTimeDiscordBot(discord.Client):
                     "timestamp": str(hist_msg.created_at.isoformat())
                 })
             
-            print(f"[Bot] Found {message_count} messages in history")
+            logger.debug(f"[Bot] Found {message_count} context messages")
             history.reverse()  # Oldest first
-            
         except Exception as e:
-            print(f"[Bot] Warning: Could not fetch message history: {e}")
+            logger.warning(f"[Bot] Could not fetch message history: {e}")
             history = []
 
         channel_id = str(message.channel.id)
         current_count = self.new_messages.get(channel_id, 0)
-        print(f"[Bot] Channel {message.channel.name} has {current_count} new messages")
+        logger.debug(f"[Bot] Channel {message.channel.name} has {current_count} new messages recorded")
 
         inbound_data = {
             "channel_id": channel_id,
@@ -158,18 +207,16 @@ class RealTimeDiscordBot(discord.Client):
             }
         }
 
-        print(f"[Bot] Sending data to Hephia with {len(history)} context messages")
-        async with aiohttp.ClientSession() as session:
-            url = f"{HEPHIA_SERVER_URL}/discord_inbound" 
-            try:
-                resp = await session.post(url, json=inbound_data)
+        url = f"{HEPHIA_SERVER_URL}/discord_inbound"
+        try:
+            async with self.session.post(url, json=inbound_data) as resp:
                 if resp.status != 200:
                     err = await resp.text()
-                    print(f"[Bot] Error forwarding to Hephia: {resp.status} {err}")
+                    logger.warning(f"[Bot] Error forwarding to Hephia: {resp.status} {err}")
                 else:
-                    print("[Bot] Successfully forwarded message to Hephia")
-            except Exception as e:
-                print(f"[Bot] Failed to forward message to Hephia: {e}")
+                    logger.info("[Bot] Successfully forwarded message to Hephia")
+        except Exception as e:
+            logger.exception(f"[Bot] Failed to forward message to Hephia: {e}")
 
 ###############################################################################
 # AIOHTTP SERVER ROUTES: OUTBOUND COMMANDS
@@ -185,8 +232,10 @@ async def handle_list_guilds(request: web.Request) -> web.Response:
     ]
     """
     guilds = []
+    logger.debug("[Bot] Listing guilds")
     for g in bot.guilds:
         guilds.append({"id": str(g.id), "name": g.name})
+    logger.debug(f"[Bot] Found {len(guilds)} guilds")
     return web.json_response(guilds)
 
 
@@ -197,7 +246,6 @@ async def handle_list_channels(request: web.Request) -> web.Response:
     Example response:
     [
       {"id": "111111", "name": "#general", "type": "text"},
-      {"id": "222222", "name": "#random", "type": "text"},
       ...
     ]
     """
@@ -207,15 +255,15 @@ async def handle_list_channels(request: web.Request) -> web.Response:
         return web.json_response({"error": "Guild not found"}, status=404)
 
     channels_info = []
+    logger.debug(f"[Bot] Listing channels for guild {guild.name}")
     for channel in guild.channels:
-        # You can further filter only text channels, or include categories, voice, etc.
         channel_type = str(channel.type)  # "text", "voice", "category", etc.
         channels_info.append({
             "id": str(channel.id),
             "name": channel.name,
             "type": channel_type
         })
-
+    logger.debug(f"[Bot] Found {len(channels_info)} channels in guild {guild.name}")
     return web.json_response(channels_info)
 
 
@@ -231,7 +279,7 @@ async def handle_get_channel_history(request: web.Request) -> web.Response:
     """
     try:
         channel_id = str(request.match_info["channel_id"])
-        print(f"[Bot] Fetching history for channel {channel_id}")
+        logger.debug(f"[Bot] Fetching history for channel {channel_id}")
         limit_str = request.query.get("limit", "50")
         try:
             limit = min(int(limit_str), 100)  # Some safe cap
@@ -241,7 +289,7 @@ async def handle_get_channel_history(request: web.Request) -> web.Response:
         try:
             channel = bot.get_channel(int(channel_id))
             if channel is None:
-                print(f"[Bot] Channel {channel_id} not found in cache, attempting fetch")
+                logger.debug(f"[Bot] Channel {channel_id} not found in cache, attempting fetch_channel")
                 channel = await bot.fetch_channel(int(channel_id))
         except discord.NotFound:
             return web.json_response({"error": f"Channel {channel_id} not found"}, status=404)
@@ -254,33 +302,28 @@ async def handle_get_channel_history(request: web.Request) -> web.Response:
         # Fetch up to 'limit' messages, most recent first
         history_data = []
         
-        # WARNING: This calls the REST API if not cached. Consider caching if you do this a lot.
         try:
             history_iter = channel.history(limit=limit, oldest_first=False)
             async with asyncio.timeout(30.0):  # 30 seconds timeout
                 messages = [msg async for msg in history_iter]
-            # We'll reverse them so the earliest is first
-            messages.reverse()
+            messages.reverse()  # earliest first
         except asyncio.TimeoutError:
             return web.json_response({"error": "Request timed out while fetching history"}, status=504)
 
-        # Bot mention patterns
         bot_mention = f'<@{bot.user.id}>'
         bot_mention_bang = f'<@!{bot.user.id}>'
 
         for msg in messages:
             # Get the proper user reference format
             if hasattr(msg.author, 'global_name'):  # New Discord system
-                author_ref = msg.author.name  # Uses unique username
-            else:  # Legacy Discord system
+                author_ref = msg.author.name
+            else:
                 author_ref = f"{msg.author.display_name}#{msg.author.discriminator}"
             
-            # Clean up message content by replacing bot mentions with friendly format
-            content = msg.content
-            content = content.replace(bot_mention, f'@{bot.user.name}')
+            # Clean up message content by replacing bot mentions
+            content = msg.content.replace(bot_mention, f'@{bot.user.name}')
             content = content.replace(bot_mention_bang, f'@{bot.user.name}')
             
-            # Convert each message to a dict
             history_data.append({
                 "id": str(msg.id),
                 "author": author_ref,
@@ -292,7 +335,7 @@ async def handle_get_channel_history(request: web.Request) -> web.Response:
         return web.json_response(history_data)
 
     except Exception as e:
-        print(f"[Bot] Error in get_channel_history: {e}")
+        logger.exception(f"[Bot] Error in get_channel_history: {e}")
         return web.json_response(
             {"error": f"Failed to fetch history: {str(e)}"}, 
             status=500
@@ -323,17 +366,14 @@ async def handle_get_message_by_id(request: web.Request) -> web.Response:
         if msg is None:
             return web.json_response({"error": "Message not found"}, status=404)
 
-        # Get the proper user reference format
         if hasattr(msg.author, 'global_name'):  # New Discord system
-            author_ref = msg.author.name  # Uses unique username
-        else:  # Legacy Discord system
+            author_ref = msg.author.name
+        else:
             author_ref = f"{msg.author.display_name}#{msg.author.discriminator}"
 
-        # Clean up message content by replacing bot mentions with friendly format
-        content = msg.content
         bot_mention = f'<@{bot.user.id}>'
         bot_mention_bang = f'<@!{bot.user.id}>'
-        content = content.replace(bot_mention, f'@{bot.user.name}')
+        content = msg.content.replace(bot_mention, f'@{bot.user.name}')
         content = content.replace(bot_mention_bang, f'@{bot.user.name}')
 
         result = {
@@ -347,6 +387,7 @@ async def handle_get_message_by_id(request: web.Request) -> web.Response:
     except discord.NotFound:
         return web.json_response({"error": "Message not found"}, status=404)
     except Exception as e:
+        logger.exception(f"[Bot] Error fetching message: {e}")
         return web.json_response({"error": f"Failed to fetch message: {e}"}, status=500)
 
 
@@ -357,8 +398,20 @@ async def handle_send_message(request: web.Request) -> web.Response:
     Returns: { "status": "ok", "message_id": "<ID>" }
     """
     channel_id = request.match_info["channel_id"]
-    data = await request.json()
-    content = data.get("content", "")
+    try:
+        data = await request.json()
+    except Exception as e:
+        error_msg = f"Invalid JSON payload: {e}"
+        logger.error(f"[Bot] {error_msg}")
+        return web.json_response({"error": error_msg}, status=400)
+
+    content = data.get("content", "").strip()
+
+    # Validate non-empty content before proceeding.
+    if not content:
+        error_msg = "Message content cannot be empty."
+        logger.error(f"[Bot] {error_msg}")
+        return web.json_response({"error": error_msg}, status=400)
 
     channel = bot.get_channel(int(channel_id))
     if not channel or not isinstance(channel, discord.TextChannel):
@@ -366,8 +419,10 @@ async def handle_send_message(request: web.Request) -> web.Response:
 
     try:
         sent_msg = await channel.send(content)
+        logger.info(f"[Bot] Message sent in channel {channel.name} with ID {sent_msg.id}")
         return web.json_response({"status": "ok", "message_id": str(sent_msg.id)})
     except Exception as e:
+        logger.exception(f"[Bot] Failed to send message: {e}")
         return web.json_response({"error": f"Failed to send message: {e}"}, status=500)
 
 ###############################################################################
@@ -390,46 +445,61 @@ def create_app() -> web.Application:
     return app
 
 ###############################################################################
-# MAIN ENTRY POINT
+# MESSAGE CACHE INITIALIZATION
 ###############################################################################
 
-async def initialize_message_cache(bot: RealTimeDiscordBot, messages_per_channel: int = 100, 
-                                delay_between_channels: float = 1.0):
+async def initialize_message_cache(
+    bot: RealTimeDiscordBot, 
+    messages_per_channel: int = 100, 
+    concurrency_limit: int = 5
+):
     """
-    Pre-fetches message history for all accessible channels.
-    Uses delays to be nice to Discord's API.
+    Pre-fetches message history for all accessible text channels.
+    Uses a semaphore to limit concurrency.
     
     Args:
         bot: The Discord bot instance
         messages_per_channel: How many messages to fetch per channel
-        delay_between_channels: Delay in seconds between channel fetches
+        concurrency_limit: Max concurrent fetches to avoid rate limit issues
     """
-    print("[Bot] Starting message cache initialization...")
-    
+    logger.info("[Bot] Starting message cache initialization...")
+
+    # Prepare tasks
+    tasks = []
+    sem = asyncio.Semaphore(concurrency_limit)
+
+    async def fetch_channel_history(channel):
+        async with sem:
+            try:
+                logger.debug(f"[Bot] Fetching history for {channel.guild.name}/{channel.name}")
+                messages = [msg async for msg in channel.history(limit=messages_per_channel)]
+                bot.new_messages[str(channel.id)] = len(messages)
+                logger.debug(f"[Bot] Cached {len(messages)} messages from {channel.name}")
+            except Exception as e:
+                logger.warning(f"[Bot] Failed to fetch history for {channel.name}: {e}")
+
     for guild in bot.guilds:
         for channel in guild.channels:
-            if not isinstance(channel, discord.TextChannel):
-                continue
-                
-            try:
-                print(f"[Bot] Fetching history for {guild.name}/{channel.name}")
-                messages = [msg async for msg in channel.history(limit=messages_per_channel)]
-                # Store message count for this channel
-                bot.new_messages[str(channel.id)] = len(messages)
-                print(f"[Bot] Cached {len(messages)} messages from {channel.name}")
-                
-                # Be nice to Discord API
-                await asyncio.sleep(delay_between_channels)
-                
-            except Exception as e:
-                print(f"[Bot] Failed to fetch history for {channel.name}: {e}")
-                continue
-    
-    print("[Bot] Message cache initialization complete")
+            if isinstance(channel, discord.TextChannel):
+                tasks.append(asyncio.create_task(fetch_channel_history(channel)))
+
+    await asyncio.gather(*tasks)
+    logger.info("[Bot] Message cache initialization complete")
+
+###############################################################################
+# MAIN ENTRY POINT
+###############################################################################
 
 async def main():
-    global bot
-    bot = RealTimeDiscordBot(intents=discord.Intents.all())
+    global bot, persistent_session
+    # Create a persistent aiohttp session for all outbound requests
+    persistent_session = aiohttp.ClientSession()
+
+    # Pass the session to the bot so it can be re-used for all calls
+    bot = RealTimeDiscordBot(
+        intents=discord.Intents.all(),
+        session=persistent_session
+    )
 
     # 1) Start the aiohttp server in a background task
     app = create_app()
@@ -437,20 +507,31 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", BOT_HTTP_PORT)
     await site.start()
-    print(f"[HTTP] Aiohttp server running at http://0.0.0.0:{BOT_HTTP_PORT}")
+    logger.info(f"[HTTP] Aiohttp server running at http://0.0.0.0:{BOT_HTTP_PORT}")
 
     # 2) Start the Discord bot
     if not DISCORD_TOKEN:
-        print("[Bot] ERROR: DISCORD_BOT_TOKEN is not set")
+        logger.error("[Bot] DISCORD_BOT_TOKEN is not set. Exiting.")
         return
 
     try:
-        # 3) Connect to Discord and run forever
         await bot.start(DISCORD_TOKEN)
     except KeyboardInterrupt:
-        await bot.close()
+        logger.info("[Bot] Received KeyboardInterrupt, shutting down...")
     finally:
+        logger.info("[Bot] Closing Discord bot connection...")
+        await bot.close()
+        logger.info("[Bot] Cleaning up the web server...")
         await runner.cleanup()
 
+        # Close the persistent session
+        logger.info("[Bot] Closing persistent aiohttp session...")
+        if not persistent_session.closed:
+            await persistent_session.close()
+        logger.info("[Bot] Shutdown complete.")
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.exception("[Bot] Fatal error in main: %s", e)

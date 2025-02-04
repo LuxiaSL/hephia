@@ -1,6 +1,7 @@
 # core/discord_service.py
 
 import asyncio
+import json
 import aiohttp
 import time
 from typing import Optional, Dict, Any, List, Tuple, Callable
@@ -29,7 +30,7 @@ class DiscordServiceConfig:
     max_retries: int = 3
     retry_delay: float = 0.5
     health_check_interval: float = 30.0
-    connection_timeout: float = 10.0
+    connection_timeout: float = 15.0
     max_queue_size: int = 100
     max_concurrent_requests: int = 5
 
@@ -272,35 +273,84 @@ class DiscordService:
         **kwargs
     ) -> Tuple[Optional[Any], Optional[int]]:
         """
-        Wraps connection.request(...) and:
-          - returns (json_data, status_code)
-          - returns (None, status_code) if e.g. 404 or request fails
-          - logs errors/warnings appropriately
+        Wraps an HTTP request with:
+        - an async context manager for proper response handling,
+        - detailed logging (pre-request state, raw response snippet, and structured error logging),
+        - returns (json_data, status_code) or (None, status_code) on error.
         """
-        resp = await self.connection.request(method, endpoint, **kwargs)
-        if resp is None:
-            SystemLogger.error(f"Failed to make request to {endpoint} with method {method}")
-            return None, None
+        full_url = f"{self.config.bot_url}{endpoint}"
+        SystemLogger.debug(f"Initiating {method} request to {endpoint} with kwargs: {kwargs}")
+        SystemLogger.debug(f"Full URL: {full_url}")
+        SystemLogger.debug(f"Current connection status: {self.connection.status}")
+        SystemLogger.debug(f"Session state: {'Active' if self.connection.session and not self.connection.session.closed else 'Inactive'}")
 
-        status = resp.status
         try:
-            data = await resp.json()
+            async with self.connection.session.request(method, full_url, **kwargs) as resp:
+                status = resp.status
+                SystemLogger.debug(f"Response received | Status: {status} | Headers: {resp.headers}")
+
+                try:
+                    SystemLogger.debug("Attempting to parse response body")
+                    raw_text = await resp.text()
+                    SystemLogger.debug(f"Raw response text (first 1000 chars): {raw_text[:1000]}...")
+                    
+                    data = json.loads(raw_text)
+                    SystemLogger.debug(
+                        f"Successfully parsed JSON response | Data keys: "
+                        f"{list(data.keys()) if isinstance(data, dict) else 'array'}"
+                    )
+                except aiohttp.ClientPayloadError as e:
+                    SystemLogger.error(
+                        f"Connection closed while reading | Endpoint: {endpoint} | "
+                        f"Status: {status} | Error: {str(e)} | "
+                        f"Partial response: {getattr(resp, '_body', 'N/A')[:200]}"
+                    )
+                    data = None
+                except json.JSONDecodeError as e:
+                    SystemLogger.error(
+                        f"Invalid JSON | Endpoint: {endpoint} | Status: {status} | "
+                        f"Error: {str(e)} | Position: {e.pos} | "
+                        f"Line: {e.lineno} | Col: {e.colno} | "
+                        f"Raw text snippet: {raw_text[:200]}"
+                    )
+                    data = None
+                except Exception as e:
+                    SystemLogger.error(
+                        f"Unexpected error parsing response | Endpoint: {endpoint} | "
+                        f"Status: {status} | Error type: {type(e).__name__} | "
+                        f"Error: {str(e)} | "
+                        f"Raw text available: {'Yes' if 'raw_text' in locals() else 'No'}"
+                    )
+                    data = None
+
+                if status != 200:
+                    if status == 404:
+                        SystemLogger.warning(
+                            f"Not Found | Method: {method} | Endpoint: {endpoint} | "
+                            f"Request kwargs: {kwargs}"
+                        )
+                    else:
+                        SystemLogger.error(
+                            f"Non-200 status | Code: {status} | Method: {method} | "
+                            f"Endpoint: {endpoint} | Headers: {resp.headers} | "
+                            f"Request kwargs: {kwargs}"
+                        )
+                elif data is None:
+                    SystemLogger.warning(
+                        f"Empty or unparseable response | Status: 200 | Method: {method} | "
+                        f"Endpoint: {endpoint} | Headers: {resp.headers} | "
+                        f"Content-Type: {resp.headers.get('Content-Type', 'N/A')}"
+                    )
+                
+                SystemLogger.debug(f"Request completed | Method: {method} | Endpoint: {endpoint} | Status: {status}")
+                return data, status
+
         except Exception as e:
-            SystemLogger.warning(f"Failed to parse JSON response from {endpoint}: {e}")
-            data = None
-
-        if status != 200:
-            if status == 404:
-                SystemLogger.warning(f"Request to {endpoint} returned 404 Not Found")
-            else:
-                SystemLogger.error(f"Request to {endpoint} returned status {status}")
-        elif data is None:
-            SystemLogger.warning(f"Request to {endpoint} returned 200 but no parseable data")
-        return data, status
-
-    # ----------------------------------------------------------------------
-    # EXACT METHODS PARALLELING YOUR ENVIRONMENT
-    # ----------------------------------------------------------------------
+            SystemLogger.error(
+                f"Request failed | Method: {method} | Endpoint: {endpoint} | "
+                f"Error: {str(e)} | Connection Status: {self.connection.status}"
+            )
+            return None, None
 
     async def list_guilds(self) -> Tuple[Optional[List[dict]], Optional[int]]:
         """GET /guilds -> returns ([{id, name, ...}], status_code)."""

@@ -18,53 +18,68 @@ from loggers import SystemLogger
 from config import Config
 
 class BaseAPIClient(ABC):
-    """Base class for API clients with common functionality."""
+    """Enhanced base class for API clients with robust error handling."""
     
     def __init__(self, api_key: str, base_url: str, service_name: str):
         self.api_key = api_key
         self.base_url = base_url
         self.service_name = service_name
         self.max_retries = 3
-        self.retry_delay = 1  # seconds
-    
+        self.base_retry_delay = 1  # seconds
+        self.max_retry_delay = 32  # Maximum delay after exponential backoff
+        
     async def _make_request(
         self,
         endpoint: str,
         method: str = "POST",
         payload: Optional[Dict] = None,
-        extra_headers: Optional[Dict] = None
+        extra_headers: Optional[Dict] = None,
+        timeout: float = 30.0
     ) -> Dict[str, Any]:
-        """Make API request with retry logic and error handling."""
+        """Make API request with enhanced retry logic and error handling."""
         headers = self._get_headers(extra_headers)
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         
+        last_exception = None
         for attempt in range(self.max_retries):
             try:
-                async with aiohttp.ClientSession() as session:
+                # Calculate exponential backoff delay
+                delay = min(self.base_retry_delay * (2 ** attempt), self.max_retry_delay)
+                
+                client_timeout = aiohttp.ClientTimeout(
+                    total=timeout,
+                    connect=timeout/3,
+                    sock_read=timeout
+                )
+                
+                async with aiohttp.ClientSession(timeout=client_timeout) as session:
                     async with session.request(
                         method,
                         url,
                         headers=headers,
                         json=payload
                     ) as response:
+                        # Log the raw response for debugging
+                        response_text = await response.text()
+                        SystemLogger.debug(f"Raw API response ({self.service_name}): {response_text.lstrip()}")
+                        
                         if response.status == 200:
-                            SystemLogger.log_api_request(
-                                self.service_name,
-                                endpoint,
-                                response.status
-                            )
-                            return await response.json()
+                            try:
+                                # Explicitly try to parse JSON
+                                response_data = await response.json()
+                                SystemLogger.log_api_request(
+                                    self.service_name,
+                                    endpoint,
+                                    response.status
+                                )
+                                return response_data
+                            except json.JSONDecodeError as e:
+                                SystemLogger.error(f"JSON decode error: {str(e)}\nRaw response: {response_text}")
+                                raise
                         
-                        error_text = await response.text()
-                        SystemLogger.log_api_request(
-                            self.service_name,
-                            endpoint,
-                            response.status,
-                            error_text
-                        )
-                        
+                        # Handle specific error cases
                         if response.status == 429:  # Rate limit
-                            retry_after = int(response.headers.get('Retry-After', self.retry_delay))
+                            retry_after = int(response.headers.get('Retry-After', delay))
                             SystemLogger.log_api_retry(
                                 self.service_name,
                                 attempt + 1,
@@ -74,30 +89,47 @@ class BaseAPIClient(ABC):
                             await asyncio.sleep(retry_after)
                             continue
                             
-                        if response.status >= 500:  # Server error, retry
-                            delay = self.retry_delay * (attempt + 1)
+                        if response.status >= 500:  # Server error
                             SystemLogger.log_api_retry(
                                 self.service_name,
                                 attempt + 1,
                                 self.max_retries,
-                                f"Server error, waiting {delay}s"
+                                f"Server error {response.status}, waiting {delay}s"
                             )
                             await asyncio.sleep(delay)
                             continue
                             
-                        raise Exception(f"API error ({self.service_name}): Status {response.status}")
+                        # For other status codes, raise with details
+                        error_msg = f"API error ({self.service_name}): Status {response.status}\nResponse: {response_text}"
+                        raise Exception(error_msg)
                         
+            except asyncio.TimeoutError as e:
+                last_exception = e
+                SystemLogger.warning(
+                    f"Timeout on attempt {attempt + 1}/{self.max_retries} "
+                    f"({self.service_name}): {str(e)}"
+                )
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(delay)
+                continue
+                
             except Exception as e:
+                last_exception = e
                 SystemLogger.log_api_retry(
                     self.service_name,
                     attempt + 1,
                     self.max_retries,
-                    str(e)
+                    f"{type(e).__name__}: {str(e)}"
                 )
-                if attempt == self.max_retries - 1:
-                    raise
-                await asyncio.sleep(self.retry_delay * (attempt + 1))
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(delay)
+                continue
 
+        # If we get here, all retries failed
+        error_msg = f"All retries failed for {self.service_name}: {str(last_exception)}"
+        SystemLogger.error(error_msg)
+        raise Exception(error_msg)
+    
     @abstractmethod
     def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
         """Get headers specific to this provider."""

@@ -18,6 +18,7 @@ Future integrations:
 """
 
 from event_dispatcher import global_event_dispatcher, Event
+from ...internal_context import InternalContext
 import time
 
 class Mood:
@@ -41,7 +42,7 @@ class MoodSynthesizer:
     Synthesizes the internal's mood based on recent emotions, needs, and behavior.
     """
 
-    def __init__(self, internal_context):
+    def __init__(self, internal_context: InternalContext):
         """
         Initializes the MoodSynthesizer.
 
@@ -89,10 +90,10 @@ class MoodSynthesizer:
         global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
         global_event_dispatcher.add_listener("cognitive:mood:meditation", self.process_meditation)
 
-    def update_mood(self, event):
+    async def update_mood(self, event):
         # Retrieve current needs, emotions, and behavior from the context
         current_needs = self.context.get_current_needs()
-        recent_emotions = self.context.get_recent_emotions()
+        recent_emotions = await self.context.get_recent_emotions()
         current_behavior = self.context.get_current_behavior()
 
         # Calculate the new mood object based on current context
@@ -214,11 +215,9 @@ class MoodSynthesizer:
     def get_mood_state(self):
         """Gets the persistent state of the mood system."""
         return {
-            "mood": {
-                "valence": self.current_mood.valence,
-                "arousal": self.current_mood.arousal,
-                "name": self.current_mood_name
-            }
+            "valence": self.current_mood.valence,
+            "arousal": self.current_mood.arousal,
+            "name": self.current_mood_name
         }
 
     def set_mood_state(self, state):

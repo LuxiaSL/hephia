@@ -57,4 +57,5 @@ data/
 .coverage
 
 #admin tools
-analyze_database.py
+analyze_memory_db.py
+analyze_state_persistence.py

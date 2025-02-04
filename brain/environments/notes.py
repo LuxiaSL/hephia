@@ -2,7 +2,7 @@
 notes.py - Persistent note-taking environment for Hephia.
 
 Provides a structured note management system with tagging and search capabilities.
-Maintains SQLite database for storage while exposing a clean command interface.
+Maintains an SQLite database for storage while exposing a clean command interface.
 """
 
 import sqlite3
@@ -32,13 +32,13 @@ class NotesEnvironment(BaseEnvironment):
         super().__init__()  # Then initialize command structure
         
         self.help_text = """
-        The notes environment provides persistent storage for thoughts and observations.
+        The notes environment provides persistent external storage for thoughts and observations.
         
         Core Features:
         - Create and manage notes with content and tags
         - Search notes by content or tags
         - Track note context and metadata
-        - Organize with tagging system
+        - Organize with a tagging system
         
         Tips:
         - Use tags consistently for better organization
@@ -237,78 +237,78 @@ class NotesEnvironment(BaseEnvironment):
         # List tags command
         self.register_command(
             CommandDefinition(
-            name="tags",
-            description="List all available tags", 
-            parameters=[],  # No parameters needed
-            examples=[
-                'notes tags'  # Simply list tags
-            ],
-            failure_hints={
-                "DatabaseError": "Failed to retrieve tags. Try again."
-            },
-            related_commands=['list', 'search', 'tag-add', 'tag-remove']
+                name="tags",
+                description="List all available tags", 
+                parameters=[],  # No parameters needed
+                examples=[
+                    'notes tags'
+                ],
+                failure_hints={
+                    "DatabaseError": "Failed to retrieve tags. Try again."
+                },
+                related_commands=['list', 'search', 'tag-add', 'tag-remove']
             )
         )
 
         # Add tags command
         self.register_command(
             CommandDefinition(
-            name="tag-add",
-            description="Add tags to a note",
-            parameters=[
-                Parameter(
-                name="note_id", 
-                description="Note ID to add tags to",
-                required=True
-                ),
-                Parameter(
-                name="tags",
-                description="Space-separated tags to add",
-                required=True,
-                examples=["important", "todo project"]
-                )
-            ],
-            examples=[
-                'notes tag-add abc123 important',
-                'notes tag-add def456 project idea'
-            ],
-            failure_hints={
-                "NotFound": "Note not found. Check the ID.",
-                "ValueError": "Invalid tags format. Use space-separated tags.",
-                "DatabaseError": "Failed to add tags. Try again."
-            },
-            related_commands=['tags', 'tag-remove']
+                name="tag-add",
+                description="Add tags to a note",
+                parameters=[
+                    Parameter(
+                        name="note_id", 
+                        description="Note ID to add tags to",
+                        required=True
+                    ),
+                    Parameter(
+                        name="tags",
+                        description="Space-separated tags to add",
+                        required=True,
+                        examples=["important", "todo project"]
+                    )
+                ],
+                examples=[
+                    'notes tag-add abc123 important',
+                    'notes tag-add def456 project,idea'
+                ],
+                failure_hints={
+                    "NotFound": "Note not found. Check the ID.",
+                    "ValueError": "Invalid tags format. Use space-separated tags.",
+                    "DatabaseError": "Failed to add tags. Try again."
+                },
+                related_commands=['tags', 'tag-remove']
             )
         )
 
         # Remove tags command  
         self.register_command(
             CommandDefinition(
-            name="tag-remove",
-            description="Remove tags from a note",
-            parameters=[
-                Parameter(
-                name="note_id",
-                description="Note ID to remove tags from",
-                required=True
-                ),
-                Parameter(
-                name="tags", 
-                description="Space-separated tags to remove",
-                required=True,
-                examples=["important", "todo project"]
-                )
-            ],
-            examples=[
-                'notes tag-remove abc123 important',
-                'notes tag-remove def456 old-tag'
-            ],
-            failure_hints={
-                "NotFound": "Note not found. Check the ID.",
-                "ValueError": "Invalid tags format. Use space-separated tags.",
-                "DatabaseError": "Failed to remove tags. Try again." 
-            },
-            related_commands=['tags', 'tag-add']
+                name="tag-remove",
+                description="Remove tags from a note",
+                parameters=[
+                    Parameter(
+                        name="note_id",
+                        description="Note ID to remove tags from",
+                        required=True
+                    ),
+                    Parameter(
+                        name="tags", 
+                        description="Space-separated tags to remove",
+                        required=True,
+                        examples=["important", "todo project"]
+                    )
+                ],
+                examples=[
+                    'notes tag-remove abc123 important',
+                    'notes tag-remove def456 old-tag'
+                ],
+                failure_hints={
+                    "NotFound": "Note not found. Check the ID.",
+                    "ValueError": "Invalid tags format. Use space-separated tags.",
+                    "DatabaseError": "Failed to remove tags. Try again." 
+                },
+                related_commands=['tags', 'tag-add']
             )
         )
     
@@ -319,7 +319,7 @@ class NotesEnvironment(BaseEnvironment):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Create tables
+        # Create tables. Note the addition of a 'tags' column to the notes table.
         cursor.executescript("""
             CREATE TABLE IF NOT EXISTS notes (
                 id TEXT PRIMARY KEY,
@@ -327,7 +327,8 @@ class NotesEnvironment(BaseEnvironment):
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 context TEXT,
-                sentiment TEXT
+                sentiment TEXT,
+                tags TEXT  -- Denormalized tags field
             );
 
             CREATE TABLE IF NOT EXISTS tags (
@@ -343,32 +344,33 @@ class NotesEnvironment(BaseEnvironment):
                 PRIMARY KEY (note_id, tag_id)
             );
 
+            -- Note: Removed content=notes from the FTS table.
             CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
                 content, 
                 context,
                 tags,
-                sentiment,
-                content=notes
+                sentiment
             );
         """)
         
-        # Create triggers for FTS updates
+        # Create triggers for full-text search (FTS) updates.
         cursor.executescript("""
             CREATE TRIGGER IF NOT EXISTS notes_after_insert AFTER INSERT ON notes BEGIN
-                INSERT INTO notes_fts(content, context, sentiment)
-                VALUES (NEW.content, NEW.context, NEW.sentiment);
+                INSERT INTO notes_fts(rowid, content, context, tags, sentiment)
+                VALUES (new.rowid, new.content, new.context, new.tags, new.sentiment);
             END;
 
             CREATE TRIGGER IF NOT EXISTS notes_after_update AFTER UPDATE ON notes BEGIN
                 UPDATE notes_fts 
-                SET content = NEW.content, 
-                    context = NEW.context,
-                    sentiment = NEW.sentiment
-                WHERE rowid = NEW.rowid;
+                SET content = new.content, 
+                    context = new.context,
+                    tags = new.tags,
+                    sentiment = new.sentiment
+                WHERE rowid = new.rowid;
             END;
 
             CREATE TRIGGER IF NOT EXISTS notes_after_delete AFTER DELETE ON notes BEGIN
-                DELETE FROM notes_fts WHERE rowid = OLD.rowid;
+                DELETE FROM notes_fts WHERE rowid = old.rowid;
             END;
         """)
         
@@ -451,44 +453,45 @@ class NotesEnvironment(BaseEnvironment):
         """
         Create a new note with context awareness.
         
-        The note creation ripples through the system:
-        - Stores the current cognitive context
-        - Updates tag relationships
-        - Suggests natural next actions
+        - Captures the current cognitive context.
+        - Updates tag relationships and stores a denormalized tag string.
+        - Notifies the system and suggests next actions.
         """
         note_id = str(uuid4())
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # Capture current cognitive state
+            # Capture current cognitive state.
             note_context = {
                 'mood': context.get('internal_state', {}).get('mood', {}),
                 'needs': context.get('internal_state', {}).get('needs', {}),
                 'timestamp': datetime.now().isoformat()
             }
             
-            # Store the note
+            # Prepare tags.
+            tag_list = []
+            tags_str = ""
+            if tags:
+                tag_list = [t.strip() for t in tags.split(',') if t.strip()]
+                tags_str = ",".join(tag_list)
+            
+            # Store the note including the denormalized tags field.
             cursor.execute(
-                """INSERT INTO notes (id, content, context) 
-                   VALUES (?, ?, ?)""",
-                (note_id, content.strip(), json.dumps(note_context))
+                """INSERT INTO notes (id, content, context, tags) 
+                   VALUES (?, ?, ?, ?)""",
+                (note_id, content.strip(), json.dumps(note_context), tags_str)
             )
             
-            # Handle tags if provided
-            tag_list = []
-            if tags:
-                tag_list = [t.strip() for t in tags.split(',')]
+            # Handle tag associations.
+            if tag_list:
                 for tag in tag_list:
-                    # Insert or get tag
                     cursor.execute(
                         "INSERT OR IGNORE INTO tags (name) VALUES (?)",
                         (tag,)
                     )
                     cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))
                     tag_id = cursor.fetchone()[0]
-                    
-                    # Link to note
                     cursor.execute(
                         "INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)",
                         (note_id, tag_id)
@@ -496,7 +499,7 @@ class NotesEnvironment(BaseEnvironment):
             
             conn.commit()
             
-            # Notify system
+            # Notify system.
             global_event_dispatcher.dispatch_event(
                 Event("notes:created", {
                     "note_id": note_id,
@@ -506,17 +509,15 @@ class NotesEnvironment(BaseEnvironment):
                 })
             )
             
-            # Generate contextual next steps
+            # Generate suggested next commands.
             suggested_next = [
-                f"notes read {note_id}",  # View the note
-                "notes list"  # See in context
+                f"notes read {note_id}",
+                "notes list"
             ]
-            
-            # Add tag-based suggestions
-            if tags:
-                suggested_next.append(f"notes list --tag={tag_list[0]}")  # View similar notes
+            if tag_list:
+                suggested_next.append(f"notes list --tag={tag_list[0]}")
             else:
-                suggested_next.append(f'notes tag-add {note_id} <tag>')  # Suggest tagging
+                suggested_next.append(f'notes tag-add {note_id} <tag>')
             
             return CommandResult(
                 success=True,
@@ -548,25 +549,20 @@ class NotesEnvironment(BaseEnvironment):
                     "notes list"
                 ]
             )
-
         finally:
             conn.close()
 
     async def _read_note(self, note_id: str) -> CommandResult:
         """
         Read a specific note with its full context.
-        
-        Reading flows naturally into:
-        - Updating the note
-        - Exploring related notes
-        - Managing tags
+        Displays the note’s denormalized tags and parsed context.
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
             cursor.execute("""
-                SELECT n.*, GROUP_CONCAT(t.name) as tags
+                SELECT n.*, GROUP_CONCAT(t.name) as tag_list
                 FROM notes n
                 LEFT JOIN note_tags nt ON n.id = nt.note_id
                 LEFT JOIN tags t ON nt.tag_id = t.id
@@ -594,50 +590,47 @@ class NotesEnvironment(BaseEnvironment):
                     )
                 )
             
-            # Parse stored context
-            context = json.loads(note[4]) if note[4] else {}
+            # Parse stored context.
+            context_data = json.loads(note[4]) if note[4] else {}
             
-            # Format note display
-            content = [
+            # Format the note display.
+            content_lines = [
                 f"Note {note[0]}:",
                 f"Created: {note[2]}",
                 f"Updated: {note[3]}",
-                f"Tags: {note[-1] or 'none'}",
+                f"Tags: {note[6] or 'none'}",
                 "",
                 "Content:",
                 note[1]
             ]
             
-            if context.get('mood'):
-                content.extend([
+            if context_data.get('mood'):
+                content_lines.extend([
                     "",
                     "Created while:",
-                    f"Mood: {context['mood'].get('name', 'unknown')}",
-                    f"Needs: {', '.join(f'{k}: {v}' for k, v in context.get('needs', {}).items())}"
+                    f"Mood: {context_data['mood'].get('name', 'unknown')}",
+                    f"Needs: {', '.join(f'{k}: {v}' for k, v in context_data.get('needs', {}).items())}"
                 ])
 
-            # Generate contextual suggestions
             suggested = [
-                f"notes update {note_id} \"New content\"",  # Update
-                f"notes tag-add {note_id} <tag>"  # Add tags
+                f"notes update {note_id} \"New content\"",
+                f"notes tag-add {note_id} <tag>"
             ]
-            
-            # Add tag-based suggestions
-            if note[-1]:  # Has tags
-                tags = note[-1].split(',')
-                suggested.append(f"notes list --tag={tags[0]}")  # View similar notes
+            if note[6]:
+                tags = note[6].split(',')
+                suggested.append(f"notes list --tag={tags[0]}")
             
             return CommandResult(
                 success=True,
-                message="\n".join(content),
+                message="\n".join(content_lines),
                 suggested_commands=suggested,
                 data={
                     "note_id": note_id,
                     "content": note[1],
                     "created": note[2],
                     "updated": note[3],
-                    "tags": note[-1].split(',') if note[-1] else [],
-                    "context": context
+                    "tags": note[6].split(',') if note[6] else [],
+                    "context": context_data
                 }
             )
         
@@ -664,61 +657,60 @@ class NotesEnvironment(BaseEnvironment):
                     'notes create "New note"'
                 ]
             )
-            
         finally:
             conn.close()
 
-    
     async def _list_notes(self, tag: Optional[str] = None, limit: int = 10) -> CommandResult:
         """List notes with optional tag filtering."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            query = """
-                SELECT n.*, GROUP_CONCAT(t.name) as tags
+            base_query = """
+                SELECT n.*, GROUP_CONCAT(t.name) as tag_list
                 FROM notes n
                 LEFT JOIN note_tags nt ON n.id = nt.note_id
                 LEFT JOIN tags t ON nt.tag_id = t.id
             """
-            
-            # Handle tag filtering
             if tag:
-                query += " WHERE t.name = ?"
-                cursor.execute(query + f" GROUP BY n.id ORDER BY n.created_at DESC LIMIT {limit}", (tag,))
+                base_query += " WHERE t.name = ?"
+                params = (tag, limit)
             else:
-                cursor.execute(query + f" GROUP BY n.id ORDER BY n.created_at DESC LIMIT {limit}")
+                params = (limit,)
+                
+            full_query = base_query + " GROUP BY n.id ORDER BY n.created_at DESC LIMIT ?"
+            cursor.execute(full_query, params)
             
             notes = cursor.fetchall()
             
             if not notes:
                 return CommandResult(
-                success=True,  # Still successful, just empty!
-                message="No notes found.",
-                suggested_commands=[
-                    'notes create "My first note" --tags=example',
-                    'notes create "Getting started"'
-                ],
-                data={"count": 0}  # Include metadata
-            )
+                    success=True,
+                    message="No notes found.",
+                    suggested_commands=[
+                        'notes create "My first note" --tags=example',
+                        'notes create "Getting started"'
+                    ],
+                    data={"count": 0}
+                )
             
-            # Format notes list
-            content = ["Recent Notes:\n"]
+            content_lines = ["Recent Notes:\n"]
             for note in notes:
-                content.append(
+                # note[6] is the denormalized tags field
+                content_lines.append(
                     f"ID: {note[0]}\n"
                     f"Created: {note[2]}\n"
                     f"Content: {note[1][:75]}...\n"
-                    f"Tags: {note[-1] or 'none'}\n"
+                    f"Tags: {note[6] or 'none'}\n"
                 )
 
             return CommandResult(
                 success=True,
-                message="\n".join(content),
+                message="\n".join(content_lines),
                 suggested_commands=[
                     "notes read <note_id>",
                     "notes search <query>",
-                    f"notes list --limit={limit + 5}"  # Suggest viewing more
+                    f"notes list --limit={limit + 5}"
                 ],
                 data={
                     "count": len(notes),
@@ -726,7 +718,7 @@ class NotesEnvironment(BaseEnvironment):
                     "filter_tag": tag
                 }
             )
-
+        
         except Exception as e:
             return CommandResult(
                 success=False,
@@ -734,15 +726,15 @@ class NotesEnvironment(BaseEnvironment):
                 error=CommandValidationError(
                     message=f"Failed to list notes: {str(e)}",
                     suggested_fixes=[
-                    "Check database connectivity",
-                    "Try with a smaller limit value",
-                    "Verify tag name if filtering by tag"
+                        "Check database connectivity",
+                        "Try with a smaller limit value",
+                        "Verify tag name if filtering by tag"
                     ],
                     related_commands=["notes create", "notes search", "notes tags"],
                     examples=[
-                    "notes list --limit=5",
-                    "notes list --tag=important",
-                    "notes list"
+                        "notes list --limit=5",
+                        "notes list --tag=important",
+                        "notes list"
                     ]
                 ),
                 suggested_commands=[
@@ -751,7 +743,6 @@ class NotesEnvironment(BaseEnvironment):
                     "notes search <query>"
                 ]
             )
-            
         finally:
             conn.close()
     
@@ -767,11 +758,8 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
-            # First verify note exists
-            cursor.execute("""
-                SELECT EXISTS(SELECT 1 FROM notes WHERE id = ?)
-            """, (note_id,))
-            
+            # Verify the note exists.
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM notes WHERE id = ?)", (note_id,))
             if not cursor.fetchone()[0]:
                 return CommandResult(
                     success=False,
@@ -791,60 +779,52 @@ class NotesEnvironment(BaseEnvironment):
                     )
                 )
 
-            # Update note content and context
             new_context = {
                 'mood': context.get('internal_state', {}).get('mood', {}),
                 'needs': context.get('internal_state', {}).get('needs', {}),
                 'timestamp': datetime.now().isoformat()
             }
             
+            # If new tags are provided, process them; otherwise keep the existing denormalized tags.
+            tags_str = None
+            if tags is not None:
+                tag_list = [t.strip() for t in tags.split(',') if t.strip()]
+                tags_str = ",".join(tag_list)
+            else:
+                cursor.execute("SELECT tags FROM notes WHERE id = ?", (note_id,))
+                tags_str = cursor.fetchone()[0]
+
             cursor.execute("""
                 UPDATE notes 
                 SET content = ?, 
                     updated_at = CURRENT_TIMESTAMP,
-                    context = ?
+                    context = ?,
+                    tags = ?
                 WHERE id = ?
-            """, (content.strip(), json.dumps(new_context), note_id))
+            """, (content.strip(), json.dumps(new_context), tags_str, note_id))
 
-            # Handle tags if provided
+            # Update tag associations if new tags are provided.
             if tags is not None:
-                # Remove existing tags
                 cursor.execute("DELETE FROM note_tags WHERE note_id = ?", (note_id,))
-                
-                # Add new tags
-                tag_list = [t.strip() for t in tags.split(',') if t.strip()]
                 for tag in tag_list:
-                    # Insert or get tag
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO tags (name) VALUES (?)",
-                        (tag,)
-                    )
-                    cursor.execute(
-                        "SELECT id FROM tags WHERE name = ?",
-                        (tag,)
-                    )
+                    cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
+                    cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))
                     tag_id = cursor.fetchone()[0]
-                    
-                    # Link tag to note
-                    cursor.execute("""
-                        INSERT INTO note_tags (note_id, tag_id) 
-                        VALUES (?, ?)
-                    """, (note_id, tag_id))
+                    cursor.execute("INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)", (note_id, tag_id))
 
             conn.commit()
 
-            # Get updated tags using LEFT JOIN structure
+            # Retrieve the updated denormalized tags.
             cursor.execute("""
                 SELECT GROUP_CONCAT(t.name)
-                FROM notes n
-                LEFT JOIN note_tags nt ON n.id = nt.note_id
-                LEFT JOIN tags t ON nt.tag_id = t.id
-                WHERE n.id = ?
-                GROUP BY n.id
+                FROM tags t
+                WHERE t.id IN (
+                    SELECT tag_id FROM note_tags WHERE note_id = ?
+                )
             """, (note_id,))
-            
-            current_tags = cursor.fetchone()
-            tag_list = current_tags[0].split(',') if current_tags and current_tags[0] else []
+            current_tags_row = cursor.fetchone()
+            current_tags = current_tags_row[0] if current_tags_row and current_tags_row[0] else ""
+            tag_list = current_tags.split(',') if current_tags else []
 
             return CommandResult(
                 success=True,
@@ -885,7 +865,6 @@ class NotesEnvironment(BaseEnvironment):
                     "notes tags"
                 ]
             )
-
         finally:
             conn.close()
     
@@ -893,16 +872,15 @@ class NotesEnvironment(BaseEnvironment):
         """
         Delete a note and its associated data.
         
-        Deletion ripples through:
+        Cascades removal from:
         - Note content and metadata
         - Tag relationships 
-        - Search index
+        - Full-text search index via triggers
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # First check if note exists
             cursor.execute("SELECT 1 FROM notes WHERE id = ?", (note_id.strip(),))
             if not cursor.fetchone():
                 return CommandResult(
@@ -923,7 +901,6 @@ class NotesEnvironment(BaseEnvironment):
                     )
                 )
 
-            # Delete note - tags are handled by foreign key constraints
             cursor.execute("DELETE FROM notes WHERE id = ?", (note_id.strip(),))
             conn.commit()
             
@@ -931,9 +908,9 @@ class NotesEnvironment(BaseEnvironment):
                 success=True,
                 message=f"Successfully deleted note {note_id}",
                 suggested_commands=[
-                    "notes list",  # View remaining notes
-                    "notes create \"New note\"",  # Create new note
-                    "notes tags"  # Review available tags
+                    "notes list",
+                    "notes create \"New note\"",
+                    "notes tags"
                 ],
                 data={
                     "deleted_id": note_id
@@ -958,7 +935,6 @@ class NotesEnvironment(BaseEnvironment):
                     "notes create \"New note\""
                 ]
             )
-
         finally:
             conn.close()
     
@@ -968,28 +944,29 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
+            # Use BM25 ranking for FTS5.
             cursor.execute("""
-                SELECT notes.*, GROUP_CONCAT(t.name) as tags
+                SELECT notes.*, GROUP_CONCAT(t.name) as tag_list
                 FROM notes_fts
                 JOIN notes ON notes_fts.rowid = notes.rowid
                 LEFT JOIN note_tags nt ON notes.id = nt.note_id
                 LEFT JOIN tags t ON nt.tag_id = t.id
                 WHERE notes_fts MATCH ?
                 GROUP BY notes.id
-                ORDER BY rank
-                LIMIT 5
+                ORDER BY bm25(notes_fts)
+                LIMIT ?
             """, (query, limit))
             
             notes = cursor.fetchall()
             
             if not notes:
                 return CommandResult(
-                    success=True,  # Still a successful search, just no results
+                    success=True,
                     message=f"No notes found matching '{query}'",
                     suggested_commands=[
-                        "notes list",  # View all notes instead
-                        f'notes search "{query}" --limit={limit + 5}',  # Try more results
-                        f'notes create "New note about {query}"'  # Create new note
+                        "notes list",
+                        f'notes search "{query}" --limit={limit + 5}',
+                        f'notes create "Note about {query}"'
                     ],
                     data={
                         "query": query,
@@ -997,18 +974,17 @@ class NotesEnvironment(BaseEnvironment):
                     }
                 )
             
-            # Format search results
-            content = [f"Search results for '{query}':\n"]
+            content_lines = [f"Search results for '{query}':\n"]
             for note in notes:
-                content.append(
+                content_lines.append(
                     f"ID: {note[0]}\n"
                     f"Content: {note[1][:50]}...\n"
-                    f"Tags: {note[-1] or 'none'}\n"
+                    f"Tags: {note[6] or 'none'}\n"
                 )
 
             return CommandResult(
                 success=True,
-                message="\n".join(content),
+                message="\n".join(content_lines),
                 suggested_commands=[
                     "notes read <note_id>",
                     f'notes search "{query}" --limit={limit + 5}',
@@ -1053,6 +1029,7 @@ class NotesEnvironment(BaseEnvironment):
     ) -> CommandResult:
         """
         Manage tags for a note.
+        Adds or removes tags, and then reassembles the denormalized tags field.
         """
         if action not in ['add', 'remove']:
             return CommandResult(
@@ -1095,7 +1072,6 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
-            # Verify note exists
             cursor.execute("SELECT 1 FROM notes WHERE id = ?", (note_id,))
             if not cursor.fetchone():
                 return CommandResult(
@@ -1116,22 +1092,12 @@ class NotesEnvironment(BaseEnvironment):
                     )
                 )
 
-
             if action == 'add':
                 for tag in tags:
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO tags (name) VALUES (?)",
-                        (tag,)
-                    )
-                    cursor.execute(
-                        "SELECT id FROM tags WHERE name = ?",
-                        (tag,)
-                    )
+                    cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
+                    cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))
                     tag_id = cursor.fetchone()[0]
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?, ?)",
-                        (note_id, tag_id)
-                    )
+                    cursor.execute("INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?, ?)", (note_id, tag_id))
             else:  # remove
                 for tag in tags:
                     cursor.execute("""
@@ -1141,15 +1107,28 @@ class NotesEnvironment(BaseEnvironment):
                         )
                     """, (note_id, tag))
             
+            # Reassemble the denormalized tags field.
+            cursor.execute("""
+                SELECT GROUP_CONCAT(name)
+                FROM tags
+                WHERE id IN (
+                    SELECT tag_id FROM note_tags WHERE note_id = ?
+                )
+            """, (note_id,))
+            new_tags_row = cursor.fetchone()
+            new_tags = new_tags_row[0] if new_tags_row and new_tags_row[0] else ""
+            
+            cursor.execute("UPDATE notes SET tags = ? WHERE id = ?", (new_tags, note_id))
+            
             conn.commit()
             
             return CommandResult(
                 success=True,
                 message=f"{action.capitalize()}ed tags {', '.join(tags)} {'to' if action == 'add' else 'from'} note {note_id}",
                 suggested_commands=[
-                    f"notes read {note_id}",  # View updated note
-                    "notes tags",  # View all tags
-                    f"notes list --tag={tags[0]}"  # View notes with this tag
+                    f"notes read {note_id}",
+                    "notes tags",
+                    f"notes list --tag={tags[0]}"
                 ],
                 data={
                     "note_id": note_id,
@@ -1179,7 +1158,6 @@ class NotesEnvironment(BaseEnvironment):
                     "notes tags"
                 ]
             )
-            
         finally:
             conn.close()
 
@@ -1210,16 +1188,15 @@ class NotesEnvironment(BaseEnvironment):
                     data={"count": 0}
                 )
             
-            # Format tag list with counts
-            content = ["Available tags:\n"]
+            content_lines = ["Available tags:\n"]
             for tag, count in tags:
-                content.append(f"{tag} ({count} notes)")
+                content_lines.append(f"{tag} ({count} notes)")
 
             return CommandResult(
                 success=True,
-                message="\n".join(content),
+                message="\n".join(content_lines),
                 suggested_commands=[
-                    "notes list --tag=" + tags[0][0],  # List notes with most used tag
+                    "notes list --tag=" + tags[0][0],
                     'notes create "New note" --tags=' + tags[0][0],
                     "notes list"
                 ],
@@ -1247,6 +1224,5 @@ class NotesEnvironment(BaseEnvironment):
                     'notes create "New note"'
                 ]
             )
-        
         finally:
             conn.close()
