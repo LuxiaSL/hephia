@@ -128,6 +128,10 @@ class ExoProcessor:
             ))
         )
         global_event_dispatcher.add_listener(
+            "discord:notification",
+            lambda event: asyncio.create_task(self.handle_discord_notification(event.data))
+        )
+        global_event_dispatcher.add_listener(
             "discord:memory:request_formation",
             lambda event: asyncio.create_task(self.handle_discord_memory_request(event))
         )
