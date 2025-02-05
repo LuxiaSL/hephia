@@ -33,6 +33,8 @@ Install NLTK dependencies:
 python
 >>> import nltk
 >>> nltk.download('punkt_tab')
+>>> nltk.download('maxent_ne_chunker')
+>>> nltk.download('words')
 >>> exit()
 ```
 

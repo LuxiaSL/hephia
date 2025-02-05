@@ -14,11 +14,65 @@ Key capabilities:
 from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
 import numpy as np
-from nltk import pos_tag, word_tokenize, ne_chunk
-from nltk.tree import Tree
 
+# Attempt to import NLTK and its components; if unavailable, define fallbacks.
+try:
+    import nltk
+    from nltk import pos_tag, word_tokenize, ne_chunk
+    from nltk.tree import Tree
+except ImportError as e:
+    # Log a warning (you might want to integrate with your logger here)
+    print("Warning: NLTK not available, using basic fallbacks.")
+    nltk = None
+
+    def word_tokenize(text: str) -> List[str]:
+        # Fallback: very naive whitespace tokenization.
+        return text.split()
+
+    def pos_tag(tokens: List[str]) -> List[tuple]:
+        # Fallback: assign a default tag.
+        return [(token, "NN") for token in tokens]
+
+    def ne_chunk(pos_tags: List[tuple]) -> Any:
+        # Fallback: return an empty list indicating no named entities.
+        return []
+
+    Tree = list  # Dummy alias
+
+# Even if NLTK is importable, ensure required resources are available.
+def safe_word_tokenize(text: str) -> List[str]:
+    try:
+        tokens = word_tokenize(text)
+        return tokens
+    except LookupError:
+        try:
+            if nltk is not None:
+                nltk.download("punkt")
+                return word_tokenize(text)
+        except Exception as e:
+            print(f"Error downloading 'punkt': {e}")
+        # Fallback to basic split.
+        return text.split()
+    except Exception as e:
+        print(f"Unexpected error in word_tokenize: {e}")
+        return text.split()
+
+def safe_pos_tag(tokens: List[str]) -> List[tuple]:
+    try:
+        return pos_tag(tokens)
+    except Exception as e:
+        print(f"Error in pos_tag, using fallback: {e}")
+        return [(token, "NN") for token in tokens]
+
+def safe_ne_chunk(pos_tags: List[tuple]) -> Any:
+    try:
+        return ne_chunk(pos_tags)
+    except Exception as e:
+        print(f"Error in ne_chunk, returning empty list: {e}")
+        return []
+
+# Import internal modules
 from internal.modules.memory.embedding_manager import EmbeddingManager
-
 from loggers.loggers import MemoryLogger
 
 class SemanticAnalysisError(Exception):
@@ -170,12 +224,12 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             if not text or len(text.strip()) == 0:
                 return 0.0
                 
-            # Basic text preprocessing
+            # Basic text preprocessing: split into sentences on period.
             sentences = [s.strip() for s in text.split('.') if s.strip()]
             if not sentences:
                 return 0.0
                 
-            # Calculate semantic cohesion using embeddings
+            # Calculate semantic cohesion using embeddings (if more than one sentence)
             if len(sentences) > 1:
                 embeddings = [
                     self.embedding_manager.encode(s, normalize_embeddings=True)
@@ -193,32 +247,36 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             else:
                 semantic_cohesion = 0.5
                 
-            # Lexical diversity analysis
-            tokens = word_tokenize(text.lower())
+            # Lexical diversity analysis using safe tokenization.
+            tokens = safe_word_tokenize(text.lower())
             if not tokens:
                 return 0.0
                 
             unique_ratio = len(set(tokens)) / len(tokens)
             
-            # Syntactic complexity analysis
-            pos_tags = pos_tag(tokens)
+            # Syntactic complexity analysis using safe POS tagging.
+            pos_tags = safe_pos_tag(tokens)
             complex_tags = {'IN', 'WDT', 'WP', 'WRB'}
             syntactic_complexity = len(
                 [t for _, t in pos_tags if t in complex_tags]
             ) / len(pos_tags) if pos_tags else 0
             
-            # Named entity density
+            # Named entity density analysis using safe ne_chunk.
             try:
-                ne_tree = ne_chunk(pos_tags)
-                named_entities = len([
-                    subtree for subtree in ne_tree 
-                    if isinstance(subtree, Tree)
-                ])
+                ne_tree = safe_ne_chunk(pos_tags)
+                # Count named entities if ne_tree is a Tree structure.
+                if isinstance(ne_tree, Tree):
+                    named_entities = len([
+                        subtree for subtree in ne_tree 
+                        if isinstance(subtree, Tree)
+                    ])
+                else:
+                    named_entities = 0
                 ne_density = named_entities / len(tokens)
-            except (ValueError, AttributeError):
+            except Exception:
                 ne_density = 0
             
-            # Content word ratio
+            # Content word ratio (using a set of content tags)
             content_tags = {
                 'NN', 'NNS', 'NNP', 'NNPS', 
                 'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ',
@@ -254,7 +312,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
                 words = text.split()
                 meaningful_words = [w for w in words if w.isalpha()]
                 return len(set(meaningful_words)) / len(meaningful_words) if meaningful_words else 0.0
-            except (ValueError, AttributeError):
+            except Exception:
                 return 0.0
                 
     def _analyze_cluster_semantics(
