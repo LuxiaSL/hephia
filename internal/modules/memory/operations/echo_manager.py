@@ -15,8 +15,7 @@ Key capabilities:
 """
 
 import time
-import math
-from typing import Optional, Dict, Any, List, Tuple, Union
+from typing import Optional, Dict, Any, List, Tuple
 
 from event_dispatcher import Event, global_event_dispatcher
 from loggers.loggers import MemoryLogger

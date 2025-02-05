@@ -14,7 +14,7 @@ logger = logging.getLogger("unix_bridge_aiohttp")
 
 # Path to the Unix socket
 SOCKET_PATH = "/path/to/socket"
-UNIX_ENDPOINT_ROOT = f"http://localhost:6006"  
+UNIX_ENDPOINT_ROOT = "http://localhost:6006"  
 
 app = FastAPI()
 

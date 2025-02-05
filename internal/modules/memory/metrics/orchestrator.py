@@ -1,5 +1,5 @@
 """
-\metrics\orchestrator.py
+\\metrics\\orchestrator.py
 
 Orchestrates the complete metrics calculation process for memory retrieval.
 Coordinates semantic, emotional, state, temporal, and strength calculations.
@@ -15,14 +15,14 @@ Key capabilities:
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 from enum import Enum, auto
-import time
 
 from .semantic import SemanticMetricsCalculator
-from .emotional import EmotionalMetricsCalculator, EmotionalStateSignature
+from .emotional import EmotionalMetricsCalculator
 from .state import StateMetricsCalculator
 from .temporal import TemporalMetricsCalculator
 from .strength import StrengthMetricsCalculator
 from ..embedding_manager import EmbeddingManager
+from ..state.signatures import EmotionalStateSignature
 
 from loggers.loggers import MemoryLogger
 

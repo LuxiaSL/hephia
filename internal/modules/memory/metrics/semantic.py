@@ -1,5 +1,5 @@
 """
-\metrics\semantic.py
+\\metrics\\semantic.py
 
 Implements semantic analysis calculations for cognitive memory retrieval.
 Handles text similarity, embedding comparison, and semantic density analysis.
@@ -11,7 +11,7 @@ Key capabilities:
 - Support for future cluster analysis
 """
 
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
 import numpy as np
 from nltk import pos_tag, word_tokenize, ne_chunk
@@ -212,10 +212,10 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
                 ne_tree = ne_chunk(pos_tags)
                 named_entities = len([
                     subtree for subtree in ne_tree 
-                    if type(subtree) == Tree
+                    if isinstance(subtree, Tree)
                 ])
                 ne_density = named_entities / len(tokens)
-            except:
+            except (ValueError, AttributeError):
                 ne_density = 0
             
             # Content word ratio
@@ -254,7 +254,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
                 words = text.split()
                 meaningful_words = [w for w in words if w.isalpha()]
                 return len(set(meaningful_words)) / len(meaningful_words) if meaningful_words else 0.0
-            except:
+            except (ValueError, AttributeError):
                 return 0.0
                 
     def _analyze_cluster_semantics(

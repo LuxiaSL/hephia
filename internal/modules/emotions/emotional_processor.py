@@ -96,10 +96,12 @@ class EmotionalStimulus:
             self._decay_vector(vector, decay_rate, min_change)
 
         # Remove fully decayed vectors
-        self.active_vectors = [v for v in self.active_vectors
-                               if abs(v.valence) >= min_change
-                               or abs(v.arousal) >= min_change
-                               or v.intensity >= min_change]
+        self.active_vectors = [
+            v for v in self.active_vectors
+            if (abs(v.valence) >= min_change or
+                abs(v.arousal) >= min_change or
+                v.intensity >= min_change)
+        ]
 
         self._recalculate_state()
 
@@ -426,26 +428,24 @@ class EmotionalProcessor:
                
             self.current_stimulus.add_vector(influenced_vector)
 
-        
         # apply memory content influence
         # to come: query across memory nodes for average network emotional resonance to influence vector by
-
         # just as well, the direct cognitive influence via mediate_emotion and one_turn call. could be done via an event which then gets listened to here and files back in after.
 
     def _calculate_relative_influence(self, base_vector, influence_valence, influence_arousal, influence_type):
         """
         Calculates how much an influence affects the current emotional state.
-       
+
         Args:
            base_vector (EmotionalVector): Current emotional vector
            influence_valence (float): Raw valence influence
            influence_arousal (float): Raw arousal influence
            influence_type (str): Type of influence ('mood' or 'behavior')
-       
+
         Returns:
            tuple: (relative_valence, relative_arousal)
         """
-       # Base factors for different influence types
+        # Base factors for different influence types
         influence_factors = {
            'mood': 0.5,    # Mood has moderate influence
            'behavior': 0.3  # Behavior has lesser influence

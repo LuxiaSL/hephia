@@ -4,10 +4,9 @@ Handles logger setup and configuration.
 """
 
 import logging
-import sys
 from pathlib import Path
 from datetime import datetime
-from .formatters import InternalFormatter, ExoLoopFormatter, ConsoleFormatter, MemoryFormatter, EventFormatter
+from .formatters import InternalFormatter, ExoLoopFormatter, MemoryFormatter, EventFormatter
 
 class LogManager:
     """Enhanced log management with multiple output streams."""

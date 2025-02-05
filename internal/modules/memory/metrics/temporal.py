@@ -1,5 +1,5 @@
 """
-\metrics\temporal.py
+\\metrics\\temporal.py
 
 Implements temporal analysis for memory retrieval and pattern detection.
 Handles decay curves, echo timing, and access patterns.
@@ -11,7 +11,7 @@ Key capabilities:
 - Support for temporal pattern detection
 """
 
-from typing import Dict, Optional, Any, List, Union
+from typing import Dict, Optional, List
 import math
 import time
 

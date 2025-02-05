@@ -7,7 +7,7 @@ CognitiveDBManager or CognitiveMemoryNetwork to persist changes.
 """
 
 import time
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, List
 
 from .base import ISynthesisHandler
 

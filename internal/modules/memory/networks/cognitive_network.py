@@ -9,7 +9,7 @@ and a CognitiveConnectionManager for connection management.
 
 from __future__ import annotations
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Any
 import asyncio
 
 from loggers.loggers import MemoryLogger

@@ -99,7 +99,6 @@ class TimerCoordinator:
             task_name: Name of task to remove
         """
         if task_name in self.tasks:
-            task = self.tasks.pop(task_name)
             
             # Remove from task groups
             for group in self.task_groups.values():

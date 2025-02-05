@@ -6,7 +6,6 @@ import aiohttp
 import discord
 from aiohttp import web
 from dotenv import load_dotenv
-from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 ###############################################################################

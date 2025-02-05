@@ -1,4 +1,3 @@
-import json
 import time
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -185,7 +184,7 @@ class CognitiveDBManager:
         Uses transaction context for atomic operations.
         """
         try:
-            async with self.db.transaction() as conn:
+            async with self.db.transaction():
                 # Update the nodes themselves
                 await self.update_node(source)
                 await self.update_node(target)
@@ -253,7 +252,7 @@ class SynthesisRelationManager:
 
     async def transfer_relations(self, from_id: int, to_id: int, modifier: float = 0.9) -> None:
         """Transfer synthesis relations during merges."""
-        async with self.db.transaction() as conn:
+        async with self.db.transaction():
             relations = await self.get_relations(from_id, True)
             for relation in relations:
                 metadata = relation.get('metadata') or {}

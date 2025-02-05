@@ -35,7 +35,7 @@ class CognitiveMemoryNode(BaseMemoryNode):
     - Body state references
     - Formation context
     """
-   # Non-default fields (required):
+    # Non-default fields (required):
     timestamp: float
     raw_state: Dict[str, Any]
     processed_state: Dict[str, Any]

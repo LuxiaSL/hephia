@@ -2,12 +2,10 @@ import time
 import asyncio
 from asyncio import TimeoutError as AsyncTimeoutError
 from typing import Optional, TYPE_CHECKING
-from functools import lru_cache
 
 from .base_manager import (
     BaseConnectionManager,
-    ConnectionOperation,
-    MergeCandidate
+    ConnectionOperation
 )
 
 if TYPE_CHECKING:
@@ -15,7 +13,6 @@ if TYPE_CHECKING:
 
 from ...nodes.cognitive_node import CognitiveMemoryNode
 from ...nodes.node_utils import (
-    softmax,
     calculate_emotional_similarity,
     calculate_needs_similarity,
     calculate_temporal_weight

@@ -1,8 +1,7 @@
 # memory/types.py
 
-import time
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Union, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Dict, Any, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..nodes.body_node import BodyMemoryNode

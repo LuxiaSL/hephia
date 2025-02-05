@@ -6,7 +6,6 @@ a "cognitive summary" panel.
 """
 
 import curses
-import threading
 import time
 from queue import Queue, Empty
 from typing import Optional, List
@@ -235,7 +234,7 @@ class MonitorUI:
                 logger.error(f"Error in monitor loop: {e}", exc_info=True)
                 try:
                     self.setup_windows()
-                except:
+                except Exception:
                     logger.critical("Failed to recover from error", exc_info=True)
                     break
 
@@ -275,16 +274,9 @@ class MonitorUI:
     # Panel Update Methods
     ###########################################################################
     def update_cognitive_panel(self, event):
-        """
-        Show truncated summary + recent messages in the Cognitive (left) panel,
-        full un-truncated summary in the Summary (bottom-right) panel.
-        """
         try:
             # Extract the main processed state
             full_summary = event.data.get('processed_state', 'No summary available')
-            truncated_summary = (
-                full_summary[:100] + "..." if len(full_summary) > 100 else full_summary
-            )
 
             # Build the content for the cognitive window
             messages = event.data.get('raw_state', [])[-2:]

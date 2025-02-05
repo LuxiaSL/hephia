@@ -32,7 +32,7 @@ class MeditateEnvironment(BaseEnvironment):
         The meditation environment allows focused introspection and state influence.
         Use 'focus' to meditate on specific states or concepts.
         Use 'absorb' to deeply reflect on specific memories.
-        
+
         Examples:
         - meditate focus "calm"
         - meditate focus "contentment"
@@ -211,10 +211,9 @@ class MeditateEnvironment(BaseEnvironment):
                 effects = result.get("effects", [])
                 
                 response = (
-                    f"Absorbing memory: {memory_content}\n\n"
-                    + "\n".join(f"• {effect}" for effect in effects)
+                    f"Absorbing memory: {memory_content}\n\n" +
+                    "\n".join(f"• {effect}" for effect in effects)
                 )
-                
                 # Suggest relevant follow-ups
                 suggested = [
                     f'reflect query "similar to {memory_id}"',

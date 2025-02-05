@@ -19,7 +19,6 @@ Future integrations:
 
 from event_dispatcher import global_event_dispatcher, Event
 from ...internal_context import InternalContext
-import time
 
 class Mood:
     """

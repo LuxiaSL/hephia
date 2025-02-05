@@ -33,13 +33,13 @@ class NotesEnvironment(BaseEnvironment):
         
         self.help_text = """
         The notes environment provides persistent external storage for thoughts and observations.
-        
+
         Core Features:
         - Create and manage notes with content and tags
         - Search notes by content or tags
         - Track note context and metadata
         - Organize with a tagging system
-        
+
         Tips:
         - Use tags consistently for better organization
         - Include context in searches

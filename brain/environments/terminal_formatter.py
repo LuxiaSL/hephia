@@ -5,15 +5,12 @@ Handles the presentation of command results, help information, and system state
 in a consistent and informative format that guides LLM interaction.
 """
 
-from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from brain.commands.model import (
     CommandResult,
     CommandDefinition,
-    Parameter,
-    Flag,
     EnvironmentCommands,
     CommandValidationError
 )

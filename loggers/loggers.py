@@ -5,7 +5,6 @@ Provides clean interfaces for specific logging needs.
 
 import logging
 import json
-import sys
 import re
 from typing import Dict, Any, List, Optional, Union
 from brain.commands.model import ParsedCommand

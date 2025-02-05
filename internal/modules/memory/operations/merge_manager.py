@@ -2,7 +2,7 @@
 merge_manager.py
 """
 
-from typing import List, Optional, Tuple, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union
 
 from loggers.loggers import MemoryLogger
 

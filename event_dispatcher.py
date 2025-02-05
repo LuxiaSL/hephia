@@ -70,9 +70,9 @@ class EventDispatcher:
             callback (Callable): The callback function to remove.
         """
         if '*' in event_type:
-            self.wildcard_listeners = [l for l in self.wildcard_listeners if l["callback"] != callback]
+            self.wildcard_listeners = [listen for listen in self.wildcard_listeners if listen["callback"] != callback]
         else:
-            self.listeners[event_type] = [l for l in self.listeners[event_type] if l["callback"] != callback]
+            self.listeners[event_type] = [listen for listen in self.wildcard_listeners if listen["callback"] != callback]
 
     def _get_listeners(self, event: Event) -> List[Dict[str, Any]]:
         """
@@ -81,7 +81,7 @@ class EventDispatcher:
         """
         listeners_to_call = self.listeners[event.event_type].copy()
         listeners_to_call.extend(
-            [l for l in self.wildcard_listeners if l["pattern"].match(event.event_type)]
+            [listen for listen in self.wildcard_listeners if listen["pattern"].match(event.event_type)]
         )
         listeners_to_call.sort(key=lambda x: x["priority"], reverse=True)
         return listeners_to_call

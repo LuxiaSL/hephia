@@ -6,7 +6,7 @@ allowing the cognitive system to interact with both internal
 and external tools.
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Optional
 from .base_environment import BaseEnvironment, CommandResult
 from .notes import NotesEnvironment
 from .search import SearchEnvironment
@@ -15,11 +15,6 @@ from .meditation import MeditateEnvironment
 from .reflection import ReflectEnvironment
 from .discord import DiscordEnvironment
 from api_clients import APIManager
-from brain.commands.model import (
-    CommandDefinition,
-    EnvironmentCommands,
-    CommandValidationError
-)
 
 from config import Config
 

@@ -5,7 +5,7 @@ Configuration settings for the Hephia project.
 """
 
 from enum import Enum
-from typing import Dict, Any, Optional
+from typing import Optional
 from dataclasses import dataclass
 import os
 import platform

@@ -10,12 +10,9 @@ from __future__ import annotations
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-import aiohttp
 from typing import List, Dict, Any
 import asyncio
 import time
-import os
-from datetime import datetime
 from pydantic import BaseModel
 
 from core.timer import TimerCoordinator

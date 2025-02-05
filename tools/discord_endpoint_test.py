@@ -2,8 +2,6 @@
 import asyncio
 import aiohttp
 import json
-from aiohttp import ClientResponseError
-from concurrent.futures import ThreadPoolExecutor
 
 # Configuration
 BOT_HTTP_URL = "http://localhost:9001"

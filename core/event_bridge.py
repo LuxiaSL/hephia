@@ -3,7 +3,6 @@ Simplified event bridge for MVP state updates.
 Handles core state changes between internal systems and external interfaces.
 """
 
-from typing import Dict, Any
 from event_dispatcher import global_event_dispatcher, Event
 import asyncio
 

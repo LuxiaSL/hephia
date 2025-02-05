@@ -9,7 +9,7 @@ import aiohttp
 from bs4 import BeautifulSoup
 import re
 
-from typing import Dict, List, Any, Optional, TypedDict
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from urllib.parse import urlparse, urljoin
 from .base_environment import BaseEnvironment
@@ -49,13 +49,13 @@ class WebEnvironment(BaseEnvironment):
 
         self.help_text = """
         The web environment provides smart web page access and viewing.
-        
+
         Features:
         - Intelligent content extraction
         - Multiple viewing modes
         - Link discovery and analysis
         - Metadata extraction
-        
+
         Examples:
         - web open https://example.com --preview=full
         - web open https://news.site/article --extract=text

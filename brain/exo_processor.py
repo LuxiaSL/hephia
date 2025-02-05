@@ -9,11 +9,9 @@ todo: design cognitive state summary that can be sent to state bridge and used f
 above will likely work well with the inner monologue when that gets done
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import asyncio
-import os
-import json
 
 from internal import Internal
 from api_clients import APIManager
@@ -194,11 +192,11 @@ class ExoProcessor:
                     return error_message
                 
                 # Execute command
-                BrainLogger.debug(f"Executing command")
+                BrainLogger.debug("Executing command")
                 result = await self._execute_command(command, current_state)
 
                 # Command succeeded, format response and continue processing
-                BrainLogger.debug(f"Formatting command result")
+                BrainLogger.debug("Formatting command result")
                 formatted_response = TerminalFormatter.format_command_result(result)
 
                 # format notifications
@@ -310,6 +308,7 @@ class ExoProcessor:
         """
         # Handle global commands
         if not command.environment:
+            # Handle global commands
             if command.action == GlobalCommands.HELP:
                 return self.environment_registry.format_global_help()
             if command.action == GlobalCommands.VERSION:
@@ -318,15 +317,16 @@ class ExoProcessor:
                     message=f"Hephia OS v{Config.VERSION}",
                     suggested_commands=["help"]
                 )
+            # Return error for unknown global commands
             return CommandResult(
                 success=False,
-                message=f"Error in {command.environment}: {str(e)}",
-                suggested_commands=[f"{command.environment} help"],
+                message=f"Unknown global command: {command.action}",
+                suggested_commands=["help"],
                 error=CommandValidationError(
-                    message=str(e),
-                    suggested_fixes=["Check command syntax", "Verify environment state"],
-                    related_commands=["help"],
-                    examples=[f"{command.environment} help"]
+                    message=f"Command '{command.action}' is not a valid global command",
+                    suggested_fixes=["Use 'help' to see available commands"],
+                    related_commands=["help", "version"],
+                    examples=["help", "version"]
                 )
             )
         
@@ -377,7 +377,7 @@ class ExoProcessor:
             # Keep system prompt and trim the rest
             self.conversation_history = [
                 self.conversation_history[0],  # System prompt
-                *self.conversation_history[-(max_length-1):]  # Recent messages
+                *self.conversation_history[-(max_length - 1):]  # Recent messages
             ]
 
     ##############################
@@ -410,8 +410,6 @@ class ExoProcessor:
             model_config = Config.AVAILABLE_MODELS[model_name]
             
             # Create summarization prompt
-            prompt = f"Create a one paragraph summary of this conversation: {conversation_text}"
-            
             system_prompt = """You are maintaining cognitive continuity for an autonomous AI system.
 Your summaries track the ongoing state of mind, decisions, and context.
 Your response will be used to maintain continuity of self across many instances.
@@ -463,7 +461,7 @@ Previous summary for context:
                 BrainLogger.error(f"Primary summary generation failed: {str(e)}")
                 try:
                     # Use shorter timeout for retry
-                    async with asyncio.timeout(timeout/2):
+                    async with asyncio.timeout(timeout / 2):
                         retry_summary = await self.api.create_completion(
                             provider=model_config.provider.value,
                             model=model_config.model_id,
@@ -718,41 +716,67 @@ Return only the unified memory text, no extra commentary."""
         and session-level patterns for memory formation.
         """
         try:
-            # 1. Environment Transition Check (Enhanced)
-            if (self.last_environment and 
-                current_command.environment != self.last_environment and
-                current_command.environment not in {'help', 'version'}):
-                env_history = self._get_environment_session_history(self.last_environment)
-                if env_history and len(env_history) > 2:
-                    session_significance = await self._evaluate_session_significance(
-                        self.last_environment,
-                        env_history
-                    )
-                    if session_significance:
-                        await self._trigger_environment_memory(
-                            self.last_environment,
-                            env_history
-                        )
+            # Skip environment transition check for help/version commands
+            IGNORED_ENVIRONMENTS = {'help', 'version'}
             
-            # 2. Content Significance Check (Enhanced)
-            content_significance = await self._evaluate_content_significance(
+            # 1. Check for significant environment transitions
+            should_check_env = (
+                self.last_environment and 
+                current_command.environment != self.last_environment and
+                current_command.environment not in IGNORED_ENVIRONMENTS
+            )
+            
+            if should_check_env:
+                await self._check_environment_transition(
+                    self.last_environment,
+                    self._get_environment_session_history(self.last_environment)
+                )
+            
+            # 2. Check for significant content interactions
+            if await self._evaluate_content_significance(
                 llm_response,
                 command_result,
                 current_command
-            )
-            
-            if content_significance:
+            ):
                 await self._trigger_content_memory(
                     llm_response,
                     command_result,
                     current_command
                 )
-                    
-            # Update last environment
-            self.last_environment = current_command.environment
                 
+            # Update environment tracking
+            self.last_environment = current_command.environment
+                    
         except Exception as e:
             BrainLogger.error(f"Error in significance check: {e}")
+
+    async def _check_environment_transition(
+        self,
+        environment: str,
+        history: List[Dict]
+    ) -> None:
+        """
+        Evaluate and process significant environment transitions.
+        
+        Args:
+            environment: The environment being transitioned from
+            history: Session history for the environment
+        """
+        MIN_HISTORY_LENGTH = 2
+        
+        if not history or len(history) <= MIN_HISTORY_LENGTH:
+            return
+            
+        session_significance = await self._evaluate_session_significance(
+            environment,
+            history
+        )
+        
+        if session_significance:
+            await self._trigger_environment_memory(
+                environment,
+                history
+            )
 
     async def _evaluate_content_significance(
         self,
@@ -1090,7 +1114,7 @@ Remember you are an autonomous AI system with your own evolving thoughts and fee
                         query=query,
                         limit=5
                     )
-                except Exception as e:
+                except Exception:
                     #failed to get memories, use none
                     memories = None
                 

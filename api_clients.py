@@ -44,11 +44,14 @@ class BaseAPIClient(ABC):
         for attempt in range(self.max_retries):
             try:
                 # Calculate exponential backoff delay
-                delay = min(self.base_retry_delay * (2 ** attempt), self.max_retry_delay)
+                delay = min(
+                    self.base_retry_delay * (2 ** attempt),
+                    self.max_retry_delay
+                )
                 
                 client_timeout = aiohttp.ClientTimeout(
                     total=timeout,
-                    connect=timeout/3,
+                    connect=timeout / 3,
                     sock_read=timeout
                 )
                 

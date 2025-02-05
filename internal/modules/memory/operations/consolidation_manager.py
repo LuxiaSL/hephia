@@ -1,5 +1,5 @@
 """
-internal\modules\memory\operations\consolidation_manager.py
+internal\\modules\\memory\\operations\\consolidation_manager.py
 
 Manages network consolidation operations including:
 - Activity pattern tracking & analysis
@@ -8,14 +8,11 @@ Manages network consolidation operations including:
 - Network health maintenance
 """
 
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import time
 
-from ..networks.base_network import NetworkConfig
 from ..nodes.base_node import BaseMemoryNode
-from ..nodes.body_node import BodyMemoryNode
-from ..nodes.cognitive_node import CognitiveMemoryNode
 from ..operations.ghost_manager import GhostManager
 from ..operations.merge_manager import MergeManager
 

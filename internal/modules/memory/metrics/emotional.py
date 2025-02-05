@@ -1,5 +1,5 @@
 """
-\metrics\emotional.py
+\\metrics\\emotional.py
 
 Implements emotional similarity and resonance calculations for memory retrieval.
 Handles both stored emotional states and body memory relationships.
@@ -11,13 +11,9 @@ Key capabilities:
 - Intensity and complexity analysis
 """
 
-from typing import Dict, List, Optional, Union, Any
-from dataclasses import dataclass
+from typing import Dict, List, Any
 import time
 import math
-
-from internal.modules.memory.nodes.body_node import BodyMemoryNode
-from internal.modules.memory.state.signatures import EmotionalStateSignature
 
 from loggers.loggers import MemoryLogger
 

@@ -7,15 +7,12 @@ the terminal-like interface that makes it easy for LLMs to interact with.
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass, field
 
 from brain.commands.model import (
     CommandDefinition,
     ParameterType,
     ParsedCommand,
     CommandResult,
-    Parameter,
-    Flag,
     EnvironmentCommands,
     CommandValidationError
 )

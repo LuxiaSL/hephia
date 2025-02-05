@@ -1,5 +1,5 @@
 """
-\metrics\state.py
+\\metrics\\state.py
 
 Implements unified state metrics calculations for memory retrieval.
 Handles needs, behavior, mood and emotional state comparisons.
@@ -12,11 +12,10 @@ Key capabilities:
 - Support for body/cognitive memory integration
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 import math
-import time
 
-from .emotional import EmotionalMetricsCalculator, EmotionalStateSignature
+from .emotional import EmotionalMetricsCalculator
 
 from loggers.loggers import MemoryLogger
 
@@ -327,7 +326,7 @@ class StateMetricsCalculator:
             max_val = 2.0  # valence + arousal => each up to 1.0 difference
             sim = 1.0 - ((valence_diff + arousal_diff) / max_val)
             return max(0.0, min(1.0, sim))
-        except:
+        except Exception:
             return 0.0
 
     def _get_mood_intensity(self, mood: Dict[str, Any]) -> float:

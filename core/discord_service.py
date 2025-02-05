@@ -4,7 +4,7 @@ import asyncio
 import json
 import aiohttp
 import time
-from typing import Optional, Dict, Any, List, Tuple, Callable
+from typing import Optional, Any, List, Tuple, Callable
 from dataclasses import dataclass
 from enum import Enum
 

@@ -32,7 +32,7 @@ class ReflectEnvironment(BaseEnvironment):
         The reflection environment lets you explore and reflect on memories.
         Use 'query' to search for specific memories or themes.
         Use 'recent' to review recent experiences.
-        
+
         Examples:
         - reflect query "happy memories"
         - reflect query "conversations about projects"

@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from .base_environment import BaseEnvironment
 from brain.commands.model import (
@@ -436,7 +436,7 @@ class DiscordEnvironment(BaseEnvironment):
         for msg in data:
             try:
                 timestamp = msg.get('timestamp', '')[:16]  # YYYY-MM-DD HH:MM
-            except:
+            except Exception:
                 timestamp = 'Unknown time'
             
             author = msg.get('author', 'Unknown')

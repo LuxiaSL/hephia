@@ -7,7 +7,7 @@ for persistence.
 """
 from __future__ import annotations
 import time
-from typing import Optional, Dict
+from typing import Optional
 import asyncio
 
 from loggers.loggers import MemoryLogger

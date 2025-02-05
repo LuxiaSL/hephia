@@ -33,7 +33,7 @@ class SearchEnvironment(BaseEnvironment):
         The search environment lets you find information and get summarized answers.
         Use 'query' for direct questions and information retrieval.
         Results can be saved to notes or expanded with follow-up searches.
-        
+
         Examples:
         - search query "current weather in London"
         - search query "explain quantum computing" --detail=high

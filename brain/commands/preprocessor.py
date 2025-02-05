@@ -8,14 +8,11 @@ rich feedback to help the LLM learn and improve its command usage.
 from typing import Dict, List, Optional, Tuple, Any
 import re
 import json
-import os
 from config import Config
-from dataclasses import dataclass
 from loggers import BrainLogger
 from api_clients import APIManager
 from .model import (
     ParsedCommand, 
-    CommandDefinition,
     CommandValidationError,
     GlobalCommands,
     EnvironmentCommands,

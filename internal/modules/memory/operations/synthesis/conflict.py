@@ -170,7 +170,6 @@ def _analyze_complex_conflicts(nodeA, nodeB, metrics: Dict[str, Any]) -> Dict[st
     # Check semantic drift 
     semantic = cm.get('semantic', {})
     semantic_density = semantic.get('semantic_density', 0.0)
-    semantic_sim = semantic.get('embedding_similarity', 0.0)
     
     # Only check cluster metrics if they were requested during calculation
     cluster_metrics = semantic.get('cluster_metrics', {})

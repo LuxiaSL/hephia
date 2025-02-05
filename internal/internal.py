@@ -4,7 +4,7 @@ Modified to work with server-based architecture.
 """
 
 from __future__ import annotations
-from typing import List, Optional
+from typing import List
 import asyncio
 
 from internal.internal_context import InternalContext

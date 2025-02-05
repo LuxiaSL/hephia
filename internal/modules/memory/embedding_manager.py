@@ -1,6 +1,5 @@
 # embeddings/embedding_manager.py
-from typing import List, Optional, Type, Any
-import numpy as np
+from typing import List, Optional, Any
 from functools import lru_cache
 
 from loggers.loggers import MemoryLogger

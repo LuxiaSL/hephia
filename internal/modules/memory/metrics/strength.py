@@ -1,5 +1,5 @@
 """
-\metrics\strength.py
+\\metrics\\strength.py
 
 Implements strength-based analysis for memory networks.
 Handles node strength, network position, and ghost relationships.
@@ -11,7 +11,7 @@ Key capabilities:
 - Connection strength patterns
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from loggers.loggers import MemoryLogger
 
 class StrengthMetricsError(Exception):
