@@ -261,6 +261,7 @@ def generate_timeline_document(events, output_path):
 if __name__ == "__main__":
     # Collect all visualization log files.
     log_dir = "./data/logs/visualization/"
+    out_dir = "./data/"
     log_files = glob.glob(os.path.join(log_dir, "vis-*.log"))
     if not log_files:
         print("No visualization log files found")
@@ -272,11 +273,11 @@ if __name__ == "__main__":
         all_events.extend(events)
     
     # Write aggregated parsed data to a JSON file.
-    output_json = os.path.join(log_dir, "cognitive_events.json")
+    output_json = os.path.join(out_dir, "cognitive_events.json")
     with open(output_json, 'w', encoding='utf-8') as f:
         json.dump(all_events, f, indent=2)
     print(f"Parsed {len(all_events)} events from {len(log_files)} files.")
     
     # Generate a Markdown timeline document.
-    timeline_md = os.path.join(log_dir, "cognitive_timeline.md")
+    timeline_md = os.path.join(out_dir, "cognitive_timeline.md")
     generate_timeline_document(all_events, timeline_md)
