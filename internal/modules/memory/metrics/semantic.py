@@ -20,7 +20,7 @@ try:
     import nltk
     from nltk import pos_tag, word_tokenize, ne_chunk
     from nltk.tree import Tree
-except ImportError as e:
+except ImportError:
     # Log a warning (you might want to integrate with your logger here)
     print("Warning: NLTK not available, using basic fallbacks.")
     nltk = None
