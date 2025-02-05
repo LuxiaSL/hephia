@@ -5,6 +5,7 @@ Handles the presentation of command results, help information, and system state
 in a consistent and informative format that guides LLM interaction.
 """
 
+import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -82,20 +83,41 @@ class TerminalFormatter:
         # Add memories if provided
         if memories:
             memory_lines = ["\nRelevant Memories:", "---"]
-            for memory in memories:
-                # Extract core memory data
-                text = memory.get('content', memory.get('text_content', ''))
-                # Get first line or snippet of content 
-                snippet = text.split('\n')[0]
-                if len(snippet) > 250:
-                    snippet = snippet[:247] + "..."
-                memory_lines.append(f"• {snippet}")
-            memory_lines.append("---")
+            current_time = time.time()
             
+            for memory in memories:
+                # Extract timestamp and format relative time
+                timestamp = memory.get('timestamp', 0)
+                time_diff = current_time - timestamp
+                
+                if time_diff < 300:  # 5 minutes
+                    time_str = "Just now"
+                elif time_diff < 3600:  # 1 hour
+                    time_str = "Recently"
+                elif time_diff < 86400:  # 24 hours
+                    time_str = "Earlier today"
+                elif time_diff < 604800:  # 1 week
+                    time_str = "A few days ago"
+                elif time_diff < 2592000:  # 30 days
+                    time_str = "A while ago"
+                else:
+                    time_str = "A long time ago"
+
+                # Extract and format memory content
+                text = memory.get('content', memory.get('text_content', ''))
+                
+                # Format memory entry with timestamp and full content
+                memory_lines.append(f"[{time_str}]")
+                for line in text.split('\n'):
+                    if line.strip():
+                        memory_lines.append(f"  {line.strip()}")
+                memory_lines.append("")
+                memory_lines.append("---")
+
+            # Append all memory lines at once after processing all memories
             state_str = state_str + "\n" + "\n".join(memory_lines)
 
         return state_str
-    
     @staticmethod
     def format_notifications(notifications: List[str], result: str) -> str:
         """

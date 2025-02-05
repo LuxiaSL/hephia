@@ -208,7 +208,8 @@ class ExoProcessor:
                 self._add_to_history("assistant", llm_response)
                 self._add_to_history("user", formatted_response)
                 self.last_successful_turn = datetime.now()
-
+                
+                BrainLogger.debug("Terminal Response: " + formatted_response)
                 # Retrieve memories for next turn
                 BrainLogger.debug("Retrieving related memories")
                 memories = await self._retrieve_related_memories(
@@ -219,6 +220,7 @@ class ExoProcessor:
 
                 if memories:
                     self.relevant_memories = memories
+                    BrainLogger.debug(f"Relevant memories retrieved: {len(memories)} {[m['id'] for m in memories]}")
 
                 # significance check for new memories
                 BrainLogger.debug("Dispatching significance check")
@@ -272,7 +274,7 @@ class ExoProcessor:
             state_context,  
             *self.conversation_history[1:] 
         ]
-
+        BrainLogger.debug(f"State Context: {state_context['content']}")
         BrainLogger.debug("Firing out to API for process_turn")
         return await self.api.create_completion(
             provider=model_config.provider.value,
