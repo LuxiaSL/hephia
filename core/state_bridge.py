@@ -95,7 +95,7 @@ class StateBridge:
 
                 self.setup_event_listeners()
 
-                context = await self.internal_context.get_api_context()
+                context = await self.internal_context.get_api_context(use_memory_emotions=False)
                 # Notify system with API context
                 global_event_dispatcher.dispatch_event(
                     Event("state:initialized", {
@@ -116,7 +116,8 @@ class StateBridge:
     async def update_cognitive_state(self, event: Event):
         """Update cognitive state and broadcast API context."""
         async with self.state_lock:
-            self.persistent_state.brain_state = event.data.get('raw_state', {})
+            if event.data.get('source') == 'exo_processor':
+                self.persistent_state.brain_state = event.data.get('raw_state', {})
         try:
             await self.update_state()
         except Exception as e:
@@ -165,17 +166,17 @@ class StateBridge:
         """Compute a hash of the significant parts of state to detect meaningful changes."""
         # Focus on key state elements that would constitute a meaningful change
         key_elements = {
-            'emotions': state.session_state.get('emotions', {}).get('current_state', {}),
+            'emotions': state.session_state.get('emotions', {}),
             'needs': state.session_state.get('needs', {}),
             'mood': state.session_state.get('mood', {}),
             'behavior': state.session_state.get('behavior', {})
         }
         return str(hash(json.dumps(key_elements, sort_keys=True)))
 
-    async def get_api_context(self) -> Dict[str, Any]:
+    async def get_api_context(self, use_memory_emotions: bool = True) -> Dict[str, Any]:
         """Get current processed state for API consumption."""
         if self.internal:
-            return await self.internal_context.get_api_context()
+            return await self.internal_context.get_api_context(use_memory_emotions=use_memory_emotions)
         return {}
 
     async def update_state(self):
@@ -204,7 +205,7 @@ class StateBridge:
                         self.last_cleanup_time = datetime.now()
 
                     # Broadcast API context
-                    context = await self.internal_context.get_api_context()
+                    context = await self.internal_context.get_api_context(use_memory_emotions=False)
                     global_event_dispatcher.dispatch_event(
                         Event("state:changed", {
                             "context": context

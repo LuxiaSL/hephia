@@ -301,7 +301,7 @@ class EmotionalProcessor:
             source_type='aggregate'
         )
 
-        global_event_dispatcher.dispatch_event_sync(Event("emotion:updated", {
+        global_event_dispatcher.dispatch_event(Event("emotion:updated", {
             "emotion": aggregate_vector
         }))
 
@@ -339,7 +339,7 @@ class EmotionalProcessor:
         self.current_stimulus.add_vector(initial_vector)
 
         # Dispatch the initial vector
-        global_event_dispatcher.dispatch_event_sync(Event("emotion:new", {
+        global_event_dispatcher.dispatch_event(Event("emotion:new", {
             "emotion": initial_vector
         }))
 

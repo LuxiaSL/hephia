@@ -487,10 +487,10 @@ class DiscordEnvironment(BaseEnvironment):
     async def _send_message(self, params: List[str]) -> CommandResult:
         if len(params) < 2:
             error = CommandValidationError(
-                message="Channel ID and message content required",
+                message="Channel ID and message content required", 
                 suggested_fixes=["Provide channel ID and message content", "Use quotes around message content"],
                 related_commands=["discord list_channels"],
-                examples=['discord send_message <channel_id> "Hello world"']
+                examples=['discord send_message <channel_id> "Hello\nworld"'] 
             )
             return CommandResult(
                 success=False,
@@ -507,7 +507,7 @@ class DiscordEnvironment(BaseEnvironment):
                 message=f"Failed to send message: HTTP {status_code}",
                 suggested_fixes=["Check channel ID", "Verify bot permissions"],
                 related_commands=["discord list_channels"],
-                examples=['discord send_message <valid_channel_id> "Hello"']
+                examples=['discord send_message <valid_channel_id> "Hello\nworld"']  # Added multiline example
             )
             return CommandResult(
                 success=False,
@@ -519,7 +519,9 @@ class DiscordEnvironment(BaseEnvironment):
 
         lines = ["Message Sent Successfully:", "---"]
         lines.append(f"Channel ID: {channel_id}")
-        lines.append(f"Content: {content[:100]}{'...' if len(content) > 100 else ''}")
+        preview = content[:100] + ('...' if len(content) > 100 else '')
+        lines.append("Content:")
+        lines.append(preview)  # Changed to preserve newlines in preview
         if 'message_id' in data:
             lines.append(f"Message ID: {data['message_id']}")
         lines.append("---")

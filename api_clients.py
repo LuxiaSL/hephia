@@ -7,15 +7,16 @@ provider-specific optimizations and requirements.
 
 import platform
 import aiohttp
-from aiohttp import UnixConnector 
+from aiohttp import UnixConnector, TCPConnector
 import os
 from typing import Dict, Any, List, Optional, Union
 import json
 import asyncio
 from abc import ABC, abstractmethod
-from loggers import SystemLogger
 
+from loggers import SystemLogger
 from config import Config
+
 
 class BaseAPIClient(ABC):
     """Enhanced base class for API clients with robust error handling."""
@@ -27,6 +28,7 @@ class BaseAPIClient(ABC):
         self.max_retries = 3
         self.base_retry_delay = 1  # seconds
         self.max_retry_delay = 32  # Maximum delay after exponential backoff
+        self.read_timeout_multiplier = 1.5  # multiplier for socket read timeout
         
     async def _make_request(
         self,
@@ -39,96 +41,139 @@ class BaseAPIClient(ABC):
         """Make API request with enhanced retry logic and error handling."""
         headers = self._get_headers(extra_headers)
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        
         last_exception = None
+
         for attempt in range(self.max_retries):
             try:
-                # Calculate exponential backoff delay
-                delay = min(
-                    self.base_retry_delay * (2 ** attempt),
-                    self.max_retry_delay
-                )
-                
+                # Increase overall timeout for each retry attempt
+                current_timeout = timeout * (1 + (attempt * 0.5))
                 client_timeout = aiohttp.ClientTimeout(
-                    total=timeout,
-                    connect=timeout / 3,
-                    sock_read=timeout
+                    total=current_timeout,
+                    connect=current_timeout / 3,
+                    sock_read=current_timeout * self.read_timeout_multiplier
                 )
-                
-                async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                    async with session.request(
-                        method,
-                        url,
-                        headers=headers,
-                        json=payload
-                    ) as response:
-                        # Log the raw response for debugging
-                        response_text = await response.text()
-                        SystemLogger.debug(f"Raw API response ({self.service_name}): {response_text.lstrip()}")
-                        
-                        if response.status == 200:
+                # Using TCP keepalive to help maintain the connection
+                SystemLogger.debug(
+                    f"[{self.service_name}] Attempt {attempt + 1}: Starting request to {endpoint}\n"
+                    f"Timeout settings: {client_timeout}"
+                )
+                tcp_connector = TCPConnector(
+                    keepalive_timeout=60,
+                    force_close=False,
+                    enable_cleanup_closed=True
+                )
+                async with aiohttp.ClientSession(
+                    connector=tcp_connector,
+                    timeout=client_timeout
+                ) as session:
+                    try:
+                        async with session.request(
+                            method,
+                            url,
+                            headers=headers,
+                            json=payload
+                        ) as response:
+                            # First try to read the raw bytes
                             try:
-                                # Explicitly try to parse JSON
-                                response_data = await response.json()
-                                SystemLogger.log_api_request(
-                                    self.service_name,
-                                    endpoint,
-                                    response.status
+                                raw_bytes = await response.read()
+                                SystemLogger.debug(
+                                    f"[{self.service_name}] Raw response received: {len(raw_bytes)} bytes"
                                 )
-                                return response_data
-                            except json.JSONDecodeError as e:
-                                SystemLogger.error(f"JSON decode error: {str(e)}\nRaw response: {response_text}")
-                                raise
-                        
-                        # Handle specific error cases
-                        if response.status == 429:  # Rate limit
-                            retry_after = int(response.headers.get('Retry-After', delay))
-                            SystemLogger.log_api_retry(
-                                self.service_name,
-                                attempt + 1,
-                                self.max_retries,
-                                f"Rate limited, waiting {retry_after}s"
+                            except aiohttp.ClientPayloadError as e:
+                                raise Exception(f"Failed to read response payload: {str(e)}")
+
+                            # Then try to decode as text
+                            try:
+                                response_text = raw_bytes.decode('utf-8')
+                                SystemLogger.debug(
+                                    f"[{self.service_name}] Decoded response length: {len(response_text)}"
+                                )
+                            except UnicodeDecodeError as e:
+                                raise Exception(f"Failed to decode response as UTF-8: {str(e)}")
+
+                            # Log response details before processing
+                            SystemLogger.debug(
+                                f"[{self.service_name}] Response details:\n"
+                                f"Status: {response.status}\n"
+                                f"Headers: {dict(response.headers)}\n"
+                                f"Content-Length: {response.headers.get('Content-Length')}\n"
+                                f"Transfer-Encoding: {response.headers.get('Transfer-Encoding')}\n"
+                                f"Connection: {response.headers.get('Connection')}"
                             )
-                            await asyncio.sleep(retry_after)
-                            continue
-                            
-                        if response.status >= 500:  # Server error
-                            SystemLogger.log_api_retry(
-                                self.service_name,
-                                attempt + 1,
-                                self.max_retries,
-                                f"Server error {response.status}, waiting {delay}s"
+
+                            if response.status == 200:
+                                try:
+                                    response_data = json.loads(response_text)
+                                    SystemLogger.log_api_request(
+                                        self.service_name,
+                                        endpoint,
+                                        response.status
+                                    )
+                                    return response_data
+                                except json.JSONDecodeError as e:
+                                    error_msg = (
+                                        f"JSON decode failed for {self.service_name}:\n"
+                                        f"Error: {str(e)}\n"
+                                        f"Response preview: {response_text[:200]}..."
+                                    )
+                                    SystemLogger.error(error_msg)
+                                    raise Exception(error_msg)
+
+                            if response.status == 429:
+                                retry_after = int(response.headers.get('Retry-After', current_timeout))
+                                SystemLogger.log_api_retry(
+                                    self.service_name,
+                                    attempt + 1,
+                                    self.max_retries,
+                                    f"Rate limited, waiting {retry_after}s"
+                                )
+                                await asyncio.sleep(retry_after)
+                                continue
+
+                            if response.status >= 500:
+                                delay = min(self.base_retry_delay * (2 ** attempt), self.max_retry_delay)
+                                SystemLogger.log_api_retry(
+                                    self.service_name,
+                                    attempt + 1,
+                                    self.max_retries,
+                                    f"Server error {response.status}, waiting {delay}s"
+                                )
+                                await asyncio.sleep(delay)
+                                continue
+
+                            error_msg = (
+                                f"API error ({self.service_name}): Status {response.status}\n"
+                                f"Response: {response_text}"
                             )
-                            await asyncio.sleep(delay)
-                            continue
-                            
-                        # For other status codes, raise with details
-                        error_msg = f"API error ({self.service_name}): Status {response.status}\nResponse: {response_text}"
-                        raise Exception(error_msg)
-                        
+                            raise Exception(error_msg)
+
+                    except aiohttp.ClientResponseError as e:
+                        raise Exception(f"Response error: {str(e)}")
+                    except aiohttp.ClientConnectionError as e:
+                        raise Exception(f"Connection error: {str(e)}")
+
             except asyncio.TimeoutError as e:
                 last_exception = e
                 SystemLogger.warning(
-                    f"Timeout on attempt {attempt + 1}/{self.max_retries} "
-                    f"({self.service_name}): {str(e)}"
+                    f"Timeout on attempt {attempt + 1}/{self.max_retries} ({self.service_name}):\n"
+                    f"Type: TimeoutError\n"
+                    f"Error: {str(e)}"
                 )
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(delay)
-                continue
-                
+                    await asyncio.sleep(self.base_retry_delay * (2 ** attempt))
+                    continue
+
             except Exception as e:
                 last_exception = e
-                SystemLogger.log_api_retry(
-                    self.service_name,
-                    attempt + 1,
-                    self.max_retries,
-                    f"{type(e).__name__}: {str(e)}"
+                SystemLogger.error(
+                    f"Error on attempt {attempt + 1}/{self.max_retries} ({self.service_name}):\n"
+                    f"Type: {type(e).__name__}\n"
+                    f"Error: {str(e)}"
                 )
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(delay)
-                continue
+                    await asyncio.sleep(self.base_retry_delay * (2 ** attempt))
+                    continue
 
-        # If we get here, all retries failed
         error_msg = f"All retries failed for {self.service_name}: {str(last_exception)}"
         SystemLogger.error(error_msg)
         raise Exception(error_msg)
@@ -137,11 +182,12 @@ class BaseAPIClient(ABC):
     def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
         """Get headers specific to this provider."""
         pass
-
+    
     @abstractmethod
     def _extract_message_content(self, response: Dict[str, Any]) -> str:
         """Extract message content from provider-specific response format."""
         pass
+
 
 class OpenAIClient(BaseAPIClient):
     """Client for OpenAI API interactions."""
@@ -164,7 +210,7 @@ class OpenAIClient(BaseAPIClient):
 
     def _extract_message_content(self, response: Dict[str, Any]) -> str:
         return response["choices"][0]["message"]["content"]
-    
+
     async def create_completion(
         self,
         messages: List[Dict[str, str]],
@@ -182,6 +228,7 @@ class OpenAIClient(BaseAPIClient):
         }
         response = await self._make_request("chat/completions", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
+
 
 class AnthropicClient(BaseAPIClient):
     """Client for Anthropic API interactions."""
@@ -205,7 +252,7 @@ class AnthropicClient(BaseAPIClient):
 
     def _extract_message_content(self, response: Dict[str, Any]) -> str:
         return response["content"][0]["text"]
-    
+
     async def create_completion(
         self,
         messages: List[Dict[str, str]],
@@ -215,11 +262,9 @@ class AnthropicClient(BaseAPIClient):
         return_content_only: bool = False
     ) -> Union[Dict[str, Any], str]:
         """Create chat completion via Anthropic."""
-        # Extract system message if present
-        system_message = next(
-            (msg["content"] for msg in messages if msg["role"] == "system"),
-            None
-        )
+        # Combine all system messages if present
+        system_messages = [msg["content"] for msg in messages if msg["role"] == "system"]
+        combined_system = " ".join(system_messages) if system_messages else None
         
         payload = {
             "model": model,
@@ -227,12 +272,12 @@ class AnthropicClient(BaseAPIClient):
             "temperature": temperature,
             "max_tokens": max_tokens
         }
-        
-        if system_message:
-            payload["system"] = system_message
-            
+        if combined_system:
+            payload["system"] = combined_system
+
         response = await self._make_request("messages", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
+
 
 class GoogleClient(BaseAPIClient):
     """Client for Google AI interactions."""
@@ -255,7 +300,7 @@ class GoogleClient(BaseAPIClient):
 
     def _extract_message_content(self, response: Dict[str, Any]) -> str:
         return response["candidates"][0]["content"]["parts"][0]["text"]
-    
+
     async def create_completion(
         self,
         messages: List[Dict[str, str]],
@@ -282,6 +327,7 @@ class GoogleClient(BaseAPIClient):
         )
         return self._extract_message_content(response) if return_content_only else response
 
+
 class OpenRouterClient(BaseAPIClient):
     """Client for OpenRouter API interactions."""
     
@@ -296,8 +342,8 @@ class OpenRouterClient(BaseAPIClient):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://localhost:8000", 
-            "X-Title": "Hephia" 
+            "HTTP-Referer": "https://localhost:8000",
+            "X-Title": "Hephia"
         }
         if extra_headers:
             headers.update(extra_headers)
@@ -305,7 +351,7 @@ class OpenRouterClient(BaseAPIClient):
 
     def _extract_message_content(self, response: Dict[str, Any]) -> str:
         return response["choices"][0]["message"]["content"]
-    
+
     async def create_completion(
         self,
         messages: List[Dict[str, str]],
@@ -324,6 +370,7 @@ class OpenRouterClient(BaseAPIClient):
         
         response = await self._make_request("chat/completions", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
+
 
 class OpenPipeClient(BaseAPIClient):
     """Client for OpenPipe API interactions"""
@@ -346,7 +393,7 @@ class OpenPipeClient(BaseAPIClient):
 
     def _extract_message_content(self, response: Dict[str, Any]) -> str:
         return response["choices"][0]["message"]["content"]
-    
+
     async def create_completion(
         self,
         messages: List[Dict[str, str]],
@@ -365,6 +412,7 @@ class OpenPipeClient(BaseAPIClient):
         
         response = await self._make_request("chat/completions", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
+
 
 class PerplexityClient(BaseAPIClient):
     """Client for Perplexity API interactions."""
@@ -405,13 +453,14 @@ class PerplexityClient(BaseAPIClient):
         response = await self._make_request("chat/completions", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
 
+
 class UnixSocketClient(BaseAPIClient):
     """Base client for Unix socket communication."""
     
     def __init__(self, socket_path: str, service_name: str):
         super().__init__(
             api_key="N/A",
-            base_url="http://localhost",  # The actual hostname doesn't matter for Unix sockets
+            base_url="http://localhost",  # Hostname is irrelevant for Unix sockets
             service_name=service_name
         )
         self.socket_path = socket_path
@@ -427,9 +476,13 @@ class UnixSocketClient(BaseAPIClient):
         """Extract message from Unix socket response"""
         return response["choices"][0]["message"]["content"]
         
-    async def _make_request(self, endpoint: str, method: str = "POST", 
-                          payload: Optional[Dict] = None, 
-                          extra_headers: Optional[Dict] = None) -> Dict[str, Any]:
+    async def _make_request(
+        self,
+        endpoint: str,
+        method: str = "POST", 
+        payload: Optional[Dict] = None, 
+        extra_headers: Optional[Dict] = None
+    ) -> Dict[str, Any]:
         """Make request via Unix socket with retry logic."""
         headers = self._get_headers(extra_headers)
         
@@ -461,7 +514,7 @@ class UnixSocketClient(BaseAPIClient):
                         )
                         
                         if response.status >= 500:
-                            delay = self.retry_delay * (attempt + 1)
+                            delay = self.base_retry_delay * (attempt + 1)
                             SystemLogger.log_api_retry(
                                 self.service_name,
                                 attempt + 1,
@@ -482,7 +535,8 @@ class UnixSocketClient(BaseAPIClient):
                 )
                 if attempt == self.max_retries - 1:
                     raise
-                await asyncio.sleep(self.retry_delay * (attempt + 1))
+                await asyncio.sleep(self.base_retry_delay * (attempt + 1))
+
 
 class Chapter2Client(BaseAPIClient):
     """Client for Chapter2 API supporting both HTTP and Unix socket."""
@@ -540,6 +594,7 @@ class Chapter2Client(BaseAPIClient):
             )
             return self._extract_message_content(response) if return_content_only else response
             
+        # For HTTP, simply use the base class _make_request
         return await super().create_completion(
             messages=messages,
             model=model,
@@ -548,7 +603,8 @@ class Chapter2Client(BaseAPIClient):
             return_content_only=return_content_only,
             **kwargs
         )
-    
+
+
 class APIManager:
     """
     Central manager for all API clients.

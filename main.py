@@ -70,10 +70,9 @@ def validate_configuration() -> bool:
 async def main() -> None:
     """Initialize and run the complete Hephia system."""
     print(f"""
-╔═══════════════════════════════════════════════╗
-║             Hephia Project v0.2               ║
-║     A Digital Homunculus in Latent Space      ║
-╚═══════════════════════════════════════════════╝
+╔═══════════════════════════╗
+║    Hephia Project v0.2    ║
+╚═══════════════════════════╝
 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     """)
 
@@ -82,6 +81,8 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
     if not validate_configuration():
         return
+    
+    headless = Config.get_headless()
 
     # Setup directory structure
     setup_data_directory()
@@ -93,18 +94,19 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         server = await HephiaServer.create()
 
         # Start interface in a separate thread
-        vis_thread = threading.Thread(target=start_monitor, daemon=True)
-        vis_thread.start()
+        if not headless:
+            vis_thread = threading.Thread(target=start_monitor, daemon=True)
+            vis_thread.start()
 
-        # Hook up event handlers
-        global_event_dispatcher.add_listener(
-            "cognitive:context_update",
-            lambda event: handle_cognitive_event(event)
-        )
-        global_event_dispatcher.add_listener(
-            "state:changed",
-            lambda event: handle_state_event(event)
-        )
+            # Hook up event handlers
+            global_event_dispatcher.add_listener(
+                "cognitive:context_update",
+                lambda event: handle_cognitive_event(event)
+            )
+            global_event_dispatcher.add_listener(
+                "state:changed",
+                lambda event: handle_state_event(event)
+            )
 
         print("""
 Hephia is now active! 

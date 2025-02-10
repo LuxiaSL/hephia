@@ -1,10 +1,10 @@
 # embeddings/embedding_manager.py
 from typing import List, Optional, Any
-from functools import lru_cache
 
 from loggers.loggers import MemoryLogger
 from config import Config
 
+from .async_lru_cache import async_lru_cache
 from api_clients import APIManager
 
 class EmbeddingManager:
@@ -83,7 +83,7 @@ class EmbeddingManager:
             MemoryLogger.error(f"Text preprocessing failed: {str(e)}")
             return text  # Return original text if processing fails
         
-    def encode(
+    async def encode(
         self,
         text: str,
         convert_to_tensor: bool = False,
@@ -101,10 +101,10 @@ class EmbeddingManager:
         Returns:
             List[float]: 384-dimensional embedding vector
         """
-        return list(self._cached_internal_encode(text, convert_to_tensor, normalize_embeddings))
+        return list(await self._cached_internal_encode(text, convert_to_tensor, normalize_embeddings))
 
-    @lru_cache(maxsize=1000)
-    def _cached_internal_encode(
+    @async_lru_cache(maxsize=1000)
+    async def _cached_internal_encode(
         self,
         text: str,
         convert_to_tensor: bool = False,
@@ -137,7 +137,7 @@ class EmbeddingManager:
             # Try API if available
             if self.api_manager:
                 try:
-                    result = self._get_api_embedding(text)
+                    result = await self._get_api_embedding(text)
                     return tuple(float(x) for x in result)
                 except Exception as e:
                     MemoryLogger.error(f"API embedding failed: {str(e)}")
@@ -152,7 +152,7 @@ class EmbeddingManager:
             MemoryLogger.error(f"Embedding generation failed: {str(e)}")
             return tuple([0.0] * 384)
 
-    def _get_api_embedding(self, text: str) -> List[float]:
+    async def _get_api_embedding(self, text: str) -> List[float]:
         """Get embedding via API with retry logic."""
         if not self.api_manager:
             raise ValueError("No API manager available")
@@ -163,7 +163,7 @@ class EmbeddingManager:
             MemoryLogger.debug(f"Starting API embedding request. Text length: {len(text)}")
             
             # Use async context manager from existing API client
-            response = client._make_request(
+            response = await client._make_request(
                 "embeddings",
                 payload={
                     "input": text,

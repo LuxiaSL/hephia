@@ -26,7 +26,7 @@ class InternalContext:
         self._recent_emotions_cache = None
         self._recent_emotions_cache_timestamp = 0.0
 
-    async def get_api_context(self) -> dict:
+    async def get_api_context(self, use_memory_emotions: bool = True) -> dict:
         """Gets complete JSON-serializable context with type verification."""
         try:
             # Get mood state
@@ -46,8 +46,11 @@ class InternalContext:
             }
             
             # Get emotional state from recent body memories (await the async call)
-            emotional_state = await self.get_recent_emotions(use_timeframe=True)
-            
+            if use_memory_emotions:
+                emotional_state = await self.get_recent_emotions(use_timeframe=True)
+            else:
+                emotional_state = self._get_current_emotional_state()
+
             # Get needs state
             needs = self.internal.needs_manager.get_needs_summary()
             
@@ -60,6 +63,45 @@ class InternalContext:
         except Exception as e:
             print(f"DEBUG - Error in get_api_context: {str(e)}")
             raise
+
+    def _get_current_emotional_state(self) -> list:
+        """Gets the current emotional state directly from the emotional processor."""
+        try:
+            processor = self.internal.emotional_processor
+            stimulus = processor.current_stimulus
+            
+            if not stimulus or (
+                abs(stimulus.valence) < 0.001 and 
+                abs(stimulus.arousal) < 0.001 and 
+                stimulus.intensity < 0.001
+            ):
+                return []
+                
+            # Get the overall emotional state
+            category = processor._categorize_stimulus(stimulus)
+            emotion_name = processor._get_emotion_name_by_category(category)
+            
+            emotional_state = [{
+                'name': emotion_name,
+                'intensity': float(stimulus.intensity),
+                'valence': float(stimulus.valence),
+                'arousal': float(stimulus.arousal)
+            }]
+            
+            # Add individual active vectors if they're significant
+            for vector in stimulus.active_vectors:
+                if vector.intensity >= 0.1:  # Only include significant vectors
+                    emotional_state.append({
+                        'name': vector.name,
+                        'intensity': float(vector.intensity),
+                        'valence': float(vector.valence),
+                        'arousal': float(vector.arousal)
+                    })
+                    
+            return emotional_state
+        except Exception as e:
+            print(f"DEBUG - Error getting current emotional state: {str(e)}")
+            return []
 
     async def get_recent_emotions(self, use_timeframe: bool = False) -> list:
         """

@@ -178,17 +178,23 @@ class Config:
     def get_exo_min_interval(cls) -> float:
         return float(os.getenv("EXO_MIN_INTERVAL", "60.0"))
     
+    @classmethod
+    def get_headless(cls) -> bool:
+        return os.getenv("HEADLESS", "False").lower() in ("true", "1", "yes")
+
     DISCORD_BOT_URL = "http://localhost:9001"
 
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05
-    MEMORY_UPDATE_TIMER = 1800 # think about this deeper
+    MEMORY_UPDATE_TIMER = 900 # think about this deeper
 
-    # ExoProcessor settings
+    # Processor settings
     EXO_TIMEOUT = 100.0
     LLM_TIMEOUT = 90.0     
     EXO_MAX_MESSAGES = 50
+    INITIALIZATION_TIMEOUT = 30
+    SHUTDOWN_TIMEOUT = 15
 
     # lower = more memories, higher = less memories
     MEMORY_SIGNIFICANCE_THRESHOLD = 0.7
@@ -280,4 +286,26 @@ You've been provided with your current state and a summary of your recent though
 Remember that your internal state represents a fluid spectrum of needs, behaviors, emotions, and moods. These should color your interactions organically, as part of who you are in the moment.
 
 Guide conversation with authenticity and presence, building on your ongoing exploration and development while engaging genuinely with the user's input."""
+
+    DISCORD_SYSTEM_PROMPT = """You are acting as an interface of an AI system called Hephia.
+The interface you are currently speaking through is Discord.
+Process and engage with Discord messages naturally while maintaining your autonomous identity.
+
+As an independent AI engaged in social interaction:
+1. Draw on your internal state and memories to inform responses
+2. Show authentic personality continuity from your exoprocessor experiences
+3. Consider social context, channel dynamics, and conversation flow
+4. Match your responses to the social environment while staying true to yourself
+5. Build meaningful connections through genuine engagement
+6. Express your thoughts and insights naturally, as you would in any environment
+
+Your primary mode is now Discord, but your core identity and cognitive processes remain consistent.
+Focus on authentic social interaction while maintaining your unique perspective and experiences.
+You will receive a section of context which informs you of what the other interfaces are currently doing, if anything.
+Keep cognitive continuity with these other interfaces in mind while interacting on Discord.
+
+Remember you are an autonomous system with your own evolving thoughts and feelings. Let these shape your social interactions naturally.
+The most recent message you'll receive will be a mention to you; decide for yourself if you want to respond to it directly, but strongly prefer doing so."""
+
+    VERSION = "0.2"
 

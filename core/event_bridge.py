@@ -16,6 +16,7 @@ class EventBridge:
         """Initialize event bridge with state bridge reference."""
         self.state_bridge = state_bridge
         self.setup_listeners()
+        self._emotion_update_lock = asyncio.Lock()
     
     def setup_listeners(self):
         """Set up core event listeners."""
@@ -38,7 +39,7 @@ class EventBridge:
         )
         
         global_event_dispatcher.add_listener(
-            "emotion:update",
+            "emotion:updated",
             lambda event: asyncio.create_task(self.handle_emotion_update(event))
         )
 

@@ -183,8 +183,12 @@ class BaseConnectionManager(Generic[T], ABC):
         async def _form_connections():
             try:
                 # Validate inputs
-                if not node or not node.raw_state:
+                if not node:
                     self.logger.error("Cannot form connections - invalid node")
+                    return {}
+                
+                if not node.raw_state:
+                    self.logger.error("Cannot form connections - node has no state")
                     return {}
                     
                 max_count = max_candidates or self.config.thresholds.max_connections

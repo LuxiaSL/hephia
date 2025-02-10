@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from typing import List, Dict, Any
 import asyncio
-import time
 from pydantic import BaseModel
 
 from core.timer import TimerCoordinator
@@ -22,7 +21,7 @@ from core.discord_service import DiscordService
 from event_dispatcher import global_event_dispatcher, Event
 from internal.internal import Internal
 from config import Config
-from brain.exo_processor import ExoProcessor
+from brain.core.processor import CoreProcessor
 from brain.environments.environment_registry import EnvironmentRegistry
 from api_clients import APIManager
 from loggers import SystemLogger
@@ -78,7 +77,7 @@ class HephiaServer:
         self.state_bridge = None  # type: StateBridge
         self.event_bridge = None  # type: EventBridge
         self.environment_registry = None  # type: EnvironmentRegistry
-        self.exo_processor = None  # type: ExoProcessor
+        self.core_processor = None # type: CoreProcessor
 
         self.logger = SystemLogger
 
@@ -89,7 +88,6 @@ class HephiaServer:
         """
         instance = cls()
         # Initialize async components:
-        # Use the async factory method for Internal, for example.
         instance.internal = await Internal.create(instance.api)
         instance.state_bridge = StateBridge(internal=instance.internal)
         instance.event_bridge = EventBridge(state_bridge=instance.state_bridge)
@@ -98,11 +96,11 @@ class HephiaServer:
             cognitive_bridge=instance.internal.cognitive_bridge,
             discord_service=instance.discord_service
         )
-        instance.exo_processor = ExoProcessor(
+        instance.core_processor = CoreProcessor(
             api_manager=instance.api,
             state_bridge=instance.state_bridge,
+            cognitive_bridge=instance.internal.cognitive_bridge,
             environment_registry=instance.environment_registry,
-            internal=instance.internal
         )
         # Now that all components are in place, setup routes and event handlers.
         instance.setup_routes()
@@ -145,49 +143,31 @@ class HephiaServer:
             """
             if not request.messages:
                 raise HTTPException(status_code=400, detail="No messages provided")
-                
-            # Safely get snippet
+
+            # Prepare messages in the format expected by the core processor
+            messages = []
+            for msg in request.messages:
+                if not msg.role or not msg.content:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid message format - missing role or content"
+                    )
+                messages.append({"role": msg.role, "content": msg.content})
+
             try:
                 # Log and notify about the incoming message snippet
-                snippet = request.messages[-1].content[:1000] if request.messages else "No content"
+                snippet = messages[-1]['content'][:1000] if messages else "No content"
                 SystemLogger.info(f"Talking with your current user: {snippet}")
-
-                self.exo_processor.notifications.append(f"Conversation message snippet: {snippet}")
             except Exception as e:
                 SystemLogger.error(f"Error processing message snippet: {e}")
 
             try:
-                messages = []
-                for msg in request.messages:
-                    if not msg.role or not msg.content:
-                        raise ValueError("Invalid message format - missing role or content")
-                    messages.append({
-                        "role": msg.role,
-                        "content": msg.content
-                    })
+                # Process the chat completion request using the core processor
+                response = await self.core_processor.handle_chat_completion(messages)
+                return response
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid message format: {str(e)}")
-            
-            try:
-                response_text = await self.exo_processor.process_user_conversation(messages)
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error processing conversation: {str(e)}")
-
-            # Return a standard ChatCompletion-like JSON response
-            return {
-                "id": f"chat-{id(response_text)}",
-                "object": "chat.completion", 
-                "created": int(time.time()),
-                "model": 'hephia',
-                "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": response_text
-                },
-                "finish_reason": "stop"
-                }]
-            }
+                SystemLogger.error(f"Error processing conversation: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
             
         @self.app.post("/v1/prune_conversation")
         async def prune_conversation():
@@ -198,13 +178,13 @@ class HephiaServer:
         @self.app.get("/state")
         async def get_state():
             """Get current system state."""
-            return await self.state_bridge.get_api_context()
+            return await self.state_bridge.get_api_context(use_memory_emotions=False)
         
         @self.app.post("/discord_inbound")
         async def discord_inbound(payload: DiscordInbound):
             try:
                 SystemLogger.info("Received new Discord message.")
-                
+            
                 # Prepare context for the AI
                 message_context = {
                     'current_message': {
@@ -223,18 +203,8 @@ class HephiaServer:
                     'conversation_history': payload.context.get('recent_history', [])
                 }
                 SystemLogger.debug(f"Discord message context: {message_context}")
-                response_text = await self.exo_processor.handle_discord_notification(message_context)
+                response_text = await self.core_processor.handle_discord_message(message_context)
                 SystemLogger.debug(f"AI response: {response_text[:100]}...")
-
-                # Format notification for LLM consumption
-                notification_text = (
-                    f"Discord update: Replied to {payload.author} in channel {payload.channel_id}\n"
-                    f"- Message ID: {payload.message_id}\n"
-                    f"- User said: {payload.content[:150]}{'...' if len(payload.content) > 150 else ''}\n"
-                    f"- My response: {response_text[:50]}{'...' if len(response_text) > 50 else ''}"
-                )
-                SystemLogger.info(notification_text)
-                self.exo_processor.notifications.append(notification_text)
 
                 await self.discord_service.send_message(
                     channel_id=payload.channel_id,
@@ -242,19 +212,17 @@ class HephiaServer:
                 )
 
                 return {"status": "ok"}
-                
+            
             except Exception as e:
                 SystemLogger.error(f"Error processing Discord message: {str(e)}")
                 raise HTTPException(status_code=500, detail=str(e))
         
         @self.app.post("/discord_channel_update")
         async def discord_channel_update(payload: DiscordChannelUpdate):
-            notification = (
-                f"New messages detected in Discord channel {payload.channel_name} "
-                f"(ID: {payload.channel_id})"
+            await self.core_processor.handle_discord_channel_update(
+                channel_id=payload.channel_id,
+                channel_name=payload.channel_name
             )
-            self.exo_processor.notifications.append(notification)
-            
             return {"status": "ok"}
     
     def setup_event_handlers(self) -> None:
@@ -273,19 +241,21 @@ class HephiaServer:
         """Initialize all systems in correct order."""
         try:
             # retrieve & apply prior state first
+            SystemLogger.info("Initializing state bridge...")
             await self.state_bridge.initialize()
-
-            # init internals
-            await self.internal.start()
             
             # init exo
-            await self.exo_processor.initialize()
-            asyncio.create_task(self.exo_processor.start())
+            SystemLogger.info("Initializing processor...")
+            await self.core_processor.initialize()
+            SystemLogger.info("Starting processor...")
+            await self.core_processor.start()
 
             # init discord
+            SystemLogger.info("Initializing Discord service...")
             await self.discord_service.initialize()
             
             # simple periodic internal timers
+            SystemLogger.info("Adding internal timers...")
             self.timer.add_task(
                 name="needs_update",
                 interval=Config.NEED_UPDATE_TIMER,
@@ -299,6 +269,7 @@ class HephiaServer:
             )
             
             # Start timer
+            SystemLogger.info("Starting timer...")
             asyncio.create_task(self.timer.run())
         except Exception as e:
             await self.shutdown()
@@ -309,7 +280,7 @@ class HephiaServer:
         try:
             self.timer.stop()
             await self.internal.stop()
-            await self.exo_processor.stop()
+            await self.core_processor.stop()
             await self.state_bridge._save_session()
             await self.discord_service.cleanup()
 
@@ -329,7 +300,7 @@ class HephiaServer:
         
         try:
             # Send initial state
-            initial_state = await self.state_bridge.get_api_context()
+            initial_state = await self.state_bridge.get_api_context(use_memory_emotions=False)
             await websocket.send_json({
                 "type": "initial_state",
                 "data": initial_state

@@ -87,7 +87,7 @@ class BaseSemanticMetricsCalculator(ABC):
     """
     
     @abstractmethod
-    def calculate_metrics(
+    async def calculate_metrics(
         self,
         text_content: str,
         embedding: List[float],
@@ -114,7 +114,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         self.embedding_manager = embedding_manager
         self.logger = MemoryLogger
         
-    def calculate_metrics(
+    async def calculate_metrics(
         self,
         text_content: str,
         embedding: List[float],
@@ -161,7 +161,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
                 )
                 
             # Always calculate semantic density
-            metrics['semantic_density'] = self._calculate_semantic_density(text_content)
+            metrics['semantic_density'] = await self._calculate_semantic_density(text_content)
             
             # Optionally analyze cluster properties
             if analyze_clusters and 'cluster_nodes' in kwargs:
@@ -208,7 +208,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             self.logger.log_error(f"Text relevance calculation failed: {str(e)}")
             return 0.0
             
-    def _calculate_semantic_density(self, text: str) -> float:
+    async def _calculate_semantic_density(self, text: str) -> float:
         """
         Calculate semantic density using multiple linguistic features:
         1. Embedding-based semantic richness (using existing model)
@@ -232,7 +232,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             # Calculate semantic cohesion using embeddings (if more than one sentence)
             if len(sentences) > 1:
                 embeddings = [
-                    self.embedding_manager.encode(s, normalize_embeddings=True)
+                    await self.embedding_manager.encode(s, normalize_embeddings=True)
                     for s in sentences
                 ]
                 similarities = []

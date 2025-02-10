@@ -17,7 +17,7 @@ class LogManager:
         # Create log directories
         log_base = Path('data/logs')
         internal_dir = log_base / 'internal'
-        exoloop_dir = log_base / 'exoloop'
+        exoloop_dir = log_base / 'brain'
         system_dir = log_base / 'system'
         memory_dir = log_base / 'memory'
         event_dir = log_base / 'events'

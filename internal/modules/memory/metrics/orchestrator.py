@@ -152,7 +152,7 @@ class RetrievalMetricsOrchestrator:
             
             # 1. Semantic Metrics
             if MetricComponent.SEMANTIC in config.enabled_components:
-                metrics['semantic'] = self._calculate_semantic_metrics(
+                metrics['semantic'] = await self._calculate_semantic_metrics(
                     target_node,
                     query_text,
                     query_embedding,
@@ -214,7 +214,7 @@ class RetrievalMetricsOrchestrator:
                 }
             return 0.0
 
-    def _calculate_semantic_metrics(
+    async def _calculate_semantic_metrics(
         self,
         node: Any,
         query_text: Optional[str],
@@ -232,7 +232,7 @@ class RetrievalMetricsOrchestrator:
                 }
                 
             calculator = self.calculators[MetricComponent.SEMANTIC]
-            return calculator.calculate_metrics(
+            return await calculator.calculate_metrics(
                 text_content=node.text_content,
                 embedding=node.embedding,
                 query_text=query_text,

@@ -118,19 +118,20 @@ class TerminalFormatter:
             state_str = state_str + "\n" + "\n".join(memory_lines)
 
         return state_str
+    
     @staticmethod
-    def format_notifications(notifications: List[str], result: str) -> str:
+    def format_notifications(updates: str, result: str) -> str:
         """
-        Format notifications and append them to the command result with consistent styling.
+        Format cognitive updates/notifications and append them to the command result.
 
         Args:
-            notifications: List of notification strings to format
+            updates: String containing updates from other cognitive interfaces
             result: Original command result string to append to
 
         Returns:
-            String combining result and formatted notifications
+            String combining result and formatted cognitive updates
         """
-        if not notifications:
+        if not updates or updates.strip() == "No recent updates from other interfaces":
             return result
 
         # Split result at final divider
@@ -138,14 +139,24 @@ class TerminalFormatter:
         if len(parts) != 2:
             return result
 
-        # Format notifications
-        notification_lines = ["Notifications:"]
-        for notice in notifications:
-            notification_lines.append(f"• {notice}")
-        notification_lines.append("")
+        # Format updates section
+        update_lines = [
+            "Cognitive Updates:",
+            "----------------"
+        ]
+        
+        # Split updates by newlines and format each section
+        for update in updates.split("\n\n"):
+            if update.strip():
+                # Indent update content
+                indented_update = "\n".join(
+                    f"  {line}" for line in update.split("\n") if line.strip()
+                )
+                update_lines.append(indented_update)
+                update_lines.append("")
 
-        # Reconstruct with notifications before final divider
-        return parts[0] + "\n" + "\n".join(notification_lines) + "---" + parts[1]
+        # Reconstruct with updates before final divider
+        return parts[0] + "\n" + "\n".join(update_lines) + "---" + parts[1]
 
     @staticmethod
     def format_command_result(result: CommandResult) -> str:

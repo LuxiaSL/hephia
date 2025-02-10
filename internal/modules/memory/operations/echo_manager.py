@@ -88,7 +88,7 @@ class EchoManager:
             # Evaluate ghost nodes
             for ghost in getattr(node, "ghost_nodes", []):
                 try:
-                    ghost_node = self._build_ghost_node(ghost)
+                    ghost_node = await self._build_ghost_node(ghost)
                     ghost_metrics = await self._get_node_metrics(
                         ghost_node, comparison_state, query_text, query_embedding
                     )
@@ -412,14 +412,14 @@ class EchoManager:
             self.logger.error(f"Failed to get body links: {e}")
             return []
 
-    def _build_ghost_node(self, ghost_info: Dict[str, Any]) -> CognitiveMemoryNode:
+    async def _build_ghost_node(self, ghost_info: Dict[str, Any]) -> CognitiveMemoryNode:
         """
         Construct temporary node for ghost evaluation.
         """
         embedding = ghost_info.get('embedding', [])
         if not embedding and ghost_info.get('text_content'):
             try:
-                embedding = self.metrics_orchestrator.embedding_manager.encode(ghost_info['text_content'])
+                embedding = await self.metrics_orchestrator.embedding_manager.encode(ghost_info['text_content'])
             except Exception:
                 embedding = []
         return CognitiveMemoryNode(

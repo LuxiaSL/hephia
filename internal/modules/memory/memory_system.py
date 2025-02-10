@@ -338,25 +338,25 @@ class MemorySystemOrchestrator:
         Handles both environment and content significance memory formation requests.
         """
         try:
-            text_content = event.data.get("content")
-            event_data = event.data.get("event_data", {})
-            event_type = event.data.get("event_type")
-
-            # Handle different event types
-            if event_type == "environment_transition":
-                text_content = (f"Environment: {event_data.get('environment')}\n"
-                              f"Summary: {event_data.get('summary')}")
-            elif event_type == "content_significance":
-                text_content = (f"Content: {event_data.get('content')}\n"
-                              f"Command: {event_data.get('command')}\n"
-                              f"Response: {event_data.get('response')}\n"
-                              f"Result: {event_data.get('result')}")
-
-            # Get current state from event data or fetch new
-            current_state = event_data.get('context') or await self.internal_context.get_memory_context(is_cognitive=True)
+            logger.info(f"Completing memory formation for event: {event.event_type}, data: {event.data}")
             
-            if not (text_content and current_state):
-                raise ValueError("Missing required data for memory formation")
+            # Extract content from either direct content or nested event_data
+            text_content = event.data.get("content")
+            if not text_content and "event_data" in event.data:
+                text_content = event.data["event_data"].get("content")
+            
+            # Extract event type
+            event_type = event.data.get("event_type")
+            if not event_type and "event_data" in event.data:
+                event_type = event.data["event_data"].get("event_type", "unspecified")
+
+            current_state = await self.internal_context.get_memory_context(is_cognitive=True)
+            
+            if not text_content:
+                raise ValueError("No content provided for memory formation")
+
+            if not current_state:
+                raise ValueError("No current state available for memory formation")
 
             node_id = await self.form_cognitive_memory(
                 text_content=text_content,
@@ -365,6 +365,7 @@ class MemorySystemOrchestrator:
             )
             logger.info(f"Cognitive memory formation complete; node ID: {node_id}")
             return node_id
+            
         except Exception as e:
             logger.error(f"Failed to complete memory formation: {e}")
             return None
@@ -417,7 +418,7 @@ class MemorySystemOrchestrator:
         """
         try:
             async with asyncio.timeout(timeout):
-                embedding = self.embedding_manager.encode(text_content)
+                embedding = await self.embedding_manager.encode(text_content)
                 initial_strength = await self._calculate_initial_strength(
                     context=current_state,
                     text_content=text_content,
@@ -483,7 +484,7 @@ class MemorySystemOrchestrator:
             if text_content is not None:
                 # Create temporary cognitive node
                 if embedding is None:
-                    embedding = self.embedding_manager.encode(text_content)
+                    embedding = await self.embedding_manager.encode(text_content)
                 temp_node = CognitiveMemoryNode(
                     text_content=text_content,
                     embedding=embedding,
@@ -700,13 +701,14 @@ class MemorySystemOrchestrator:
         query: str,
         comparison_state: Dict[str, Any],
         top_k: int = 10,
+        threshold: float = 0.0,
         return_details: bool = False
     ) -> Union[List[CognitiveMemoryNode], Tuple[List[CognitiveMemoryNode], List[Dict[str, Any]]]]:
         """
         Retrieve cognitive memories based on a query and a comparison state.
         """
         try:
-            query_embedding = self.embedding_manager.encode(query)
+            query_embedding = await self.embedding_manager.encode(query)
             t_metrics_config = self.metrics_config
             t_metrics_config.detailed_metrics = True
             retrieval_scores = []
@@ -735,10 +737,11 @@ class MemorySystemOrchestrator:
                         "precalculated_metrics": node_metrics
                     }
                 ))
+            filtered_results = [res for res in top_results if res[1] >= threshold]
             if return_details:
-                return ([n for n, _, _ in top_results], [m for _, _, m in top_results])
+                return ([n for n, _, _ in filtered_results], [m for _, _, m in filtered_results])
             else:
-                return [n for n, _, _ in top_results]
+                return [n for n, _, _ in filtered_results]
         except Exception as e:
             logger.error(f"Failed to retrieve memories: {e}")
             return [] if not return_details else ([], [])
@@ -955,7 +958,7 @@ class MemorySystemOrchestrator:
             node_b_id = event.data["node_b_id"]
             synthesis_text = event.data["synthesis_text"]
             resolution_context = event.data.get("resolution_context", {})
-            synthesis_embedding = self.embedding_manager.encode(synthesis_text)
+            synthesis_embedding = await self.embedding_manager.encode(synthesis_text)
             nodeA = await self.cognitive_network.get_node(node_a_id)
             nodeB = await self.cognitive_network.get_node(node_b_id)
             if not nodeA or not nodeB:

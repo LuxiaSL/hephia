@@ -275,6 +275,10 @@ class MonitorUI:
     ###########################################################################
     def update_cognitive_panel(self, event):
         try:
+            # Check if event is from exo processor interface
+            if event.data.get('source') != 'exo_processor':
+                return
+
             # Extract the main processed state
             full_summary = event.data.get('processed_state', 'No summary available')
 

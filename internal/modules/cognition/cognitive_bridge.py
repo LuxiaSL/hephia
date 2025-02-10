@@ -34,6 +34,7 @@ class CognitiveBridge:
         self.internal_context = internal_context
         self.memory_system = MemorySystemOrchestrator
         self.cognitive_state = {"raw": [], "processed": {}}
+        self.logger = BrainLogger
         self.setup_event_listeners()
 
     def setup_event_listeners(self):
@@ -60,7 +61,7 @@ class CognitiveBridge:
         else:
             return {"raw_state": self.cognitive_state.raw, "processed_state": self.cognitive_state.processed}
 
-    def _get_node_by_id(self, node_id: str) -> Optional[CognitiveMemoryNode]:
+    async def _get_node_by_id(self, node_id: str) -> Optional[CognitiveMemoryNode]:
         """
         Helper method to get a cognitive memory node by ID.
         
@@ -70,7 +71,7 @@ class CognitiveBridge:
         Returns:
             Optional[CognitiveMemoryNode]: The requested node if found, None otherwise
         """
-        return self.memory_system._get_node_by_id(node_id)
+        return await self.memory_system.get_node_by_id(node_id)
 
     async def reflect_on_topic(self, topic: str, depth: int) -> List[Dict[str, Any]]:
         """
@@ -136,7 +137,7 @@ class CognitiveBridge:
             self.logger.error(f"Reflection error: {str(e)}")
             return []
 
-    async def retrieve_memories(self, query: str, limit: int = 5, context_state: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    async def retrieve_memories(self, query: str, limit: int = 5, context_state: Optional[Dict[str, Any]] = None, threshold: float = 0) -> List[Dict[str, Any]]:
         """
         Helper method to retrieve memories using cognitive memory's retrieval system.
 
@@ -157,6 +158,7 @@ class CognitiveBridge:
                 query=query,
                 comparison_state=context_state,
                 top_k=limit,
+                threshold=threshold,
                 return_details=True
             )
             
@@ -389,88 +391,22 @@ class CognitiveBridge:
             return None
 
     async def _handle_memory_formation(self, event: Event):
-        """Handle memory formation requests from ExoProcessor."""
+        """Handle memory formation requests in a source-agnostic way."""
         try:
-            source = event.data.get('source')
-            if source == 'environment_transition':
-                # Handle environment session memory
-                await self._form_environment_memory(
-                    event.data.get('environment'),
-                    event.data.get('summary'),
-                    event.data.get('history', [])
-                )
-            elif source == 'content_significance':
-                # Handle significant content memory
-                await self._form_content_memory(
-                    event.data.get('content'),
-                    event.data.get('command'),
-                    event.data.get('response'),
-                    event.data.get('result')
-                )
+            event_data = event.data.get('event_data', {})
+            content = event_data.get('content')
+            context = event_data.get('context')
+            
+            # Request memory formation through the memory system
+            global_event_dispatcher.dispatch_event(Event(
+                "memory:formation_requested",
+                {
+                    "event_type": event.data.get('event_type', 'unknown'),
+                    "event_data": event_data
+                }
+            ))
         except Exception as e:
             global_event_dispatcher.dispatch_event(Event(
                 "cognitive:error",
                 {"message": f"Memory formation failed: {str(e)}"}
-            ))
-
-    async def _form_environment_memory(
-        self,
-        environment: str,
-        summary: str,
-        history: List[Dict]
-    ):
-        """Form memory from environment session."""
-        try:
-            # Get current state context
-            context = await self.internal_context.get_memory_context(is_cognitive=True)
-            
-            # Request memory formation through the memory system
-            global_event_dispatcher.dispatch_event(Event(
-                "memory:formation_requested",
-                {
-                    "event_type": "environment_transition",
-                    "event_data": {
-                        "environment": environment,
-                        "summary": summary,
-                        "history": history,
-                        "context": context
-                    }
-                }
-            ))
-        except Exception as e:
-            global_event_dispatcher.dispatch_event(Event(
-                "cognitive:error",
-                {"message": f"Environment memory formation failed: {str(e)}"}
-            ))
-
-    async def _form_content_memory(
-        self,
-        content: str,
-        command: str,
-        response: str,
-        result: str
-    ):
-        """Form memory from significant content."""
-        try:
-            # Get current state context
-            context = await self.internal_context.get_memory_context(is_cognitive=True)
-            
-            # Request memory formation through the memory system
-            global_event_dispatcher.dispatch_event(Event(
-                "memory:formation_requested",
-                {
-                    "event_type": "content_significance",
-                    "event_data": {
-                        "content": content,
-                        "command": command,
-                        "response": response,
-                        "result": result,
-                        "context": context
-                    }
-                }
-            ))
-        except Exception as e:
-            global_event_dispatcher.dispatch_event(Event(
-                "cognitive:error",
-                {"message": f"Content memory formation failed: {str(e)}"}
             ))

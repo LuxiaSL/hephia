@@ -38,7 +38,7 @@ class EventDispatcher:
         self.listeners: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.wildcard_listeners: List[Dict[str, Any]] = []
         # Event types to filter out (won't be logged)
-        self.event_filter: List[str] = ['timer', 'state', 'need', 'emotion']
+        self.event_filter: List[str] = ['timer', 'need', 'emotion', 'state']
         # Optionally, a list of event types to select for logging
         self.event_select: Optional[List[str]] = None
 
