@@ -27,7 +27,23 @@ class InternalContext:
         self._recent_emotions_cache_timestamp = 0.0
 
     async def get_api_context(self, use_memory_emotions: bool = True) -> dict:
-        """Gets complete JSON-serializable context with type verification."""
+        """
+        Gets complete JSON-serializable context with type verification.
+        
+        Args:
+            use_memory_emotions (bool): Whether to use memory-derived emotions or current emotional state.
+        
+        Returns:
+            dict: A dictionary containing the current mood, needs, behavior, and emotional state.
+        
+        Example:
+            {
+            'mood': {'name': 'happy', 'valence': 0.6, 'arousal': 0.3},
+            'needs': {'hunger': {'level': 0.2, 'satisfaction': 0.8}, 'social': {'level': 0.5, 'satisfaction': 0.5}},
+            'behavior': {'name': 'walk', 'active': True},
+            'emotional_state': [{'name': 'joy', 'intensity': 0.7, 'valence': 0.8, 'arousal': 0.6}]
+            }
+        """
         try:
             # Get mood state
             mood = self.internal.mood_synthesizer

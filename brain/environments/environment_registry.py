@@ -13,6 +13,7 @@ from .search import SearchEnvironment
 from .web import WebEnvironment
 from .meditation import MeditateEnvironment
 from .reflection import ReflectEnvironment
+from .action import ActionEnvironment
 from .discord import DiscordEnvironment
 from api_clients import APIManager
 
@@ -23,11 +24,12 @@ class EnvironmentRegistry:
     Manages and provides access to all available environments.
     """
     
-    def __init__(self, api_manager: APIManager, cognitive_bridge, discord_service):
+    def __init__(self, api_manager: APIManager, cognitive_bridge, action_manager, discord_service):
         """Initialize the environment registry."""
         self.environments: Dict[str, BaseEnvironment] = {}
         self.api_manager = api_manager
         self.cognitive_bridge = cognitive_bridge
+        self.action_manager = action_manager
         self.discord_service = discord_service
         self.setup_environments()
     
@@ -38,6 +40,7 @@ class EnvironmentRegistry:
         self.register_environment("web", WebEnvironment())
         self.register_environment("meditate", MeditateEnvironment(self.cognitive_bridge))
         self.register_environment("reflect", ReflectEnvironment(self.cognitive_bridge))
+        self.register_environment("action", ActionEnvironment(self.action_manager))
         if(Config.get_discord_enabled()):
             self.register_environment("discord", DiscordEnvironment(self.discord_service))
     

@@ -7,13 +7,15 @@ It manages both HTTP endpoints for commands and WebSocket connections
 for real-time state updates.
 """
 from __future__ import annotations
+from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import asyncio
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from brain.cognition.notification import Notification
 from core.timer import TimerCoordinator
 from core.state_bridge import StateBridge
 from core.event_bridge import EventBridge
@@ -58,6 +60,35 @@ class DiscordChannelUpdate(BaseModel):
     channel_name: str
     new_message_count: int
 
+class ActionRequest(BaseModel):
+    """Model for action execution requests."""
+    action: str = Field(..., description="Name of the action to perform")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Optional parameters for the action")
+    message: Optional[str] = Field(None, description="Optional message to attach to memory/notification")
+
+class ActionResponse(BaseModel):
+    """Model for action execution responses."""
+    success: bool
+    message: str
+    state_changes: Dict[str, Any]
+    memory_id: Optional[str] = None
+
+class ActionStatus(BaseModel):
+    """Model for action status information."""
+    last_execution: float
+    total_executions: int
+    successful_executions: int
+    failed_executions: int
+    on_cooldown: bool
+    remaining_cooldown: float
+
+class ActionInfo(BaseModel):
+    """Model for action information."""
+    name: str
+    description: str
+    parameters: Dict[str, Any]
+    status: ActionStatus
+
 class HephiaServer:
     """
     Main server class coordinating all Hephia's systems.
@@ -94,6 +125,7 @@ class HephiaServer:
         instance.environment_registry = EnvironmentRegistry(
             instance.api,
             cognitive_bridge=instance.internal.cognitive_bridge,
+            action_manager=instance.internal.action_manager,
             discord_service=instance.discord_service
         )
         instance.core_processor = CoreProcessor(
@@ -172,13 +204,8 @@ class HephiaServer:
         @self.app.post("/v1/prune_conversation")
         async def prune_conversation():
             """Prune the conversation history."""
-            self.exo_processor.prune_conversation()
+            self.core_processor.prune_conversation()
             return {"status": "success"}
-            
-        @self.app.get("/state")
-        async def get_state():
-            """Get current system state."""
-            return await self.state_bridge.get_api_context(use_memory_emotions=False)
         
         @self.app.post("/discord_inbound")
         async def discord_inbound(payload: DiscordInbound):
@@ -224,7 +251,164 @@ class HephiaServer:
                 channel_name=payload.channel_name
             )
             return {"status": "ok"}
-    
+        
+        @self.app.get("/v1/actions/state")
+        async def get_state():
+            """Get current system state."""
+            return await self.state_bridge.get_api_context(use_memory_emotions=False)
+
+        @self.app.post("/v1/actions/{action_name}")
+        async def execute_action(
+            action_name: str,
+            request: ActionRequest
+        ) -> ActionResponse:
+            """Execute a specific action."""
+            try:
+                # Validate action exists
+                if action_name not in self.internal.action_manager.available_actions:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Action '{action_name}' not found"
+                    )
+
+                # Execute action
+                result = self.internal.action_manager.perform_action(
+                    action_name,
+                    **request.parameters
+                )
+
+                if not result["success"]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=result.get("error", "Action failed")
+                    )
+
+                # Create notification for cognitive awareness
+                notification = await self.core_processor.handle_action_request({
+                    "type": "action_execution",
+                    "action": action_name,
+                    "result": result,
+                    "message": request.message,
+                    "timestamp": datetime.now(),
+                    "state_changes": result.get("state_changes", {})
+                })
+
+                 # Request memory formation if we have a message or significant state change
+                if result.get("state_changes"):
+                    # Request memory formation through cognitive bridge
+                    global_event_dispatcher.dispatch_event(Event(
+                        "cognitive:memory:request_formation",
+                        {
+                            "event_type": "action_execution",
+                            "event_data": {
+                                "content": self.core_processor.interfaces['action']._generate_summary([notification]),
+                                "context": {
+                                    "action": action_name,
+                                    "result": result,
+                                    "state_changes": result.get("state_changes", {}),
+                                    "user_message": request.message
+                                }
+                            }
+                        }
+                    ))
+
+                # Dispatch event for state update
+                global_event_dispatcher.dispatch_event(Event("internal:action", {
+                    "action": action_name,
+                    "result": result,
+                    "has_memory": bool(request.message or result.get("state_changes"))
+                }))
+
+                return ActionResponse(
+                    success=True,
+                    message=f"Successfully executed {action_name}",
+                    state_changes=result.get("state_changes", {}),
+                    memory_created=bool(result.get("state_changes"))
+                )
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/v1/actions")
+        async def get_available_actions() -> Dict[str, ActionInfo]:
+            """Get information about all available actions and their current status."""
+            try:
+                # Get actions and their current status
+                actions = self.internal.action_manager.available_actions
+                statuses = self.internal.action_manager.get_action_status()
+                
+                response = {}
+                for name, action in actions.items():
+                    # Extract parameter info from action class
+                    parameters = {}
+                    if hasattr(action, '_base_cooldown'):
+                        parameters['cooldown'] = action._base_cooldown
+                    if hasattr(action, 'calculate_recovery_amount'):
+                        parameters['dynamic_recovery'] = True
+                    
+                    # Get current status and flatten it.
+                    raw_status = statuses.get(name, {})
+                    flat_status = self.flatten_action_status(raw_status)
+                    status_obj = ActionStatus(**flat_status)
+                    
+                    response[name] = ActionInfo(
+                        name=name,
+                        description=action.__doc__ or "No description available",
+                        parameters=parameters,
+                        status=status_obj
+                    )
+                
+                return response
+                        
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+
+        @self.app.get("/v1/actions/{action_name}/status")
+        async def get_action_status(action_name: str) -> ActionStatus:
+            """Get detailed status information for a specific action."""
+            try:
+                if action_name not in self.internal.action_manager.available_actions:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Action '{action_name}' not found"
+                    )
+
+                raw_status = self.internal.action_manager.get_action_status(action_name)
+                flat_status = self.flatten_action_status(raw_status)
+                return ActionStatus(**flat_status)
+
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+    def flatten_action_status(self, raw_status: dict) -> dict:
+        """
+        Helper to flatten the status dictionary returned by the ActionManager.
+        Expected raw_status structure:
+        {
+            "history": {
+                "last_execution": ...,
+                "total_executions": ...,
+                "successful_executions": ...,
+                "failed_executions": ...
+            },
+            "on_cooldown": <bool>,
+            "remaining_cooldown": <float>
+        }
+        This returns a flat dict that matches the ActionStatus model.
+        """
+        history = raw_status.get('history', {})
+        return {
+            'last_execution': history.get('last_execution', 0),
+            'total_executions': history.get('total_executions', 0),
+            'successful_executions': history.get('successful_executions', 0),
+            'failed_executions': history.get('failed_executions', 0),
+            'on_cooldown': raw_status.get('on_cooldown', False),
+            'remaining_cooldown': raw_status.get('remaining_cooldown', 0)
+        }
+
     def setup_event_handlers(self) -> None:
         """Set up handlers for system events."""
         # Create tasks for async handlers

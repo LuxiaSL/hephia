@@ -7,7 +7,6 @@ proper context and memory formation.
 """
 
 from typing import Dict, List, Any, Optional
-from datetime import datetime
 
 from brain.environments.terminal_formatter import TerminalFormatter
 from brain.interfaces.base import CognitiveInterface

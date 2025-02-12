@@ -15,6 +15,7 @@ from brain.interfaces.base import CognitiveInterface, NotificationManager
 from brain.interfaces.exo import ExoProcessorInterface
 from brain.interfaces.discord import DiscordInterface
 from brain.interfaces.user import UserInterface
+from brain.interfaces.action import ActionInterface
 from brain.core.command_handler import CommandHandler
 from brain.cognition.notification import Notification, NotificationManager
 from brain.cognition.memory.manager import MemoryManager
@@ -134,6 +135,12 @@ class CoreProcessor:
             
             self.interfaces['user'] = UserInterface(
                 self.api,
+                self.state_bridge,
+                self.cognitive_bridge,
+                self.notification_manager
+            )
+
+            self.interfaces['action'] = ActionInterface(
                 self.state_bridge,
                 self.cognitive_bridge,
                 self.notification_manager
@@ -396,3 +403,25 @@ class CoreProcessor:
         except Exception as e:
             BrainLogger.error(f"Discord channel update error: {e}")
             raise
+
+    async def handle_action_request(
+        self,
+        content: Dict[str, Any]
+    ) -> Notification:
+        """Handle action requests from other components."""
+        try:
+            # Process through Action interface - it handles its own notifications
+            return await self.interfaces['action'].create_notification(content)
+
+        except Exception as e:
+            BrainLogger.error(f"Action request error: {e}")
+            raise e
+
+    async def prune_conversation(self) -> None:
+        """Prune conversation history to maintain system performance."""
+        try:
+            # Prune conversation through ExoProcessor interface
+            await self.interfaces['exo_processor'].prune_conversation()
+        except Exception as e:
+            BrainLogger.error(f"Conversation pruning error: {e}")
+            raise e

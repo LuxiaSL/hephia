@@ -11,7 +11,7 @@ def main():
 
     # We'll keep a local conversation array in memory
     # The roles can be: "system", "user", "assistant"
-    # (The server likely injects its own system prompt, so you don't *have* to add it here,
+    # (The server injects its own system prompt, so you don't *have* to add it here,
     # but you can if you'd like.)
     conversation = []
 
@@ -33,7 +33,7 @@ def main():
         try:
             # Send the entire conversation so far to the server
             payload = {"messages": conversation, "stream": False}
-            response = requests.post(server_url, json=payload, timeout=60)
+            response = requests.post(server_url, json=payload, timeout=120)
             response.raise_for_status()
 
             data = response.json()

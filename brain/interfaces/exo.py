@@ -418,3 +418,11 @@ Current state context:
                 self.conversation_history[0],  # Keep system prompt
                 *self.conversation_history[-(max_length - 2):]
             ]
+
+    async def prune_conversation(self):
+        """Remove the last message pair from conversation history and update state."""
+        if len(self.conversation_history) > 2:  # Keep system prompt + at least 1 exchange
+            # Remove last two messages (user/assistant pair)
+            self.conversation_history = self.conversation_history[:-2]
+            
+            BrainLogger.debug("Pruned last conversation pair")

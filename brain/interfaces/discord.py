@@ -7,7 +7,6 @@ while maintaining natural social engagement patterns.
 """
 
 from typing import Dict, List, Any, Optional
-from datetime import datetime
 
 from brain.environments.terminal_formatter import TerminalFormatter
 from core.state_bridge import StateBridge
