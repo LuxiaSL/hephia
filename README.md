@@ -51,9 +51,10 @@ python main.py
 #### Note: The terminal tends to be buggy on Unix systems due to consistent drawing; if something fudges, just resize the window and it'll settle.
 
 ## Tools
-- Use `tools/talk.py` to communicate with the loop (identity continuity very WIP)
-- Use `tools/prune.py` for soft reset
-- Use `tools/clear_data.py` for hard reset (warning: wipes all prior progress)
+- Use `tools\actions_sdk.py` to perform different interactions and take care of needs
+- Use `tools\talk.py` to communicate with the loop
+- Use `tools\prune.py` for soft reset
+- Use `tools\clear_data.py` for hard reset (warning: wipes all prior progress)
 
 ---
 
