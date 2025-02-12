@@ -51,6 +51,7 @@ python main.py
 #### Note: The terminal tends to be buggy on Unix systems due to consistent drawing; if something fudges, just resize the window and it'll settle.
 
 ## Tools
+### [Tools README](tools/README.md)
 - Use `tools\actions_sdk.py` to perform different interactions and take care of needs
 - Use `tools\talk.py` to communicate with the loop
 - Use `tools\prune.py` for soft reset
