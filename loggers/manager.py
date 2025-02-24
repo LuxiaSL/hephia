@@ -6,7 +6,7 @@ Handles logger setup and configuration.
 import logging
 from pathlib import Path
 from datetime import datetime
-from .formatters import InternalFormatter, ExoLoopFormatter, MemoryFormatter, EventFormatter
+from .formatters import InternalFormatter, ExoLoopFormatter, MemoryFormatter, EventFormatter, PromptFormatter
 
 class LogManager:
     """Enhanced log management with multiple output streams."""
@@ -21,7 +21,8 @@ class LogManager:
         system_dir = log_base / 'system'
         memory_dir = log_base / 'memory'
         event_dir = log_base / 'events'
-        for directory in [internal_dir, exoloop_dir, system_dir, memory_dir, event_dir]:
+        prompt_dir = log_base / 'prompts'
+        for directory in [internal_dir, exoloop_dir, system_dir, memory_dir, event_dir, prompt_dir]:
             directory.mkdir(parents=True, exist_ok=True)
             
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -32,7 +33,8 @@ class LogManager:
             'hephia.system': (system_dir / f"system_{timestamp}.log", InternalFormatter()),
             'hephia.brain': (exoloop_dir / f"brain_{timestamp}.log", ExoLoopFormatter()),
             'hephia.memory': (memory_dir / f"memory_{timestamp}.log", MemoryFormatter()),
-            'hephia.events': (event_dir / f"events_{timestamp}.log", EventFormatter())
+            'hephia.events': (event_dir / f"events_{timestamp}.log", EventFormatter()),
+            'hephia.prompts': (prompt_dir / f"prompts_{timestamp}.log", PromptFormatter()),
         }
         
         for logger_name, (log_file, formatter) in config.items():

@@ -12,6 +12,7 @@ from event_dispatcher import global_event_dispatcher, Event
 from brain.utils.tracer import brain_trace
 from brain.cognition.notification import Notification, NotificationManager, NotificationInterface
 
+from brain.prompts.manager import PromptManager
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 
@@ -22,10 +23,12 @@ class CognitiveInterface(NotificationInterface, ABC):
         state_bridge: StateBridge,  
         cognitive_bridge: CognitiveBridge,
         notification_manager: NotificationManager,
+        prompt_manager: PromptManager
     ):
         super().__init__(interface_id, notification_manager)
         self.state_bridge = state_bridge
         self.cognitive_bridge = cognitive_bridge
+        self.prompt_manager = prompt_manager
 
     @abstractmethod
     async def process_interaction(self, content: Any) -> Any:

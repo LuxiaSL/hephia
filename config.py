@@ -181,6 +181,10 @@ class Config:
     @classmethod
     def get_headless(cls) -> bool:
         return os.getenv("HEADLESS", "False").lower() in ("true", "1", "yes")
+    
+    @classmethod
+    def get_log_prompts(cls) -> bool:
+        return os.getenv("LOG_PROMPTS", "False").lower() in ("true", "1", "yes")
 
     DISCORD_BOT_URL = "http://localhost:9001"
 

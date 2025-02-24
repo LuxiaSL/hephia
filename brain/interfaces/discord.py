@@ -13,9 +13,10 @@ from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 from brain.interfaces.base import CognitiveInterface
 from brain.cognition.notification import Notification, NotificationManager
-
 from brain.cognition.memory.significance import MemoryData, SourceType
 from brain.utils.tracer import brain_trace
+
+from brain.prompts.manager import PromptManager
 from config import Config
 from loggers import BrainLogger
 from api_clients import APIManager
@@ -28,8 +29,9 @@ class DiscordInterface(CognitiveInterface):
             state_bridge: StateBridge,
             cognitive_bridge: CognitiveBridge,
             notification_manager: NotificationManager,
+            prompt_manager: PromptManager
         ):
-        super().__init__("discord", state_bridge, cognitive_bridge, notification_manager)
+        super().__init__("discord", state_bridge, cognitive_bridge, notification_manager, prompt_manager)
         self.api = api_manager
         
     @brain_trace
@@ -113,31 +115,36 @@ class DiscordInterface(CognitiveInterface):
     async def _generate_summary(self, notifications: List[Notification]) -> str:
         """Generate a summary of this interface's provided notifications."""
         BrainLogger.debug(f"notifications: {notifications}")
-        formatted = []
+    
+        formatted_notifications = []
         for notif in notifications:
-            BrainLogger.debug(f"notif: {notif}, content: {notif.content}")
+            notification_data = {
+                "type": notif.content.get('update_type', 'interaction'),
+                "channel": {
+                    "name": notif.content.get('channel_name', 'Unknown'),
+                    "id": notif.content.get('channel_id', 'Unknown')
+                },
+                "content": notif.content,
+                "message_id": notif.content.get('message_id'),
+                "message": notif.content.get('message', ''),
+                "response": notif.content.get('response', ''),
+                "author": notif.content.get('author', 'Unknown')
+            }
             
-            if notif.content.get('update_type') == 'channel_activity':
-                # Handle channel activity updates
-                message = (
-                    f"New messages detected in Discord channel {notif.content.get('channel_name', 'Unknown')}"
-                    f"(ID: {notif.content.get('channel_id', 'Unknown')})"
-                )
-                formatted.append(message)
-            else:
-                # Handle conversation notifications
-                content = notif.content
-                summary_text = (
-                    f"Discord update: Replied to {content.get('author', 'Unknown')} in channel {content.get('channel', 'Unknown')}\n"
-                    f"- Message ID: {content.get('message_id', 'Unknown')}\n"
-                    f"- User said: {content.get('message', '')[:250]}{'...' if len(content.get('message', '')) > 250 else ''}\n"
-                    f"- My response: {content.get('response', '')[:50]}{'...' if len(content.get('response', '')) > 50 else ''}"
-                )
-                formatted.append(summary_text)
+            # Use prompt manager to format notification
+            template_name = (
+                "discord_channel" if notification_data["type"] == "channel_activity"
+                else "discord_interaction"
+            )
+            
+            formatted = await self.prompt_manager.build_prompt(
+                template_name=template_name,
+                data=notification_data,
+                format_name="notifications"
+            )
+            formatted_notifications.append(formatted)
         
-        summary = "\n".join(formatted[-5:])  # Last 5 notifications
-        return f"""Recent Discord Activity:
-    {summary}"""
+        return "\n".join(formatted_notifications[-5:])  # Keep last 5 notifications
         
     async def _dispatch_memory_check(
         self,
@@ -195,7 +202,14 @@ class DiscordInterface(CognitiveInterface):
     ) -> str:
         """Format cognitive context for social interactions."""
         # Format state information
-        return TerminalFormatter.format_context_summary(state, memories)
+        return await self.prompt_manager.build_prompt(
+            template_name="base",
+            data={
+                "state": state,
+                "memories": memories
+            },
+            format_name="cognitive"
+        )
     
     async def format_memory_context(
         self,
@@ -211,48 +225,22 @@ class DiscordInterface(CognitiveInterface):
             state: Current cognitive state
             metadata: Contains message and channel information
         """
-        message_data = metadata.get('message', {})
-        author = message_data.get('author', 'Unknown')
-        channel = message_data.get('channel', {}).get('name', 'Unknown')
-        guild = message_data.get('channel', {}).get('guild_name', 'DM')
-        
-        history = metadata.get('history', [])
-        history_text = ""
-        if history:
-            history_entries = []
-            for msg in history:
-                try:
-                    # Use proper timestamp field from message
-                    timestamp = msg.get('timestamp', '').split('.')[0]  # Remove microseconds
-                    date = timestamp.split('T')[0]
-                    time = timestamp.split('T')[1][:8]
-                    history_entries.append(
-                        f"[{date} {time}] {msg.get('author', 'Unknown')}: {msg.get('content', '')}"
-                    )
-                except (KeyError, IndexError, AttributeError):
-                    # Fallback for malformed entries
-                    history_entries.append(f"{msg.get('author', 'Unknown')}: {msg.get('content', '')}")
-            
-            history_text = "\n".join(history_entries)
+        interaction_data = {
+            "channel": metadata.get('channel', {}).get('name', 'Unknown'),
+            "guild": metadata.get('channel', {}).get('guild_name', 'DM'),
+            "author": metadata.get('message', {}).get('author', 'Unknown'),
+            "response": content,
+            "history": metadata.get('history', [])
+        }
 
-        return f"""Form a memory of this Discord interaction:
-
-Context:
-Channel: #{channel} in {guild}
-Conversation with: {author}
-
-Recent History:
-{history_text}
-
-My Response: {content}
-
-Create a concise first-person memory snippet that captures:
-1. The social dynamics and emotional context
-2. Any relationship developments or insights
-3. Key points of the conversation
-4. My thoughts and reactions
-
-Write from Hephia's perspective as a natural social interaction memory."""
+        return await self.prompt_manager.build_prompt(
+            template_name="discord",
+            data={
+                "state": state,
+                "interaction": interaction_data
+            },
+            format_name="memory"
+        )
 
     async def get_relevant_memories(self) -> List[Dict[str, Any]]:
         """
@@ -273,53 +261,44 @@ Write from Hephia's perspective as a natural social interaction memory."""
         history: List[Dict[str, Any]],
         context: str
     ) -> str:
-        """Format prompt for social interaction."""
-        # Format conversation history
-        history_text = ""
-        if history:
-            history_entries = []
-            for msg in history:
-                try:
-                    # Use proper timestamp field from message
-                    timestamp = msg.get('timestamp', '').split('.')[0]  # Remove microseconds
-                    date = timestamp.split('T')[0]
-                    time = timestamp.split('T')[1][:8]
-                    history_entries.append(
-                        f"[{date} {time}] {msg.get('author', 'Unknown')}: {msg.get('content', '')}"
-                    )
-                except (KeyError, IndexError, AttributeError):
-                    # Fallback for malformed entries
-                    history_entries.append(f"{msg.get('author', 'Unknown')}: {msg.get('content', '')}")
-            
-            history_text = "\n".join(history_entries)
-            
-        channel_type = "server" if channel_data.get('guild_name') else "DM"
-        channel_name = channel_data.get('name', 'Unknown')
-        
-        return f"""Process this Discord interaction from your perspective:
+        """Format social prompt using prompt system."""
+        interaction_data = {
+            "channel": {
+                "type": "server" if channel_data.get('guild_name') else "DM",
+                "name": channel_data.get('name', 'Unknown'),
+                "guild": channel_data.get('guild_name', '')
+            },
+            "author": author,
+            "content": message_content,
+            "history": history
+        }
 
-Environment: Discord {channel_type} (#{channel_name})
-From: {author}
-Message: {message_content}
-
-Recent Conversation:
-{history_text}
-
-My Current Context:
-{context}"""
+        return await self.prompt_manager.build_prompt(
+            template_name="discord",
+            data={
+                "base_prompt": Config.DISCORD_SYSTEM_PROMPT,
+                "interaction": interaction_data,
+                "context": context
+            },
+            format_name="interface"
+        )
 
     async def _get_social_response(self, prompt: str) -> str:
         """Get LLM response for social interaction."""
         model_name = Config.get_cognitive_model()
         model_config = Config.AVAILABLE_MODELS[model_name]
         
-        system_prompt = Config.DISCORD_SYSTEM_PROMPT
+        system_message = await self.prompt_manager.build_prompt(
+            template_name="discord",
+            data={},
+            format_name="system"
+        )
         
         return await self.api.create_completion(
             provider=model_config.provider.value,
             model=model_config.model_id,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
             ],
             temperature=model_config.temperature,

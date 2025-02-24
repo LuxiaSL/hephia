@@ -3,6 +3,7 @@ Formatters for different log types in Hephia.
 Handles consistent formatting across different logging streams.
 """
 
+import json
 import logging
 
 class InternalFormatter(logging.Formatter):
@@ -37,6 +38,21 @@ class MemoryFormatter(logging.Formatter):
         timestamp = self.formatTime(record)
         msg = record.getMessage()
         return f"[{timestamp}] {record.levelname:8} MEMORY | {msg}"
+
+class PromptFormatter(logging.Formatter):
+    """Formatter for prompt logging with clear sections and JSON formatting."""
+    
+    def format(self, record):
+        timestamp = self.formatTime(record)
+        msg = record.getMessage()
+        
+        # Format message as JSON with proper indentation
+        try:
+            data = json.loads(msg)
+            formatted_json = json.dumps(data, indent=2)
+            return f"[{timestamp}]\n{formatted_json}\n{'='*80}"
+        except json.JSONDecodeError:
+            return f"[{timestamp}] {msg}"
     
 class EventFormatter(logging.Formatter):
     """Formatter for event dispatcher"""
