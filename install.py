@@ -152,7 +152,7 @@ def main():
 
     # Download NLTK data
     print_status("Downloading NLTK data...")
-    nltk_script = "import nltk; nltk.download('punkt_tab'); nltk.download('maxent_ne_chunker'); nltk.download('words')"
+    nltk_script = "import nltk; nltk.download('punkt_tab'); nltk.download('maxent_ne_chunker'); nltk.download('maxent_ne_chunker_tab'); nltk.download('averaged_perceptron_tagger_eng'); nltk.download('words')"
     if not run_command([python_path, "-c", nltk_script],
                      "Failed to download NLTK data"):
         return

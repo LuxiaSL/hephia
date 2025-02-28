@@ -200,7 +200,7 @@ class BaseNetwork(Generic[T], ABC):
         self,
         start_node: T,
         max_depth: int = 3,
-        min_weight: float = 0.0,
+        min_weight: float = 0.75,
         visited: Optional[Set[str]] = None
     ) -> Dict[int, List[T]]:
         """

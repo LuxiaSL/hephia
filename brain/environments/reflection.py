@@ -113,7 +113,8 @@ class ReflectEnvironment(BaseEnvironment):
         try:
             if action == "query":
                 topic = params[0]
-                depth = flags.get("depth", 1)
+                depth = min(flags.get("depth", 1), 2)
+
                 try:
                     # Get relevant memories through cognitive bridge
                     nodes = await self.cognitive_bridge.reflect_on_topic(topic, depth)

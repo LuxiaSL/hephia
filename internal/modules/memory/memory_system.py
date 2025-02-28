@@ -835,8 +835,7 @@ class MemorySystemOrchestrator:
                     # Get connected nodes with proper error handling
                     connections = await self.cognitive_network.traverse_network(
                         start_node=node,
-                        max_depth=depth,
-                        min_weight=0.3
+                        max_depth=depth
                     )
                     
                     # Ensure we have a proper dict of depth -> nodes
@@ -915,7 +914,6 @@ class MemorySystemOrchestrator:
             connections = await self.cognitive_network.traverse_network(
                 start_node=node,
                 max_depth=2,
-                min_weight=0.2
             )
             result = {
                 "memory_id": node.node_id,

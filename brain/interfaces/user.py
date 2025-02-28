@@ -235,7 +235,7 @@ Write from my perspective as a natural conversation memory."""
                 
                 # Get last user message if available
                 last_user_msg = next(
-                    (msg['content'][:250] + '...' for msg in reversed(recent_msgs) 
+                    (msg['content'] for msg in reversed(recent_msgs) 
                      if msg['role'] == 'user'),
                     'No message'
                 )
