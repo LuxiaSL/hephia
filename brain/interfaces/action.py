@@ -50,20 +50,6 @@ class ActionInterface(CognitiveInterface):
             if message:
                 summary += f" They also mentioned that: ({message})"
             
-            # Format significant state changes
-            if state_changes:
-                changes = []
-                for key, value in state_changes.items():
-                    # Handle numerical changes
-                    if isinstance(value, (int, float)):
-                        if abs(value) > 0.1:  # Only show significant changes
-                            changes.append(f"my {key} changed by {value:+.1f}")
-                    else:
-                        changes.append(f"my {key} became {value}")
-                
-                if changes:
-                    summary += f"\n- Effects: {', '.join(changes)}"
-            
             # Add timestamp context
             if 'timestamp' in content:
                 try:

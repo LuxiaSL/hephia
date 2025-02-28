@@ -1,5 +1,5 @@
 """
-brain/interfaces/user_interface.py
+brain/interfaces/user.py
 
 Implements direct user conversation handling through the User interface.
 Maintains cognitive continuity for direct user interactions while managing

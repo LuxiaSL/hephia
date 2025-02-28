@@ -3,6 +3,7 @@ Specialized loggers for different Hephia subsystems.
 Provides clean interfaces for specific logging needs.
 """
 
+from datetime import datetime
 import logging
 import json
 import re
@@ -261,6 +262,32 @@ class MemoryLogger:
             f"  From Memory ID: {strip_emojis(from_memory_id)}\n"
             f"  To Memory ID: {strip_emojis(to_memory_id)}"
         )
+
+class PromptLogger:
+    """Logger for LLM prompt generation and API calls."""
+    
+    @staticmethod
+    def log_prompt(
+        service: str,
+        messages: List[Dict[str, str]],
+        model: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """Log a prompt before it's sent to an LLM."""
+        logger = logging.getLogger('hephia.prompts')
+        
+        # Clean and structure the log data
+        log_data = {
+            "timestamp": datetime.now().isoformat(),
+            "service": strip_emojis(service),
+            "model": strip_emojis(model),
+            "messages": [{k: strip_emojis(str(v)) for k,v in msg.items()} for msg in messages]
+        }
+        
+        if metadata:
+            log_data["metadata"] = {k: strip_emojis(str(v)) for k,v in metadata.items()}
+            
+        logger.debug(json.dumps(log_data))
 
 class EventLogger:
     """Logger for event system operations."""

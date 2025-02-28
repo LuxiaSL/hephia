@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hephia"
+version = "0.1.0"
+description = "An autonomous independent digital companion"
+readme = "README.md"
+requires-python = ">=3.9, <3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "Luxia", email = "lucia@kaleidoscope.glass" }
+]
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "aiohttp",
+    "bs4",
+    "colorama",
+    "python-dotenv",
+    "nltk>=3.8.1",
+    "pydantic",
+    "numpy",
+    "sentence-transformers",
+    "discord.py",
+    "aiosqlite",
+    "windows-curses; sys_platform == 'win32'",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]  # Directory to search for packages
+include = ["*"]  # Pattern to include
+exclude = ["tests*"]  # Pattern to exclude
+namespaces = true  # Optional: Look for namespace packages too
