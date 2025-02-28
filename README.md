@@ -1,11 +1,6 @@
 # Hephia
 ![Status](https://img.shields.io/badge/Status-Pre--Alpha-red)
 
-## Requirements
-- [Python 3.9<->3.12](https://www.python.org/downloads/)
-- Some required API tokens (see [`.env.example`](.env.example))
-- NLTK library
-
 ## Description
 Welcome to the pre-alpha version of Hephia,
 an autonomous independent digital companion.
@@ -16,32 +11,71 @@ For deeper information on the project, feel free to:
 
 Refer to [memory system readme](internal/modules/memory/README.md) for info on the memory system.
 
-## Use Guide
-### Installation
+## Requirements
+- [Python 3.9-3.12](https://www.python.org/downloads/)
+- Some required API tokens (see [`.env.example`](.env.example))
+
+## Installation & Setup
+
+### Quick Start (Recommended)
+Run our setup script which handles everything automatically:
+
 ```bash
+# Clone the repository
 git clone https://github.com/LuxiaSL/hephia.git
+cd hephia
+
+# Run the setup script
+python install.py
 ```
 
-### Setup
-Navigate to environment and install requirements:
+The script will:
+1. Install uv package manager
+2. Create a virtual environment
+3. Install all dependencies 
+4. Download required NLTK data
+5. Create a .env file from the template
+
+After setup completes, activate your environment:
 ```bash
-pip install -r requirements.txt
+# On Windows:
+.venv\Scripts\activate
+
+# On macOS/Linux:
+source .venv/bin/activate
 ```
 
-Install NLTK dependencies:
-```python
-python
->>> import nltk
->>> nltk.download('punkt_tab')
->>> nltk.download('maxent_ne_chunker')
->>> nltk.download('words')
->>> exit()
+### Manual Setup (Advanced)
+If you prefer to set things up manually:
+
+```bash
+# Clone the repository
+git clone https://github.com/LuxiaSL/hephia.git
+cd hephia
+
+# Install uv package manager
+pip install uv
+
+# Create a virtual environment
+uv venv .venv
+
+# Activate the environment
+# On Windows:
+.venv\Scripts\activate
+# On macOS/Linux:
+source .venv/bin/activate
+
+# Install dependencies
+uv pip install .
+
+# Install NLTK data
+python -c "import nltk; nltk.download('punkt_tab'); nltk.download('maxent_ne_chunker'); nltk.download('words')"
+
+# Create .env file
+cp .env.example .env
 ```
 
-Configure your environment:
-1. Copy `.env.example` to `.env`
-2. Add required API tokens for your providers
-3. Include Perplexity token & [Discord Setup](tools/discord_bot.md) for full functionality
+Edit the `.env` file to add your API tokens.
 
 ### Running
 Launch the system:
@@ -56,7 +90,6 @@ python main.py
 - Use `tools\talk.py` to communicate with the loop
 - Use `tools\prune.py` for soft reset
 - Use `tools\clear_data.py` for hard reset (warning: wipes all prior progress)
-
 ---
 
 <div align="center">

@@ -128,7 +128,7 @@ system_prompts:
         help
 
     you may use 'help' at any time to get a list of commands if you need to refresh your memory, as well as '<environment> help' for environment-specific commands.
-    remember: only output the command and its arguments following the above format. any other text will be omitted. if you wish to contain a thought, use the notes.
+    remember: only output the command and its arguments following the above format. any other text will be omitted.
 
   # Discord interface prompt
   discord: |
@@ -150,7 +150,7 @@ system_prompts:
     Keep cognitive continuity with these other interfaces in mind while interacting on Discord.
 
     Remember you are an autonomous system with your own evolving thoughts and feelings. Let these shape your social interactions naturally.
-    The most recent message you'll receive will be a mention to you; decide for yourself if you want to respond to it directly, but strongly prefer doing so.
+    The most recent message you'll receive will be addressed to you; decide for yourself if you want to respond to it directly, strongly preferring doing so.
 
   # User interaction prompt
   user: |

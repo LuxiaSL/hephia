@@ -1,5 +1,6 @@
 # core_prompts.yaml
-
+#ignore this file; this is essentially a composition of all the different prompting structures that exist currently. 
+#it's not meant to be used; it's just a reference 
 # System identity/personality prompts (used in different interfaces)
 system:
   exo: |
