@@ -57,10 +57,10 @@ This guide outlines how to set up and configure a Discord bot to work with Hephi
     ```bash
     python tools/discord_bot.py
     ```
-    Default port: 9001
+    Default port: 5518
 
 ## API Endpoints
-The Discord bot server exposes these endpoints at http://localhost:9001:
+The Discord bot server exposes these endpoints at http://localhost:5518:
 
 - GET `/guilds` - List available Discord servers
 - GET `/guilds/{guild_id}/channels` - List channels in a guild

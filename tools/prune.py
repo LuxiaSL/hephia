@@ -6,7 +6,7 @@ colorama.init(autoreset=True)
 
 def prune_conversation():
     """Send a request to prune the conversation history."""
-    server_url = "http://localhost:8000/v1/prune_conversation"
+    server_url = "http://localhost:5517/v1/prune_conversation"
     
     try:
         print(Fore.YELLOW + "Pruning conversation history..." + Style.RESET_ALL)

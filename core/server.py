@@ -547,7 +547,7 @@ class HephiaServer:
                 print(f"Error broadcasting to client: {e}")
                 self.active_connections.remove(connection)
     
-    def run(self, host: str = "0.0.0.0", port: int = 8000):
+    def run(self, host: str = "0.0.0.0", port: int = 5517):
         """
         Run the server.
         

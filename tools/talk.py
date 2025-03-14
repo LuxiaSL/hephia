@@ -7,7 +7,7 @@ from colorama import Fore, Style
 colorama.init(autoreset=True)
 
 def main():
-    server_url = "http://localhost:8000/v1/chat/completions"
+    server_url = "http://localhost:5517/v1/chat/completions"
 
     # We'll keep a local conversation array in memory
     # The roles can be: "system", "user", "assistant"

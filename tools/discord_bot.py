@@ -49,8 +49,8 @@ logger.addHandler(console_handler)
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Your bot's token
-HEPHIA_SERVER_URL = "http://localhost:8000"     # Where Hephia server listens
-BOT_HTTP_PORT = 9001                            # Port where *this* bot listens
+HEPHIA_SERVER_URL = "http://localhost:5517"     # Where Hephia server listens
+BOT_HTTP_PORT = 5518                            # Port where *this* bot listens
 
 # For convenience, define a global reference to the bot
 bot: "RealTimeDiscordBot" = None
@@ -156,13 +156,13 @@ class RealTimeDiscordBot(discord.Client):
         content = content.replace(bot_mention, f'@{self.user.name}')
         content = content.replace(bot_mention_bang, f'@{self.user.name}')
 
-        # Get recent message history for context (last 50 messages)
+        # Get recent message history for context (last 100 messages)
         try:
             logger.debug(f"[Bot] Fetching message history for context before {message.id}")
             history = []
             message_count = 0
             
-            async for hist_msg in message.channel.history(limit=50, before=message):
+            async for hist_msg in message.channel.history(limit=100, before=message):
                 message_count += 1
                 if hasattr(hist_msg.author, 'global_name'):
                     hist_author = hist_msg.author.name

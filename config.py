@@ -163,7 +163,7 @@ class Config:
     @classmethod
     def get_chapter2_http_port(cls) -> int:
         """Get the Chapter 2 HTTP port from env or default."""
-        return int(os.getenv("CHAPTER2_HTTP_PORT", "8008"))
+        return int(os.getenv("CHAPTER2_HTTP_PORT", "5519"))
 
     @classmethod
     def get_use_local_embedding(cls) -> bool:
@@ -186,7 +186,7 @@ class Config:
     def get_log_prompts(cls) -> bool:
         return os.getenv("LOG_PROMPTS", "False").lower() in ("true", "1", "yes")
 
-    DISCORD_BOT_URL = "http://localhost:9001"
+    DISCORD_BOT_URL = "http://localhost:5518"
 
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5

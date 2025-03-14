@@ -4,7 +4,7 @@ import aiohttp
 import json
 
 # Configuration
-BOT_HTTP_URL = "http://localhost:9001"
+BOT_HTTP_URL = "http://localhost:5518"
 TIMEOUT = 10  # seconds
 
 def log(message: str):
