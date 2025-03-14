@@ -49,10 +49,39 @@ class BodyMemoryNetwork(BaseNetwork[BodyMemoryNode]):
 
     async def _load_existing_nodes(self) -> None:
         loaded_nodes = await self.body_db_manager.load_all_nodes()
+        current_time = time.time()
+        valid_node_ids = set()
+
+        # First pass: load all nodes and collect valid IDs
         for node in loaded_nodes:
-            node.node_id = str(node.node_id)
+            node.node_id = str(node.node_id)  # Ensure string IDs in memory
+            valid_node_ids.add(node.node_id)
+            node.last_accessed = getattr(node, 'last_accessed', None) or current_time
+            node.last_connection_update = getattr(node, 'last_connection_update', None) or current_time
             self.nodes[node.node_id] = node
-        self.logger.info(f"Loaded {len(loaded_nodes)} BodyMemoryNodes from DB.")
+
+        # Second pass: validate and clean up connections
+        total_invalid = 0
+        for node in self.nodes.values():
+            invalid_connections = []
+            for conn_id, weight in list(node.connections.items()):
+                str_conn_id = str(conn_id)  # Ensure string comparison
+                if (str_conn_id not in valid_node_ids or
+                    weight < self.config.min_connection_strength or
+                    str_conn_id == node.node_id):
+                    invalid_connections.append(conn_id)
+            
+            for invalid_id in invalid_connections:
+                node.connections.pop(invalid_id, None)
+                total_invalid += 1
+            
+            if invalid_connections:
+                await self.body_db_manager.update_node(node)
+        
+        self.logger.info(
+            f"Loaded {len(loaded_nodes)} BodyMemoryNodes from DB. "
+            f"Cleaned up {total_invalid} invalid connections."
+        )
 
     # -------------------------------------------------------------------------
     # Core CRUD Operations
@@ -80,6 +109,9 @@ class BodyMemoryNetwork(BaseNetwork[BodyMemoryNode]):
             candidates = await self.get_active_nodes()
             if candidates:
                 self.logger.debug(f"Forming initial connections for node {node.node_id}")
+                # Ensure node ID is string
+                node.node_id = str(node.node_id)
+                
                 connection_weights = await self.connection_manager.form_initial_connections(
                     node=node,
                     candidates=candidates
@@ -93,9 +125,9 @@ class BodyMemoryNetwork(BaseNetwork[BodyMemoryNode]):
                     
                     # Update reciprocal connections
                     for other_id, weight in connection_weights.items():
-                        other_node = self.nodes.get(other_id)
+                        other_node = self.nodes.get(str(other_id))
                         if other_node:
-                            other_node.connections[node.node_id] = weight
+                            other_node.connections[str(node.node_id)] = weight
                             other_node.last_connection_update = time.time()
                             await self._persist_node(other_node)
                     
@@ -133,7 +165,15 @@ class BodyMemoryNetwork(BaseNetwork[BodyMemoryNode]):
                 try:
                     # Add timeout to connection update
                     async with asyncio.timeout(5.0):  # 5 second timeout
-                        await self.connection_manager.update_connections(node, lock_acquired=True)
+                        # Get list of nodes that had reciprocal connections updated
+                        updated_node_ids = await self.connection_manager.update_connections(node, lock_acquired=True)
+                        
+                        # Persist each updated node
+                        for other_id in updated_node_ids:
+                            other_node = self.nodes.get(str(other_id))
+                            if other_node:
+                                await self._persist_node(other_node, lock_acquired=True)
+                                
                     node.last_connection_update = current_time
                 except TimeoutError:
                     self.logger.error(f"Connection update timed out for node {node.node_id}")
@@ -163,8 +203,16 @@ class BodyMemoryNetwork(BaseNetwork[BodyMemoryNode]):
                     try:
                         # Add timeout to connection update
                         async with asyncio.timeout(5.0):  # 5 second timeout
-                            await self.connection_manager.update_connections(node, lock_acquired=True)
-                        node.last_connection_update = current_time
+                            # Get list of nodes that had reciprocal connections updated
+                            updated_node_ids = await self.connection_manager.update_connections(node, lock_acquired=True)
+                            
+                            # Persist each updated node
+                            for other_id in updated_node_ids:
+                                other_node = self.nodes.get(str(other_id))
+                                if other_node:
+                                    await self._persist_node(other_node, lock_acquired=True)
+                                    
+                            node.last_connection_update = current_time
                     except TimeoutError:
                         self.logger.error(f"Connection update timed out for node {node_id}")
                         # Still update timestamp to prevent repeated timeout attempts

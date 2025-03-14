@@ -176,7 +176,15 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
                 try:
                     # Add timeout to connection update
                     async with asyncio.timeout(5.0):  # 5 second timeout
-                        await self.connection_manager.update_connections(node, lock_acquired=True)
+                        # Get list of nodes that had reciprocal connections updated
+                        updated_node_ids = await self.connection_manager.update_connections(node, lock_acquired=True)
+                        
+                        # Persist each updated node
+                        for other_id in updated_node_ids:
+                            other_node = self.nodes.get(str(other_id))
+                            if other_node:
+                                await self._persist_node(other_node, lock_acquired=True)
+                                
                     node.last_connection_update = current_time
                 except TimeoutError:
                     self.logger.error(f"Connection update timed out for node {node.node_id}")
@@ -202,13 +210,20 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
                 current_time = time.time()
                 node.last_accessed = current_time
                 node.last_connection_update = node.last_connection_update or current_time
-                
                 if (current_time - node.last_connection_update) > self.config.activity_window:
                     try:
                         # Add timeout to connection update
                         async with asyncio.timeout(5.0):  # 5 second timeout
-                            await self.connection_manager.update_connections(node, lock_acquired=True)
-                        node.last_connection_update = current_time
+                            # Get list of nodes that had reciprocal connections updated
+                            updated_node_ids = await self.connection_manager.update_connections(node, lock_acquired=True)
+                            
+                            # Persist each updated node
+                            for other_id in updated_node_ids:
+                                other_node = self.nodes.get(str(other_id))
+                                if other_node:
+                                    await self._persist_node(other_node, lock_acquired=True)
+                                    
+                            node.last_connection_update = current_time
                     except TimeoutError:
                         self.logger.error(f"Connection update timed out for node {node_id}")
                         # Still update timestamp to prevent repeated timeout attempts

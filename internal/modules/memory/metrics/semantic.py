@@ -14,6 +14,8 @@ Key capabilities:
 from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
 import numpy as np
+import concurrent.futures as cf
+import asyncio
 
 # Attempt to import NLTK and its components; if unavailable, define fallbacks.
 try:
@@ -72,6 +74,7 @@ def safe_ne_chunk(pos_tags: List[tuple]) -> Any:
         return []
 
 # Import internal modules
+from internal.modules.memory.async_lru_cache import async_lru_cache
 from internal.modules.memory.embedding_manager import EmbeddingManager
 from loggers.loggers import MemoryLogger
 
@@ -124,57 +127,46 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         **kwargs
     ) -> Dict[str, float]:
         """
-        Calculate comprehensive semantic metrics.
-        
-        Args:
-            text_content: The text to analyze
-            embedding: Pre-computed embedding for the text
-            query_text: Optional query for direct text comparison
-            query_embedding: Optional query embedding for similarity
-            analyze_clusters: Whether to include cluster-based analysis
-            
-        Returns:
-            Dict containing semantic metrics:
-            - embedding_similarity: Direct embedding comparison
-            - text_relevance: Keyword/content matching
-            - semantic_density: Content richness score
-            - cluster_metrics: (if requested) Cluster-based scores
-            
-        Raises:
-            SemanticAnalysisError: If critical calculations fail
+        Pipelined semantic metrics calculation.
         """
         try:
             metrics = {}
             
-            # Calculate embedding similarity if query provided
+            # Start the expensive semantic density calculation first
+            # This runs in the background while we do other calculations
+            density_task = self._calculate_semantic_density(text_content)
+            
+            # Start cluster analysis in parallel if requested (also expensive)
+            cluster_task = None
+            if analyze_clusters and 'cluster_nodes' in kwargs:
+                cluster_task = asyncio.create_task(self._analyze_cluster_semantics_async(
+                    embedding, kwargs['cluster_nodes']
+                ))
+            
+            # Do quick calculations immediately
             if query_embedding is not None:
                 metrics['embedding_similarity'] = self.embedding_manager.calculate_similarity(
                     embedding,
                     query_embedding
                 )
             
-            # Calculate text relevance if query text provided
             if query_text:
                 metrics['text_relevance'] = self._calculate_text_relevance(
                     text_content,
                     query_text
                 )
-                
-            # Always calculate semantic density
-            metrics['semantic_density'] = await self._calculate_semantic_density(text_content)
             
-            # Optionally analyze cluster properties
-            if analyze_clusters and 'cluster_nodes' in kwargs:
-                metrics['cluster_metrics'] = self._analyze_cluster_semantics(
-                    embedding,
-                    kwargs['cluster_nodes']
-                )
+            # Wait for density calculation to complete
+            metrics['semantic_density'] = await density_task
+            
+            # Get cluster results if requested
+            if cluster_task:
+                metrics['cluster_metrics'] = await cluster_task
             
             return metrics
             
         except Exception as e:
             self.logger.log_error(f"Semantic metrics calculation failed: {str(e)}")
-            # Provide fallback metrics
             return self._get_fallback_metrics()
             
     def _calculate_text_relevance(self, text: str, query: str) -> float:
@@ -208,103 +200,23 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             self.logger.log_error(f"Text relevance calculation failed: {str(e)}")
             return 0.0
             
+    @async_lru_cache(maxsize=500)  # Cache results for frequently accessed content
     async def _calculate_semantic_density(self, text: str) -> float:
         """
-        Calculate semantic density using multiple linguistic features:
-        1. Embedding-based semantic richness (using existing model)
-        2. Lexical diversity and information content
-        3. Syntactic complexity
-        4. Named entity density
-        5. Content word ratio
-        
-        Returns:
-            float: Normalized semantic density score [0-1]
+        Optimized semantic density calculation with tiered processing and parallelization.
         """
         try:
-            if not text or len(text.strip()) == 0:
+            # Fast path for empty or very short text
+            if not text or len(text.strip()) < 10:
                 return 0.0
+            
+            # Medium texts get simplified calculation
+            if len(text) < 100:
+                return await self._calculate_simple_density(text)
+            
+            # For longer texts, use full parallelized approach
+            return await self._calculate_full_density(text)
                 
-            # Basic text preprocessing: split into sentences on period.
-            sentences = [s.strip() for s in text.split('.') if s.strip()]
-            if not sentences:
-                return 0.0
-                
-            # Calculate semantic cohesion using embeddings (if more than one sentence)
-            if len(sentences) > 1:
-                embeddings = [
-                    await self.embedding_manager.encode(s, normalize_embeddings=True)
-                    for s in sentences
-                ]
-                similarities = []
-                for i in range(len(embeddings)):
-                    for j in range(i+1, len(embeddings)):
-                        sim = self.embedding_manager.calculate_similarity(
-                            embeddings[i],
-                            embeddings[j]
-                        )
-                        similarities.append(sim)
-                semantic_cohesion = np.mean(similarities) if similarities else 0.5
-            else:
-                semantic_cohesion = 0.5
-                
-            # Lexical diversity analysis using safe tokenization.
-            tokens = safe_word_tokenize(text.lower())
-            if not tokens:
-                return 0.0
-                
-            unique_ratio = len(set(tokens)) / len(tokens)
-            
-            # Syntactic complexity analysis using safe POS tagging.
-            pos_tags = safe_pos_tag(tokens)
-            complex_tags = {'IN', 'WDT', 'WP', 'WRB'}
-            syntactic_complexity = len(
-                [t for _, t in pos_tags if t in complex_tags]
-            ) / len(pos_tags) if pos_tags else 0
-            
-            # Named entity density analysis using safe ne_chunk.
-            try:
-                ne_tree = safe_ne_chunk(pos_tags)
-                # Count named entities if ne_tree is a Tree structure.
-                if isinstance(ne_tree, Tree):
-                    named_entities = len([
-                        subtree for subtree in ne_tree 
-                        if isinstance(subtree, Tree)
-                    ])
-                else:
-                    named_entities = 0
-                ne_density = named_entities / len(tokens)
-            except Exception:
-                ne_density = 0
-            
-            # Content word ratio (using a set of content tags)
-            content_tags = {
-                'NN', 'NNS', 'NNP', 'NNPS', 
-                'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ',
-                'JJ', 'JJR', 'JJS'
-            }
-            content_ratio = len(
-                [t for _, t in pos_tags if t in content_tags]
-            ) / len(pos_tags) if pos_tags else 0
-            
-            # Combine metrics with weights
-            weights = {
-                'semantic_cohesion': 0.3,
-                'lexical_diversity': 0.2,
-                'syntactic_complexity': 0.15,
-                'ne_density': 0.15,
-                'content_ratio': 0.2
-            }
-            
-            density_score = (
-                semantic_cohesion * weights['semantic_cohesion'] +
-                unique_ratio * weights['lexical_diversity'] +
-                syntactic_complexity * weights['syntactic_complexity'] +
-                ne_density * weights['ne_density'] +
-                content_ratio * weights['content_ratio']
-            )
-            
-            return min(1.0, max(0.0, density_score))
-            
         except Exception as e:
             self.logger.log_error(f"Semantic density calculation failed: {str(e)}")
             # Fallback to simpler calculation
@@ -314,6 +226,228 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
                 return len(set(meaningful_words)) / len(meaningful_words) if meaningful_words else 0.0
             except Exception:
                 return 0.0
+
+    async def _calculate_simple_density(self, text: str) -> float:
+        """Simplified density calculation for shorter texts."""
+        tokens = text.lower().split()
+        # Simple lexical diversity metric
+        unique_ratio = len(set(tokens)) / len(tokens) if tokens else 0.0
+        # Scale to appropriate range (0.3-0.7) for short texts
+        return 0.3 + (unique_ratio * 0.4)
+
+    async def _calculate_full_density(self, text: str) -> float:
+        """Full parallel density calculation for longer texts."""
+        # Split into sentences
+        sentences = [s.strip() for s in text.split('.') if s.strip()]
+        if not sentences:
+            return 0.0
+        
+        # Start multiple async tasks in parallel
+        tasks = {}
+        
+        # 1. Calculate semantic cohesion if multiple sentences
+        tasks['cohesion'] = self._calculate_semantic_cohesion(sentences)
+        
+        # 2. Start NLP processing pipeline
+        tasks['nlp'] = self._process_nlp_features(text)
+        
+        # Wait for all tasks to complete
+        results = await asyncio.gather(
+            tasks['cohesion'],
+            tasks['nlp'],
+            return_exceptions=True
+        )
+        
+        # Extract results (with error handling)
+        semantic_cohesion = 0.5
+        nlp_features = {}
+        
+        if not isinstance(results[0], Exception):
+            semantic_cohesion = results[0]
+        
+        if not isinstance(results[1], Exception):
+            nlp_features = results[1]
+        
+        # Combine metrics with weights
+        weights = {
+            'semantic_cohesion': 0.3,
+            'lexical_diversity': 0.2,
+            'syntactic_complexity': 0.15,
+            'ne_density': 0.15,
+            'content_ratio': 0.2
+        }
+        
+        # Extract features with defaults
+        unique_ratio = nlp_features.get('lexical_diversity', 0.5)
+        syntactic_complexity = nlp_features.get('syntactic_complexity', 0.3)
+        ne_density = nlp_features.get('ne_density', 0.1)
+        content_ratio = nlp_features.get('content_ratio', 0.5)
+        
+        # Calculate final score
+        density_score = (
+            semantic_cohesion * weights['semantic_cohesion'] +
+            unique_ratio * weights['lexical_diversity'] +
+            syntactic_complexity * weights['syntactic_complexity'] +
+            ne_density * weights['ne_density'] +
+            content_ratio * weights['content_ratio']
+        )
+        
+        return min(1.0, max(0.0, density_score))
+    
+    async def _calculate_semantic_cohesion(self, sentences: List[str]) -> float:
+        """Calculate semantic cohesion with parallel embedding generation."""
+        if len(sentences) <= 1:
+            return 0.5
+        
+        # Generate embeddings in parallel
+        embedding_tasks = [
+            self.embedding_manager.encode(s, normalize_embeddings=True)
+            for s in sentences
+        ]
+        embeddings = await asyncio.gather(*embedding_tasks)
+        
+        # Calculate pairwise similarities
+        similarities = []
+        
+        # For large numbers of sentences, we could parallelize this too
+        # But for typical memory content, this is usually fast enough
+        for i in range(len(embeddings)):
+            for j in range(i+1, len(embeddings)):
+                sim = self.embedding_manager.calculate_similarity(
+                    embeddings[i],
+                    embeddings[j]
+                )
+                similarities.append(sim)
+        
+        return np.mean(similarities) if similarities else 0.5
+
+    async def _process_nlp_features(self, text: str) -> Dict[str, float]:
+        """Process NLP features with parallel execution."""
+        loop = asyncio.get_event_loop()
+        
+        # Start tokenization (required for other processes)
+        tokens_future = loop.run_in_executor(None, safe_word_tokenize, text.lower())
+        tokens = await tokens_future
+        
+        if not tokens:
+            return {
+                'lexical_diversity': 0.0,
+                'syntactic_complexity': 0.0,
+                'ne_density': 0.0,
+                'content_ratio': 0.0
+            }
+        
+        # Calculate lexical diversity immediately (fast)
+        lexical_diversity = len(set(tokens)) / len(tokens)
+        
+        # Start POS tagging (required for other processes)
+        pos_tags_future = loop.run_in_executor(None, safe_pos_tag, tokens)
+        pos_tags = await pos_tags_future
+        
+        # Now run three parallel operations that all need pos_tags
+        with cf.ThreadPoolExecutor() as executor:
+            # Submit three tasks to thread pool
+            complexity_future = loop.run_in_executor(
+                executor,
+                self._calculate_syntactic_complexity,
+                pos_tags
+            )
+            
+            entity_future = loop.run_in_executor(
+                executor,
+                self._calculate_named_entity_density,
+                pos_tags,
+                tokens
+            )
+            
+            content_future = loop.run_in_executor(
+                executor,
+                self._calculate_content_ratio,
+                pos_tags
+            )
+            
+            # Wait for all to complete
+            syntactic_complexity, ne_density, content_ratio = await asyncio.gather(
+                complexity_future,
+                entity_future,
+                content_future
+            )
+        
+        return {
+            'lexical_diversity': lexical_diversity,
+            'syntactic_complexity': syntactic_complexity,
+            'ne_density': ne_density,
+            'content_ratio': content_ratio
+        }
+    
+    def _calculate_syntactic_complexity(self, pos_tags):
+        """Calculate syntactic complexity (thread-safe)."""
+        if not pos_tags:
+            return 0.0
+        
+        complex_tags = {'IN', 'WDT', 'WP', 'WRB'}
+        return len([t for _, t in pos_tags if t in complex_tags]) / len(pos_tags)
+
+    def _calculate_named_entity_density(self, pos_tags, tokens):
+        """Calculate named entity density (thread-safe)."""
+        if not pos_tags or not tokens:
+            return 0.0
+        
+        try:
+            ne_tree = safe_ne_chunk(pos_tags)
+            
+            if isinstance(ne_tree, Tree):
+                named_entities = len([
+                    subtree for subtree in ne_tree 
+                    if isinstance(subtree, Tree)
+                ])
+            else:
+                named_entities = 0
+                
+            return named_entities / len(tokens)
+        except Exception:
+            return 0.0
+
+    def _calculate_content_ratio(self, pos_tags):
+        """Calculate content word ratio (thread-safe)."""
+        if not pos_tags:
+            return 0.0
+        
+        content_tags = {
+            'NN', 'NNS', 'NNP', 'NNPS', 
+            'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ',
+            'JJ', 'JJR', 'JJS'
+        }
+        
+        return len([t for _, t in pos_tags if t in content_tags]) / len(pos_tags)
+    
+    async def _analyze_cluster_semantics_async(
+        self,
+        center_embedding: List[float],
+        cluster_nodes: List[Any]
+    ) -> Dict[str, float]:
+        """Parallelized cluster analysis."""
+        if not cluster_nodes:
+            return {}
+        
+        metrics = {}
+        
+        # Get all embeddings in parallel
+        valid_nodes = [node for node in cluster_nodes if hasattr(node, 'embedding')]
+        if not valid_nodes:
+            return {}
+        
+        # Calculate similarities (could be parallelized for very large clusters)
+        similarities = [
+            self.embedding_manager.calculate_similarity(center_embedding, node.embedding)
+            for node in valid_nodes
+        ]
+        
+        if similarities:
+            metrics['semantic_spread'] = np.std(similarities)
+            metrics['semantic_cohesion'] = np.mean(similarities)
+        
+        return metrics
                 
     def _analyze_cluster_semantics(
         self,

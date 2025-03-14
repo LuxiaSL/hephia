@@ -708,10 +708,12 @@ class MemorySystemOrchestrator:
         Retrieve cognitive memories based on a query and a comparison state.
         """
         try:
+            logger.debug("Encoding query...")
             query_embedding = await self.embedding_manager.encode(query)
             t_metrics_config = self.metrics_config
             t_metrics_config.detailed_metrics = True
             retrieval_scores = []
+            logger.debug("Calculating metrics for each node...")
             for node in (n for n in self.cognitive_network.nodes.values() if not n.ghosted):
                 metrics = await self.metrics_orchestrator.calculate_metrics(
                     target_node=node,
@@ -722,6 +724,7 @@ class MemorySystemOrchestrator:
                 )
                 final_score = metrics["final_score"] if isinstance(metrics, dict) else metrics
                 retrieval_scores.append((node, final_score, metrics))
+            logger.debug("Sorting retrieval scores...")
             retrieval_scores.sort(key=lambda x: x[1], reverse=True)
             top_results = retrieval_scores[:top_k]
             # Dispatch echo events for top results

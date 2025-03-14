@@ -91,8 +91,8 @@ class Config:
         ),
         "perplexity": ModelConfig(
             provider=ProviderType.PERPLEXITY,
-            model_id="llama-3.1-sonar-small-128k-online",
-            max_tokens=400,
+            model_id="sonar-pro",
+            max_tokens=600,
             description="Sonar via Perplexity"
         ),
         "hephia": ModelConfig(

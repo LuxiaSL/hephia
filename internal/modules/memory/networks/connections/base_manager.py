@@ -359,28 +359,37 @@ class BaseConnectionManager(Generic[T], ABC):
         connection_filter: Optional[Dict[str, float]] = None,
         skip_reciprocal: bool = False,
         lock_acquired: bool = False
-    ) -> None:
+    ) -> List[str]:
         """
         Update connection weights for a node.
-
+        
         Args:
             node: Node to update connections for.
             connection_filter: Optional subset of connections to update.
             skip_reciprocal: Skip updating reciprocal connections.
+            lock_acquired: Whether the lock is already acquired by caller.
+            
+        Returns:
+            List of node IDs that had their connections updated.
         """
         if lock_acquired:
-            await self._update_connections_internal(node, connection_filter, skip_reciprocal)
+            return await self._update_connections_internal(node, connection_filter, skip_reciprocal)
         else:
             async with self.connection_operation("update_connections"):
-                await self._update_connections_internal(node, connection_filter, skip_reciprocal)
+                return await self._update_connections_internal(node, connection_filter, skip_reciprocal)
 
     async def _update_connections_internal(
         self,
         node: T,
         connection_filter: Optional[Dict[str, float]],
         skip_reciprocal: bool
-    ) -> None:
-        """Internal implementation of connection updates."""
+    ) -> List[str]:
+        """
+        Internal implementation of connection updates.
+        
+        Returns:
+            List of node IDs that had their connections updated.
+        """
         try:
             connections = connection_filter or node.connections
             updated: Dict[str, float] = {}
@@ -410,11 +419,15 @@ class BaseConnectionManager(Generic[T], ABC):
 
             node.connections = updated
 
+            updated_nodes = []
             if not skip_reciprocal:
-                await self._update_reciprocal_connections(node, updated)
+                updated_nodes = await self._update_reciprocal_connections(node, updated)
+
+            return updated_nodes
 
         except Exception as e:
             self.logger.error(f"Failed to update connections: {e}")
+            return []
 
     async def _update_connection_health(
         self,
@@ -511,21 +524,29 @@ class BaseConnectionManager(Generic[T], ABC):
         self,
         node: T,
         new_weights: Dict[str, float]
-    ) -> None:
+    ) -> List[str]:
         """
         Update reciprocal connections to maintain consistency.
-
+        
         Args:
             node: Node whose connections were updated.
             new_weights: New connection weights.
+            
+        Returns:
+            List of node IDs that had their connections updated.
         """
         try:
+            updated_nodes = []
             for other_id, weight in new_weights.items():
                 other = self._get_node_by_id(other_id)
                 if other and not getattr(other, 'ghosted', False):
-                    other.connections[node.node_id] = weight
+                    other.connections[str(node.node_id)] = weight
+                    other.last_connection_update = time.time()
+                    updated_nodes.append(other_id)
+            return updated_nodes
         except Exception as e:
             self.logger.error(f"Failed to update reciprocal connections: {e}")
+            return []
 
     @abstractmethod
     def _get_node_by_id(self, node_id: str) -> Optional[T]:

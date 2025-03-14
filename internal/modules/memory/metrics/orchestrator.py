@@ -12,11 +12,14 @@ Key capabilities:
 - Result normalization and weighting
 """
 
+import asyncio
+import concurrent.futures as cf
+
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from .semantic import SemanticMetricsCalculator
+from .semantic import SemanticMetricsCalculator 
 from .emotional import EmotionalMetricsCalculator
 from .state import StateMetricsCalculator
 from .temporal import TemporalMetricsCalculator
@@ -149,51 +152,63 @@ class RetrievalMetricsOrchestrator:
         try:
             config = override_config or self.config
             metrics = {}
+
+            tasks = []
+            components = []
             
-            # 1. Semantic Metrics
             if MetricComponent.SEMANTIC in config.enabled_components:
-                metrics['semantic'] = await self._calculate_semantic_metrics(
-                    target_node,
-                    query_text,
-                    query_embedding,
-                    config.semantic_options
-                )
+                tasks.append(self._calculate_semantic_metrics(
+                    target_node, query_text, query_embedding, config.semantic_options
+                ))
+                components.append(MetricComponent.SEMANTIC)
                 
-            # 2. Emotional Metrics
-            if MetricComponent.EMOTIONAL in config.enabled_components:
-                metrics['emotional'] = self._calculate_emotional_metrics(
-                    target_node,
-                    comparison_state,
-                    body_node_id,
-                    preserved_signature,
-                    config.emotional_options
-                )
+            loop = asyncio.get_event_loop()
+            with cf.ThreadPoolExecutor() as executor:
+                if MetricComponent.EMOTIONAL in config.enabled_components:
+                    tasks.append(loop.run_in_executor(
+                    executor,
+                    self._calculate_emotional_metrics,
+                    target_node, comparison_state, body_node_id,
+                    preserved_signature, config.emotional_options
+                ))
+                components.append(MetricComponent.EMOTIONAL)
                 
-            # 3. State Metrics
-            if MetricComponent.STATE in config.enabled_components:
-                metrics['state'] = self._calculate_state_metrics(
-                    target_node,
-                    comparison_state,
-                    body_node_id,
-                    preserved_signature,
-                    config.state_options
-                )
-                
-            # 4. Temporal Metrics
-            if MetricComponent.TEMPORAL in config.enabled_components:
-                metrics['temporal'] = self._calculate_temporal_metrics(
-                    target_node,
-                    config.temporal_options
-                )
-                
-            # 5. Strength Metrics (if enabled)
-            if (MetricComponent.STRENGTH in config.enabled_components and 
-                config.include_strength):
-                metrics['strength'] = self._calculate_strength_metrics(
-                    target_node,
-                    config.strength_options
-                )
-                
+                if MetricComponent.STATE in config.enabled_components:
+                    tasks.append(loop.run_in_executor(
+                        executor,
+                        self._calculate_state_metrics,
+                        target_node, comparison_state, body_node_id,
+                        preserved_signature, config.state_options
+                    ))
+                    components.append(MetricComponent.STATE)
+                    
+                if MetricComponent.TEMPORAL in config.enabled_components:
+                    tasks.append(loop.run_in_executor(
+                        executor,
+                        self._calculate_temporal_metrics,
+                        target_node, config.temporal_options
+                    ))
+                    components.append(MetricComponent.TEMPORAL)
+                    
+                if (MetricComponent.STRENGTH in config.enabled_components and 
+                    config.include_strength):
+                    tasks.append(loop.run_in_executor(
+                        executor,
+                        self._calculate_strength_metrics,
+                        target_node, config.strength_options
+                    ))
+                    components.append(MetricComponent.STRENGTH)
+
+                # Run all tasks concurrently
+                all_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for i, component in enumerate(components):
+                if isinstance(all_results[i], Exception):
+                    self.logger.log_error(f"{component.name} metrics failed: {str(all_results[i])}")
+                    metrics[component.name.lower()] = {'error': str(all_results[i])}
+                else:
+                    metrics[component.name.lower()] = all_results[i]
+                    
             # Return detailed metrics or compute final score
             if config.detailed_metrics:
                 return {
