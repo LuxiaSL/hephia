@@ -65,8 +65,12 @@ class CommandPreprocessor:
                     raw_input=command
                 ), None
                 
-            # Extract actual command from potential hallucination
-            extracted = self._extract_command(command)
+            # Extract only the first valid command from potential multi-command input
+            extracted = self._extract_first_command(command, available_commands)
+            
+            # If new extraction failed, fall back to original method
+            if not extracted:
+                extracted = self._extract_command(command)
             if not extracted:
                 error = CommandValidationError(
                     message="Could not extract valid command from output",
@@ -205,7 +209,137 @@ class CommandPreprocessor:
                 
         return command
     
+    def _extract_first_command(self, text: str, available_commands: Dict[str, EnvironmentCommands]) -> Optional[str]:
+        """
+        Extract only the first valid command from potential multi-command input.
+        Preserves multi-line parameters while detecting command boundaries.
+        
+        Args:
+            text: Raw LLM output
+            available_commands: Registry of available environment commands
+                
+        Returns:
+            Extracted first command or None if no valid command found
+        """
+        # First handle common markdown patterns (same as original _extract_command)
+        if text.startswith('```'):
+            # Extract content from code blocks
+            matches = re.findall(r'```(?:\w+)?\n(.*?)```', text, re.DOTALL)
+            if matches:
+                text = matches[0].strip()
+        elif text.startswith('`'):
+            # Extract content from inline code
+            matches = re.findall(r'`(.*?)`', text)
+            if matches:
+                text = matches[0].strip()
 
+        # Split and clean lines
+        lines = [
+            re.sub(r'^[\s>*-]+', '', line.strip())  # Remove markdown list/quote markers
+            for line in text.split('\n') 
+            if line.strip()
+        ]
+        
+        if not lines:
+            return None
+            
+        # Get valid environment and command prefixes for boundary detection
+        environment_names = list(available_commands.keys())
+        
+        # Process the lines to identify the first command
+        command_parts = []
+        in_quotes = False
+        quote_char = None
+        is_note_command = False
+        
+        # First line is always considered part of the first command
+        first_line = lines[0]
+        command_parts.append(first_line)
+        
+        # Check if this is a notes command that accepts multiline content
+        is_note_command = any(first_line.startswith(prefix) for prefix in 
+                            ['notes create', 'notes edit', 'notes update'])
+        
+        # Also look for quoted strings in the first line to track quote state
+        for char in first_line:
+            if char in ['"', "'"]:
+                if not in_quotes:
+                    in_quotes = True
+                    quote_char = char
+                elif char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+        
+        # Process remaining lines
+        for line in lines[1:]:
+            # Skip lines that appear to be hallucinated
+            if self._detect_hallucination(line):
+                continue
+                
+            # If we're inside quotes, always include the line
+            if in_quotes:
+                command_parts.append(line)
+                # Update quote state
+                for char in line:
+                    if char == quote_char:
+                        in_quotes = False
+                        quote_char = None
+                continue
+                
+            # If not in quotes, check if this looks like a new command
+            words = line.split()
+            if words and words[0].lower() in environment_names:
+                # This looks like a new environment command - stop here
+                break
+            
+            # For notes commands, preserve formatting including empty lines
+            if is_note_command:
+                command_parts.append(line)
+            else:
+                # For other commands, include non-hallucinated content
+                clean_line = line.strip()
+                if clean_line:
+                    command_parts.append(clean_line)
+                    
+                    # Check for new quote starts
+                    for char in clean_line:
+                        if char in ['"', "'"]:
+                            if not in_quotes:
+                                in_quotes = True
+                                quote_char = char
+                            elif char == quote_char:
+                                in_quotes = False
+                                quote_char = None
+        
+        # Now process the command parts according to command type
+        if len(command_parts) == 1:
+            return command_parts[0]
+            
+        # Multi-line case (especially useful for notes)
+        command = command_parts[0]
+        additional_content = command_parts[1:]
+        
+        # Special handling for notes commands as in the original
+        if is_note_command:
+            # Handle quotes properly for multiline content
+            if '"' in command:
+                try:
+                    # Find the opening quote position
+                    parts = command.split('"', 2)
+                    if len(parts) >= 2:
+                        prefix = parts[0]  # Command part before content
+                        # Preserve formatting for note content
+                        content = '\n'.join(additional_content)
+                        return f'{prefix}"{content}"'
+                except Exception:
+                    # Fallback to simple concatenation if quote handling fails
+                    return f"{command} {' '.join(additional_content)}"
+            
+            # No quotes - wrap content in quotes
+            return f'{command} "{" ".join(additional_content)}"'
+        
+        # For regular commands, join with proper spacing
+        return f"{command} {' '.join(additional_content)}"
 
     def _parse_command(self, command: str) -> ParsedCommand:
         """Parse command string into structured format."""
