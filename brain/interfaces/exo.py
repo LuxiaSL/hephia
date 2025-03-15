@@ -95,7 +95,12 @@ class ExoProcessorInterface(CognitiveInterface):
                 BrainLogger.debug(f"Attached updates: {other_updates}")
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
-                self._add_to_history("assistant", llm_response)
+                formatted_command = f"{command.environment} {command.action}"
+                if command.parameters:
+                    formatted_command += f" {' '.join(command.parameters)}"
+                if command.flags:
+                    formatted_command += f" {' '.join(f'--{k}={v}' for k,v in command.flags.items())}"
+                self._add_to_history("assistant", formatted_command)
                 self._add_to_history("user", final_response)
                 self.last_successful_turn = datetime.now()
                 
