@@ -601,12 +601,18 @@ class Chapter2Client(BaseAPIClient):
         **kwargs
     ) -> Union[Dict[str, Any], str]:
         """Route completion request to appropriate client."""
+        # Add name: system for user messages
+        formatted_messages = [
+            {**msg, "name": "system"} if msg.get("role") == "user" else msg 
+            for msg in messages
+        ]
+        
         if self.use_unix:
             response = await self.unix_client._make_request(
                 "v1/chat/completions",
                 payload={
                     "model": model,
-                    "messages": messages,
+                    "messages": formatted_messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     **kwargs
@@ -616,7 +622,7 @@ class Chapter2Client(BaseAPIClient):
             
         # For HTTP, simply use the base class _make_request
         return await super().create_completion(
-            messages=messages,
+            messages=formatted_messages,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
