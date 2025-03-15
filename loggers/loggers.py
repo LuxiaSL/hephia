@@ -129,9 +129,10 @@ class BrainLogger:
     """Enhanced logger for cognitive operations."""
 
     @staticmethod
-    def error(message: str):
+    def error(message: str, exc_info: bool = None):
+        """Log error-level brain events."""
         logger = logging.getLogger('hephia.brain')
-        logger.error(f"Brain Error: {strip_emojis(message)}")
+        logger.error(f"Brain Error: {strip_emojis(message)}", exc_info=exc_info)
 
     @staticmethod
     def warning(message: str):
