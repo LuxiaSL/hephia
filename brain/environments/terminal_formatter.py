@@ -112,7 +112,6 @@ class TerminalFormatter:
                     if line.strip():
                         memory_lines.append(f"  {line.strip()}")
                 memory_lines.append("")
-                memory_lines.append("---")
 
             # Append all memory lines at once after processing all memories
             state_str = state_str + "\n" + "\n".join(memory_lines)
@@ -165,7 +164,6 @@ class TerminalFormatter:
         lines = []
         lines.append(f"Status: {'Success' if result.success else 'Error'}")
         lines.append(f"Time: {timestamp}")
-        lines.append("---")
 
         lines.append(result.message.strip())
         lines.append("")
@@ -187,8 +185,6 @@ class TerminalFormatter:
             lines.append("Type 'help' for available commands. Try different environments to explore their capabilities.")
         lines.append("")
 
-        lines.append("---")
-
         return "\n".join(lines)
 
     @staticmethod
@@ -196,7 +192,6 @@ class TerminalFormatter:
         lines = []
         lines.append(env.environment.upper())
         lines.append(env.description.strip() if env.description else "")
-        lines.append("---")
 
         # Group commands by category
         categorized: Dict[str, List[CommandDefinition]] = {}
@@ -261,7 +256,6 @@ class TerminalFormatter:
             lines.append("Related Commands:")
             for rc in error.related_commands:
                 lines.append(f"• {rc}")
-        lines.append("---")
         lines.append("Use 'help' for available commands")
         return "\n".join(lines)
 
@@ -270,5 +264,4 @@ class TerminalFormatter:
         return (
             "Welcome to Hephia OS\n"
             "Type 'help' to see available commands\n"
-            "---"
         )
