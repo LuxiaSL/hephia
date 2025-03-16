@@ -153,6 +153,9 @@ class CommandHandler:
                     examples=[f"{env} help" for env in self.environment_registry.get_available_commands().keys()]
                 )
             )
+        
+        if command.action == "help":
+            return TerminalFormatter.format_environment_help(environment)
 
         try:
             # Execute command in environment

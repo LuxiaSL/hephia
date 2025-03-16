@@ -15,6 +15,7 @@ from brain.commands.model import (
     EnvironmentCommands,
     CommandValidationError
 )
+from brain.environments.base_environment import BaseEnvironment
 
 class TerminalFormatter:
     """Formats system output in a consistent, terminal-like format."""
@@ -188,9 +189,9 @@ class TerminalFormatter:
         return "\n".join(lines)
 
     @staticmethod
-    def format_environment_help(env: EnvironmentCommands) -> CommandResult:
+    def format_environment_help(env: BaseEnvironment) -> CommandResult:
         lines = []
-        lines.append(env.environment.upper())
+        lines.append(env.name.upper())
         lines.append(env.description.strip() if env.description else "")
 
         # Group commands by category
@@ -206,7 +207,7 @@ class TerminalFormatter:
                 # Command signature
                 params = " ".join(f"<{p.name}>" if p.required else f"[{p.name}]" for p in c.parameters)
                 flags = " ".join(f"[--{f.name}]" for f in c.flags)
-                signature = f"{env.environment} {c.name} {params} {flags}".strip()
+                signature = f"{env.name} {c.name} {params} {flags}".strip()
                 lines.append(signature)
                 lines.append(f"  {c.description}")
                 if c.parameters:
@@ -226,7 +227,7 @@ class TerminalFormatter:
                 lines.append("")
 
         # Suggested commands
-        suggested = [f"{env.environment} help"]
+        suggested = [f"{env.name} help"]
         for c in env.commands.values():
             if c.examples:
                 suggested.append(c.examples[0])
@@ -237,7 +238,7 @@ class TerminalFormatter:
             success=True,
             message="\n".join(lines),
             suggested_commands=suggested,
-            data={"environment": env.environment}
+            data={"environment": env.name}
         )
 
     @staticmethod

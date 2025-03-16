@@ -15,7 +15,7 @@ from brain.interfaces.base import CognitiveInterface
 from brain.cognition.notification import Notification, NotificationManager
 from brain.core.command_handler import CommandHandler
 from core.state_bridge import StateBridge
-from brain.commands.model import CommandResult, ParsedCommand
+from brain.commands.model import CommandResult, ParsedCommand, GlobalCommands
 from brain.cognition.memory.significance import MemoryData, SourceType
 from brain.environments.terminal_formatter import TerminalFormatter
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
@@ -95,11 +95,16 @@ class ExoProcessorInterface(CognitiveInterface):
                 BrainLogger.debug(f"Attached updates: {other_updates}")
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
-                formatted_command = f"{command.environment} {command.action}"
-                if command.parameters:
-                    formatted_command += f" {' '.join(command.parameters)}"
-                if command.flags:
-                    formatted_command += f" {' '.join(f'--{k}={v}' for k,v in command.flags.items())}"
+                # For global commands, just use raw input directly
+                if command.environment is None and GlobalCommands.is_global_command(command.action):
+                    formatted_command = command.raw_input
+                else:
+                    formatted_command = f"{command.environment} {command.action}"
+                    if command.parameters:
+                        formatted_command += f" {' '.join(command.parameters)}"
+                    if command.flags:
+                        formatted_command += f" {' '.join(f'--{k}={v}' for k,v in command.flags.items())}"
+
                 self._add_to_history("assistant", formatted_command)
                 self._add_to_history("user", final_response)
                 self.last_successful_turn = datetime.now()
