@@ -201,7 +201,7 @@ class Config:
     SHUTDOWN_TIMEOUT = 15
 
     # lower = more memories, higher = less memories
-    MEMORY_SIGNIFICANCE_THRESHOLD = 0.7
+    MEMORY_SIGNIFICANCE_THRESHOLD = 0.75
     
     # Initial needs
     INITIAL_HUNGER = 0
