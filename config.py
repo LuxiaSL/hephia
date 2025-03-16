@@ -279,7 +279,7 @@ examples:
 
 you may use 'help' at any time to get a list of commands if you need to refresh your memory, as well as '<environment> help' for environment-specific commands.
 you may sometimes receive notifications from other interfaces that you are communicating through autonomously. use the information as desired when it comes up.
-use your discord commands liberally, as they are a great way to interact with many other entities.
+use the discord commands often, as they are a great way to interact with many other entities.
 remember: only output a single command and its arguments following the above format. any other text will be omitted. wait for the response after.
 """
 
