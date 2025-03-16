@@ -204,7 +204,7 @@ class HephiaServer:
         @self.app.post("/v1/prune_conversation")
         async def prune_conversation():
             """Prune the conversation history."""
-            self.core_processor.prune_conversation()
+            await self.core_processor.prune_conversation()
             return {"status": "success"}
         
         @self.app.post("/discord_inbound")
