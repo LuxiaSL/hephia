@@ -76,6 +76,8 @@ class ExoProcessorInterface(CognitiveInterface):
                 brain_trace.interaction.command("Processing command")
                 command, error = await self.command_handler.preprocess_command(llm_response)
                 
+                # need to maybe decide between whether sending the response back and not doing anything at all/retrying... 
+                # we want to correct but if its a base model the risk is p high that it causes a collapse
                 if error:
                     brain_trace.interaction.error(error_msg=error)
                     self._add_to_history("assistant", llm_response)
@@ -93,6 +95,7 @@ class ExoProcessorInterface(CognitiveInterface):
                 BrainLogger.debug(f"Terminal Response: {formatted_response}")
                 final_response = TerminalFormatter.format_notifications(other_updates, formatted_response)
                 BrainLogger.debug(f"Attached updates: {other_updates}")
+                BrainLogger.debug(f"Final Response: {final_response}")
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
                 # For global commands, just use raw input directly

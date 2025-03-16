@@ -134,15 +134,10 @@ class TerminalFormatter:
         if not updates or updates.strip() == "No recent updates from other interfaces":
             return result
 
-        # Split result at final divider
-        parts = result.rsplit("---", 1)
-        if len(parts) != 2:
-            return result
-
         # Format updates section
         update_lines = [
-            "Cognitive Updates:",
-            "----------------"
+            "\nCognitive Updates:",
+            "####################"
         ]
         
         # Split updates by newlines and format each section
@@ -155,8 +150,12 @@ class TerminalFormatter:
                 update_lines.append(indented_update)
                 update_lines.append("")
 
-        # Reconstruct with updates before final divider
-        return parts[0] + "\n" + "\n".join(update_lines) + "---" + parts[1]
+        # Split result at final divider if it exists
+        parts = result.rsplit("###", 1)
+        if len(parts) == 2:
+            return parts[0] + "\n" + "\n".join(update_lines) + "\n###" + parts[1]
+        else:
+            return result + "\n" + "\n".join(update_lines) + "\n###"
 
     @staticmethod
     def format_command_result(result: CommandResult) -> str:
