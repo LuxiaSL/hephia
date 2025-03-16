@@ -107,6 +107,12 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
                 "state:changed",
                 lambda event: handle_state_event(event)
             )
+        else:
+            print("gui disabled; using manual printouts of major activity")
+            global_event_dispatcher.add_listener(
+                "cognitive:context_update",
+                lambda event: print_cognitive_event(event)
+            )
 
         print("""
 Hephia is now active! 
@@ -140,6 +146,34 @@ async def shutdown_all_tasks():
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+def print_cognitive_event(event):
+    """Print cognitive event to console in a format similar to the GUI."""
+    try:
+        data = event.data
+        if data.get('source') == 'exo_processor':
+            print("\n" + "="*80)
+            print("COGNITIVE UPDATE:")
+            print("="*80)
+            
+            # Print recent messages
+            messages = data.get('raw_state', [])[-2:]
+            for msg in messages:
+                role = msg.get('role', '')
+                content = msg.get('content', '')
+                display_name = "EXO-PROCESSOR" if role == 'user' else Config.get_cognitive_model()
+                print(f"\n{display_name}:")
+                print("-" * len(display_name))
+                print(content)
+            
+            # Print summary
+            summary = data.get('processed_state', 'No summary available')
+            print("\nSUMMARY:")
+            print("-" * 7)
+            print(summary)
+            print("="*80 + "\n")
+    except Exception as e:
+        print(f"Error printing cognitive event: {e}")
 
 if __name__ == "__main__":
     try:
