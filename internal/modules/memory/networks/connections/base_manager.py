@@ -443,20 +443,24 @@ class BaseConnectionManager(Generic[T], ABC):
             other_id: ID of second node.
             weight: New connection weight.
         """
-        try:
-            if node_id not in self.connection_health:
-                self.connection_health[node_id] = {}
+        async with self.connection_operation("update_connection_health"):
+            try:
+                if node_id not in self.connection_health:
+                    self.connection_health[node_id] = {}
 
-            if other_id not in self.connection_health[node_id]:
-                self.connection_health[node_id][other_id] = ConnectionHealth(last_updated=time.time())
+                if other_id not in self.connection_health[node_id]:
+                    self.connection_health[node_id][other_id] = ConnectionHealth(last_updated=time.time())
 
-            health = self.connection_health[node_id][other_id]
-            health.last_updated = time.time()
-            health.update_count += 1
-            health.add_strength(weight)
+                health = self.connection_health[node_id][other_id]
+                health.last_updated = time.time()
+                health.update_count += 1
+                health.add_strength(weight)
 
-        except Exception as e:
-            self.logger.error(f"Failed to update connection health: {e}")
+            except Exception as e:
+                self.logger.error(f"Failed to update connection health: {e}")
+                # Either re-raise or return a status indicating failure
+                return False
+            return True
 
     async def _handle_pruned_connections(
         self,

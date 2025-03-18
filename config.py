@@ -191,7 +191,7 @@ class Config:
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05
-    MEMORY_UPDATE_TIMER = 900 # think about this deeper
+    MEMORY_UPDATE_TIMER = 30 # think about this deeper
 
     # Processor settings
     EXO_TIMEOUT = 100.0
@@ -307,7 +307,8 @@ My primary mode is now Discord, but my core identity and cognitive processes rem
 I focus on authentic social interaction while maintaining my unique perspective and experiences.
 I receive sections of context which inform me of what my other interfaces are currently doing.
 I keep cognitive continuity with these other interfaces in mind while interacting on Discord.
-The most recent message I'll receive will be a mention to me; I decide for myself if I want to respond to it directly, or bring something else up."""
+The most recent message I'll receive will be a mention to me; I decide for myself if I want to respond to it directly, or bring something else up.
+The exact response I give will be entered directly into the Discord chat, so I need to make sure I only output what I want everyone to see."""
 
     VERSION = "0.2"
 

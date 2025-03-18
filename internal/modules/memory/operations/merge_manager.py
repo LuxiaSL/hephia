@@ -72,7 +72,11 @@ class MergeManager:
             candidates = await self.find_merge_candidates(node, connection_manager)
             if candidates:
                 target_candidate = candidates[0]  # Take the best candidate
-                target_node = target_candidate.node
+                target_node = self._get_node_by_id(target_candidate.node_id)
+                if target_node is None or target_node.ghosted:
+                    self.logger.warning(f"Target node {target_candidate.node_id} not found or ghosted, skipping merge")
+                    return False
+                
                 if isinstance(node, CognitiveMemoryNode):
                     await self.merge_cognitive_nodes(node, target_node)
                 else:
@@ -171,6 +175,9 @@ class MergeManager:
             child: Node to be merged.
             parent: Node that absorbs the child node.
         """
+        if not child or not parent or not child.node_id or not parent.node_id:
+            self.logger.error("Invalid nodes provided for body merge")
+            return
         try:
             # Update node state.
             child.merge_into_parent(parent)
@@ -244,8 +251,9 @@ class MergeManager:
             parent: Node that absorbs the child node.
         """
         self.logger.info(f"[MergeManager] Merging CognitiveMemoryNode {child.node_id} into {parent.node_id}")
-        # Example: update parent node strength with a portion of child's strength.
         parent.strength += child.strength * 0.5
+        child.ghosted = True
+        child.parent_node_id = parent.node_id
         await self.cognitive_network.update_node(parent)
         await self.cognitive_network.update_node(child)
 

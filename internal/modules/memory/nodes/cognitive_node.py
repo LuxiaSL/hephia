@@ -270,8 +270,11 @@ class CognitiveMemoryNode(BaseMemoryNode):
         self.last_echo_time = time.time()
         
         # Update dampening
+        current_time = time.time()
+        time_since_last = current_time - (self.last_echo_time or current_time)
+        self.last_echo_time = current_time
+
         echo_window = 180  # seconds
-        time_since_last = self.last_echo_time - (self.last_echo_time or 0)
         
         if time_since_last > echo_window:
             self.echo_dampening = 1.0

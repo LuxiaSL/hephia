@@ -134,7 +134,7 @@ class ConsolidationManager:
 
             # Process nodes in order of increasing strength (weak nodes first)
             weak_nodes = sorted(
-                [n for n in nodes if n.strength < self.config.strength_threshold],
+                [n for n in nodes if n.strength < self.config.strength_threshold and not n.ghosted],
                 key=lambda x: x.strength
             )
 

@@ -71,6 +71,7 @@ class CommandPreprocessor:
             # If new extraction failed, fall back to original method
             if not extracted:
                 extracted = self._extract_command(command)
+                
             if not extracted:
                 error = CommandValidationError(
                     message="Could not extract valid command from output",
@@ -87,12 +88,12 @@ class CommandPreprocessor:
                 parsed = self._parse_command(sanitized)
             except ValueError as e:
                 error = CommandValidationError(
-                    message=str(e),
-                    suggested_fixes=["Remove special characters", "Use standard command format"],
-                    related_commands=[],
-                    examples=self._generate_format_examples(available_commands)
-                )
-                BrainLogger.log_command_processing(command, None, str(error))
+                        message=str(e),
+                        suggested_fixes=["Remove special characters", "Use standard command format"],
+                        related_commands=[],
+                        examples=self._generate_format_examples(available_commands)
+                    )
+                BrainLogger.log_command_processing(command.raw_input if isinstance(command, ParsedCommand) else command, None, str(error))
                 return None, error
                 
             # Validate against available commands
@@ -530,6 +531,9 @@ class CommandPreprocessor:
         command: ParsedCommand,
         available_commands: Dict[str, EnvironmentCommands]
     ) -> Optional[ParsedCommand]:
+        """Attempt to correct invalid command using LLM."""
+        if not isinstance(command, ParsedCommand):
+            return None
         """Attempt to correct invalid command using LLM."""
         model_name = Config.get_validation_model()
         model_config = Config.AVAILABLE_MODELS[model_name]

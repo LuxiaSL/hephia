@@ -56,6 +56,14 @@ class ExoProcessorInterface(CognitiveInterface):
         """
         try:
             async with asyncio.timeout(self.llm_timeout):
+                # Log conversation history to file
+                log_path = "data/logs/exo_conversation.log"
+                try:
+                    with open(log_path, "w", encoding="utf-8") as f:
+                        for msg in self.conversation_history:
+                            f.write(f"{msg['role']}: {msg['content']}\n")
+                except Exception as e:
+                    BrainLogger.error(f"Failed to write conversation log: {e}") 
                 # Get cognitive context
                 brain_trace.interaction.context("Getting cognitive context")
                 context_data = {}
@@ -425,12 +433,39 @@ Current state context:
         self._trim_conversation()
 
     def _trim_conversation(self, max_length: int = Config.EXO_MAX_MESSAGES) -> None:
-        """Trim conversation history while maintaining context."""
+        """Trim conversation history while maintaining a rolling window of most recent messages.
+        Ensures the last message is always a user message for proper LLM prompting."""
+        
         if len(self.conversation_history) > max_length:
+            # Always keep system message (index 0) and max_length-1 most recent messages
             self.conversation_history = [
                 self.conversation_history[0],  # Keep system prompt
-                *self.conversation_history[-(max_length - 2):]
+                *self.conversation_history[-(max_length-1):]  # Keep most recent messages
             ]
+            
+            # Validate conversation pairs are intact (user followed by assistant)
+            # Start from beginning after system message
+            i = 1
+            while i < len(self.conversation_history) - 1:
+                current = self.conversation_history[i]
+                next_msg = self.conversation_history[i + 1]
+                
+                if (current["role"] == "user" and next_msg["role"] == "assistant"):
+                    i += 2  # Move to next pair
+                else:
+                    # Found unpaired message, remove it
+                    self.conversation_history.pop(i)
+                    
+            # Final check - if last message is assistant, remove it to ensure user message is last
+            if len(self.conversation_history) > 1:
+                if self.conversation_history[-1]["role"] == "assistant":
+                    self.conversation_history.pop()
+                    
+            # If we somehow end up with an assistant message at the end after all that,
+            # keep removing messages until we get to a user message
+            while (len(self.conversation_history) > 1 and 
+                   self.conversation_history[-1]["role"] == "assistant"):
+                self.conversation_history.pop()
 
     async def prune_conversation(self):
         """Remove the last message pair from conversation history and update state."""
