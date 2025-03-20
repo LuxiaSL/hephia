@@ -944,7 +944,6 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
-            # Use BM25 ranking for FTS5.
             cursor.execute("""
                 SELECT notes.*, GROUP_CONCAT(t.name) as tag_list, rank
                 FROM notes_fts
