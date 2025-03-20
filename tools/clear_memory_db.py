@@ -5,8 +5,6 @@ A utility script to safely clear all data from the memory database
 while preserving the schema structure.
 """
 
-
-
 import os
 import asyncio
 import sqlite3
@@ -50,8 +48,10 @@ async def clear_memory_database(db_path: str = DEFAULT_DB_PATH) -> None:
                     print(f"Clearing table: {table_name}")
                     cursor.execute(f"DELETE FROM {table_name}")
 
-            # Reset auto-increment counters
-            cursor.execute("DELETE FROM sqlite_sequence")
+            # Reset auto-increment counters if the table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'")
+            if cursor.fetchone():
+                cursor.execute("DELETE FROM sqlite_sequence")
             
             # Commit transaction
             conn.commit()
