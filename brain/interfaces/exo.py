@@ -477,7 +477,7 @@ Current state context:
         # Otherwise truncate and clean error message 
         cleaned = response.replace("\n", "\\n").strip()
         truncated = cleaned[:50] + "..." if len(cleaned) > 50 else cleaned
-        return f">>Truncated by ({len(cleaned)} chars: {truncated}<<"
+        return f">>Truncated by ({len(cleaned)}) chars: {truncated}<<"
 
     async def prune_conversation(self):
         """Remove the last message pair from conversation history and update state."""
