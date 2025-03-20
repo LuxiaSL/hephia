@@ -946,16 +946,17 @@ class NotesEnvironment(BaseEnvironment):
         try:
             # Use BM25 ranking for FTS5.
             cursor.execute("""
-                SELECT notes.*, GROUP_CONCAT(t.name) as tag_list
+                SELECT notes.*, GROUP_CONCAT(t.name) as tag_list, rank
                 FROM notes_fts
                 JOIN notes ON notes_fts.rowid = notes.rowid
                 LEFT JOIN note_tags nt ON notes.id = nt.note_id
-                LEFT JOIN tags t ON nt.tag_id = t.id
+                LEFT JOIN tags t ON nt.tag_id = t.id,
+                (SELECT rank FROM notes_fts WHERE notes_fts MATCH ? ORDER BY rank) ranks
                 WHERE notes_fts MATCH ?
                 GROUP BY notes.id
-                ORDER BY bm25(notes_fts)
+                ORDER BY rank
                 LIMIT ?
-            """, (query, limit))
+            """, (query, query, limit))
             
             notes = cursor.fetchall()
             
