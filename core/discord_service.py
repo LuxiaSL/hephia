@@ -391,7 +391,7 @@ class DiscordService:
     ) -> None:
         """
         Fire-and-forget style. We queue up a POST to /channels/{channel_id}/send_message.
-        Messages longer than 2000 characters are automatically split into multiple messages.
+        Messages longer than 1750 characters are automatically split into multiple messages.
         If you want an immediate response or message_id, use send_message_immediate instead.
         """
         if not self.config.enabled:
@@ -399,7 +399,7 @@ class DiscordService:
             return
 
         # Discord's message length limit
-        MAX_LENGTH = 2000
+        MAX_LENGTH = 1750
         endpoint = f"/channels/{channel_id}/send_message"
 
         # Split message if needed
