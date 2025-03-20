@@ -1,4 +1,6 @@
+import math
 import os
+import random
 import sys
 import logging
 import asyncio
@@ -79,9 +81,14 @@ class RealTimeDiscordBot(discord.Client):
         """
         Called whenever a new message is created in Discord.
         Tracks message counts per channel and notifies when thresholds are reached.
+        Also handles random engagement with sigmoid scaling.
         """
         channel_id = str(message.channel.id)
         logger.debug(f"[Bot] New message in {message.channel.name} from {message.author.name}")
+
+        # 0) Ignore messages that start with a period
+        if message.content.startswith('.'):
+            return
 
         # 1) Initialize channel counter if it doesn't exist
         if channel_id not in self.new_messages:
@@ -101,11 +108,29 @@ class RealTimeDiscordBot(discord.Client):
             # Reset counter after notification
             self.new_messages[channel_id] = 0
         
-        # 5) Always forward if bot is mentioned
-        if self.user.mentioned_in(message):
-            logger.info(f"[Bot] Mention detected in channel {message.channel.name}")
+        # 5) Check for mentions/keywords and calculate response probability
+        should_respond = False
+        
+        # Direct mention or reply
+        if self.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == self.user):
+            should_respond = True
+        # Contains "hephia" but not a direct mention/reply
+        elif "hephia" in message.content.lower():
+            # 95% chance to respond
+            if random.random() < 0.85:
+                should_respond = True
+        else:
+            # Calculate sigmoid-scaled probability based on message count
+            x = (self.new_messages[channel_id] - 50) / 15.0  # Normalize and center around 50
+            sigmoid = 0.75 / (1 + math.exp(-x))  # Sigmoid scaled to max 75%
+            if random.random() < sigmoid:  # Will approach 75% chance as count nears 100
+                should_respond = True
+        
+        # 6) Forward message if we should respond
+        if should_respond:
+            logger.info(f"[Bot] Triggered response in channel {message.channel.name}")
             await self.forward_to_hephia(message)
-            # new hephia message requested, reset counter for channel
+            # Reset counter for this channel
             self.new_messages[channel_id] = 0
 
     async def notify_high_message_count(self, channel: discord.TextChannel, count: int):
@@ -406,11 +431,17 @@ async def handle_send_message(request: web.Request) -> web.Response:
 
     content = data.get("content", "").strip()
 
-    # Validate non-empty content before proceeding.
+    # Validate non-empty content before proceeding
     if not content:
         error_msg = "Message content cannot be empty."
         logger.error(f"[Bot] {error_msg}")
         return web.json_response({"error": error_msg}, status=400)
+
+    # Discord's message length limit (2000 chars)
+    MAX_LENGTH = 2000
+    if len(content) > MAX_LENGTH:
+        logger.warning(f"[Bot] Message too long ({len(content)} chars), truncating to {MAX_LENGTH}")
+        content = content[:MAX_LENGTH]
 
     channel = bot.get_channel(int(channel_id))
     if not channel or not isinstance(channel, discord.TextChannel):
