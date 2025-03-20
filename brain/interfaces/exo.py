@@ -85,7 +85,7 @@ class ExoProcessorInterface(CognitiveInterface):
                 command, error = await self.command_handler.preprocess_command(llm_response)
                 
                 if error:
-                    cleaned_response = self.clean_errored_response(llm_response)
+                    cleaned_response = await self.clean_errored_response(llm_response)
                     brain_trace.interaction.error(error_msg=error)
                     self._add_to_history("assistant", cleaned_response)
                     error_message = TerminalFormatter.format_error(error)
@@ -105,15 +105,18 @@ class ExoProcessorInterface(CognitiveInterface):
                 BrainLogger.debug(f"Final Response: {final_response}")
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
-                # For global commands, just use raw input directly
-                if command.environment is None and GlobalCommands.is_global_command(command.action):
-                    formatted_command = command.raw_input
+
+                if not result.success:
+                    formatted_command = llm_response
                 else:
-                    formatted_command = f"{command.environment} {command.action}"
-                    if command.parameters:
-                        formatted_command += f" {' '.join(command.parameters)}"
-                    if command.flags:
-                        formatted_command += f" {' '.join(f'--{k}={v}' for k,v in command.flags.items())}"
+                    if command.environment is None and GlobalCommands.is_global_command(command.action):
+                        formatted_command = command.raw_input 
+                    else:
+                        formatted_command = f"{command.environment} {command.action}"
+                        if command.parameters:
+                            formatted_command += f" {' '.join(command.parameters)}"
+                        if command.flags:
+                            formatted_command += f" {' '.join(f'--{k}={v}' for k,v in command.flags.items())}"
 
                 self._add_to_history("assistant", formatted_command)
                 self._add_to_history("user", final_response)
@@ -468,7 +471,10 @@ Current state context:
 
     async def clean_errored_response(self, response: str) -> str:
         """Clean up the LLM response in case of an error."""
-        # Truncate and clean error message 
+        if len(response) <= 50:
+            return response.strip()
+            
+        # Otherwise truncate and clean error message 
         cleaned = response.replace("\n", "\\n").strip()
         truncated = cleaned[:50] + "..." if len(cleaned) > 50 else cleaned
         return f">>Truncated by ({len(cleaned)} chars: {truncated}<<"
