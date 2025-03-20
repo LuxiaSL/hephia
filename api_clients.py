@@ -484,6 +484,7 @@ class UnixSocketClient(BaseAPIClient):
             service_name=service_name
         )
         self.socket_path = socket_path
+        self.max_retries = 10
     
     def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
         """Get headers for Unix socket requests"""
@@ -534,14 +535,13 @@ class UnixSocketClient(BaseAPIClient):
                         )
                         
                         if response.status >= 500:
-                            delay = self.base_retry_delay * (attempt + 1)
                             SystemLogger.log_api_retry(
                                 self.service_name,
                                 attempt + 1,
                                 self.max_retries,
-                                f"Server error, waiting {delay}s"
+                                f"Server error"
                             )
-                            await asyncio.sleep(delay)
+                            await asyncio.sleep(0.2)  # 200ms backoff
                             continue
                             
                         raise Exception(f"Unix socket error: Status {response.status}")
@@ -553,9 +553,9 @@ class UnixSocketClient(BaseAPIClient):
                     self.max_retries,
                     str(e)
                 )
+                await asyncio.sleep(0.2)  # 200ms backoff
                 if attempt == self.max_retries - 1:
                     raise
-                await asyncio.sleep(self.base_retry_delay * (attempt + 1))
 
 
 class Chapter2Client(BaseAPIClient):
