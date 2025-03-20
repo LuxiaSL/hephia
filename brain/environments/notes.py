@@ -512,7 +512,7 @@ class NotesEnvironment(BaseEnvironment):
             # Generate suggested next commands.
             suggested_next = [
                 f"notes read {note_id}",
-                "notes list"
+                f"notes update {note_id} \"Updated Content\"",
             ]
             if tag_list:
                 suggested_next.append(f"notes list --tag={tag_list[0]}")
