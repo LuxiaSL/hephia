@@ -84,11 +84,10 @@ class ExoProcessorInterface(CognitiveInterface):
                 brain_trace.interaction.command("Processing command")
                 command, error = await self.command_handler.preprocess_command(llm_response)
                 
-                # need to maybe decide between whether sending the response back and not doing anything at all/retrying... 
-                # we want to correct but if its a base model the risk is p high that it causes a collapse
                 if error:
+                    cleaned_response = self.clean_errored_response(llm_response)
                     brain_trace.interaction.error(error_msg=error)
-                    self._add_to_history("assistant", llm_response)
+                    self._add_to_history("assistant", cleaned_response)
                     error_message = TerminalFormatter.format_error(error)
                     self._add_to_history("user", error_message)
                     return error_message
@@ -466,6 +465,13 @@ Current state context:
             while (len(self.conversation_history) > 1 and 
                    self.conversation_history[-1]["role"] == "assistant"):
                 self.conversation_history.pop()
+
+    async def clean_errored_response(self, response: str) -> str:
+        """Clean up the LLM response in case of an error."""
+        # Truncate and clean error message 
+        cleaned = response.replace("\n", "\\n").strip()
+        truncated = cleaned[:50] + "..." if len(cleaned) > 50 else cleaned
+        return f">>Truncated by ({len(cleaned)} chars: {truncated}<<"
 
     async def prune_conversation(self):
         """Remove the last message pair from conversation history and update state."""
