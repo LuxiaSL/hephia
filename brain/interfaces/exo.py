@@ -337,8 +337,11 @@ Focus on what was meaningful and any changes in understanding or state."""
         Transforms command/response pairs into a coherent narrative.
         """
         try:
+            if not self.conversation_history:
+                return "No conversation history available."
+                
             # Get recent messages
-            recent = self.conversation_history[-window_size:]
+            recent = self.conversation_history[-min(window_size, len(self.conversation_history)):]
             if not recent:
                 return "No recent cognitive activity."
             
