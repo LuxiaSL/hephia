@@ -391,19 +391,52 @@ class DiscordService:
     ) -> None:
         """
         Fire-and-forget style. We queue up a POST to /channels/{channel_id}/send_message.
-        If you want an immediate response or message_id, you'd do a direct _perform_request
-        instead of queueing.
+        Messages longer than 2000 characters are automatically split into multiple messages.
+        If you want an immediate response or message_id, use send_message_immediate instead.
         """
         if not self.config.enabled:
             SystemLogger.warning("Attempted to send a message while Discord integration is disabled.")
             return
+
+        # Discord's message length limit
+        MAX_LENGTH = 2000
         endpoint = f"/channels/{channel_id}/send_message"
-        await self.queue.enqueue(
-            priority,
-            "POST",
-            endpoint,
-            json={"content": content}
-        )
+
+        # Split message if needed
+        if len(content) <= MAX_LENGTH:
+            await self.queue.enqueue(
+                priority,
+                "POST",
+                endpoint,
+                json={"content": content}
+            )
+        else:
+            # Split content into chunks of MAX_LENGTH while preserving words
+            chunks = []
+            while content:
+                if len(content) <= MAX_LENGTH:
+                    chunks.append(content)
+                    break
+                
+                # Find last space before MAX_LENGTH
+                split_point = content.rfind(' ', 0, MAX_LENGTH)
+                if split_point == -1:  # No space found, force split at MAX_LENGTH
+                    split_point = MAX_LENGTH
+                
+                chunks.append(content[:split_point])
+                content = content[split_point:].lstrip()
+
+            # Queue each chunk with increasing priority to maintain order
+            for i, chunk in enumerate(chunks):
+                # Adjust priority slightly for each chunk to maintain sequence
+                chunk_priority = priority + (i * 0.001)
+                await self.queue.enqueue(
+                    chunk_priority,
+                    "POST",
+                    endpoint,
+                    json={"content": chunk}
+                )
+
 
     async def send_message_immediate(
         self,
