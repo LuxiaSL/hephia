@@ -71,7 +71,7 @@ class CognitiveInterface(NotificationInterface, ABC):
         yield ("updates", other_updates)
     
     @abstractmethod
-    async def get_relevant_memories(self) -> List[Dict[str, Any]]:
+    async def get_relevant_memories(self, metadata: Optional[Dict[str, any]]) -> List[Dict[str, Any]]:
         """Retrieve memories relevant to this interface's current context."""
         pass
 

@@ -56,14 +56,6 @@ class ExoProcessorInterface(CognitiveInterface):
         """
         try:
             async with asyncio.timeout(self.llm_timeout):
-                # Log conversation history to file
-                log_path = "data/logs/exo_conversation.log"
-                try:
-                    with open(log_path, "w", encoding="utf-8") as f:
-                        for msg in self.conversation_history:
-                            f.write(f"{msg['role']}: {msg['content']}\n")
-                except Exception as e:
-                    BrainLogger.error(f"Failed to write conversation log: {e}") 
                 # Get cognitive context
                 brain_trace.interaction.context("Getting cognitive context")
                 context_data = {}
@@ -85,6 +77,7 @@ class ExoProcessorInterface(CognitiveInterface):
                 command, error = await self.command_handler.preprocess_command(llm_response)
                 
                 if error:
+                    # cleaning only for when hallucinated context is terribly long
                     cleaned_response = await self.clean_errored_response(llm_response)
                     brain_trace.interaction.error(error_msg=error)
                     self._add_to_history("assistant", cleaned_response)
@@ -106,21 +99,19 @@ class ExoProcessorInterface(CognitiveInterface):
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
 
-                if not result.success:
-                    formatted_command = llm_response
-                else:
-                    if command.environment is None and GlobalCommands.is_global_command(command.action):
-                        formatted_command = command.raw_input 
-                    else:
-                        formatted_command = f"{command.environment} {command.action}"
-                        if command.parameters:
-                            formatted_command += f" {' '.join(command.parameters)}"
-                        if command.flags:
-                            formatted_command += f" {' '.join(f'--{k}={v}' for k,v in command.flags.items())}"
-
-                self._add_to_history("assistant", formatted_command)
+                #just return the llm response; the final_response should carry all information relating to any processing *we* did.
+                self._add_to_history("assistant", llm_response)
                 self._add_to_history("user", final_response)
                 self.last_successful_turn = datetime.now()
+
+                # Log conversation history to file
+                log_path = "data/logs/exo_conversation.log"
+                try:
+                    with open(log_path, "w", encoding="utf-8") as f:
+                        for msg in self.conversation_history:
+                            f.write(f"{msg['role']}: {msg['content']}\n")
+                except Exception as e:
+                    BrainLogger.error(f"Failed to write conversation log: {e}") 
                 
                 # Create notification for other interfaces
                 brain_trace.interaction.notify("Final updates")
@@ -292,7 +283,7 @@ Focus on what was meaningful and any changes in understanding or state."""
         """
         return TerminalFormatter.format_context_summary(state, memories)
 
-    async def get_relevant_memories(self) -> List[Dict[str, Any]]:
+    async def get_relevant_memories(self, metadata: Optional[str]) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to current conversation context.
         """
@@ -474,12 +465,12 @@ Current state context:
 
     async def clean_errored_response(self, response: str) -> str:
         """Clean up the LLM response in case of an error."""
-        if len(response) <= 50:
+        if len(response) <= 150:
             return response.strip()
             
         # Otherwise truncate and clean error message 
         cleaned = response.replace("\n", "\\n").strip()
-        truncated = cleaned[:50] + "..." if len(cleaned) > 50 else cleaned
+        truncated = cleaned[:150] + "..."
         return f">>Truncated by ({len(cleaned)}) chars: {truncated}<<"
 
     async def prune_conversation(self):

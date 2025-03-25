@@ -78,6 +78,9 @@ class ParsedCommand:
     action: str
     parameters: List[str]
     flags: Dict[str, str]
+    # prepping; want to make sure we always return the raw input back to the LLM, 
+    # but with direction on what we did internally so that it might be able to fix in the future.
+    applied_fixes: List[str] = field(default_factory=list) 
     raw_input: str  # Original LLM text for reference/debugging
 
 @dataclass

@@ -103,6 +103,7 @@ class CommandPreprocessor:
                     parsed, available_commands
                 )
                 if corrected:
+                    # again, make sure that for here we send back the correction + reason for correction 
                     BrainLogger.log_command_processing(command, corrected, None)
                     return corrected, None
                     
@@ -167,8 +168,7 @@ class CommandPreprocessor:
         command = first_line
         
         # Check if this is a notes command that accepts multiline content
-        is_note_command = any(command.startswith(prefix) for prefix in 
-                            ['notes create', 'notes edit', 'notes update'])
+        is_note_command = any(command.startswith(prefix) for prefix in ['notes create', 'notes update'])
         
         # Join non-hallucinated lines with proper spacing
         additional_content = []
@@ -258,8 +258,7 @@ class CommandPreprocessor:
         command_parts.append(first_line)
         
         # Check if this is a notes command that accepts multiline content
-        is_note_command = any(first_line.startswith(prefix) for prefix in 
-                            ['notes create', 'notes edit', 'notes update'])
+        is_note_command = any(first_line.startswith(prefix) for prefix in ['notes create', 'notes update'])
         
         # Also look for quoted strings in the first line to track quote state
         for char in first_line:
@@ -531,10 +530,11 @@ class CommandPreprocessor:
         command: ParsedCommand,
         available_commands: Dict[str, EnvironmentCommands]
     ) -> Optional[ParsedCommand]:
+        #rework this to make sure that it's a tuple/returns the necessary info in parsedcommand for applied fixes via new model structure
         """Attempt to correct invalid command using LLM."""
         if not isinstance(command, ParsedCommand):
             return None
-        """Attempt to correct invalid command using LLM."""
+        
         model_name = Config.get_validation_model()
         model_config = Config.AVAILABLE_MODELS[model_name]
         try:

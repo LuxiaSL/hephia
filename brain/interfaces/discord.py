@@ -250,11 +250,10 @@ Create a concise first-person memory snippet that captures:
 1. The social dynamics and emotional context
 2. Any relationship developments or insights
 3. Key points of the conversation
-4. My thoughts and reactions
+4. Thoughts and reactions
+"""
 
-Write from Hephia's perspective as a natural social interaction memory."""
-
-    async def get_relevant_memories(self) -> List[Dict[str, Any]]:
+    async def get_relevant_memories(self, metadata: Optional[str]) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to current social context.
         Focuses on interaction patterns and relationship context.
