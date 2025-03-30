@@ -108,7 +108,7 @@ class DiscordInterface(CognitiveInterface):
                 }
             )
             BrainLogger.error(f"Error processing Discord interaction: {e}", exc_info=True)
-            return "I apologize, but I'm having trouble processing right now."
+            return ""
 
     # Keep existing methods
     async def _generate_summary(self, notifications: List[Notification]) -> str:

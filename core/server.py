@@ -247,6 +247,10 @@ class HephiaServer:
                 response_text = await self.core_processor.handle_discord_message(message_context)
                 SystemLogger.debug(f"AI response: {response_text[:100]}...")
 
+                if response_text == "":
+                    SystemLogger.warning("Received empty response from AI.")
+                    return {"status": "no_response"}
+
                 # Use path-based message sending instead of ID-based
                 await self.discord_service.queue_message_by_path(
                     path=channel_path,

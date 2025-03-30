@@ -376,7 +376,6 @@ class CoreProcessor:
                 channel_data['path'] = f"{guild_name}:{channel_name}" if guild_name else channel_name
                 message_context['channel'] = channel_data
 
-            # Process through Discord interface - it handles its own notifications
             return await self.interfaces['discord'].process_interaction(
                 message_context
             )
