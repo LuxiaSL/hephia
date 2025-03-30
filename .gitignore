@@ -56,7 +56,3 @@ data/
 
 # i should probably know what this is but i dont but i assume it's chill
 .coverage
-
-#admin tools
-analyze_memory_db.py
-analyze_state_persistence.py

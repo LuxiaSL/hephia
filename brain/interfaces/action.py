@@ -81,5 +81,5 @@ class ActionInterface(CognitiveInterface):
     async def format_memory_context(self, content, state, metadata=None):
         pass
 
-    async def get_relevant_memories(self):
+    async def get_relevant_memories(self, metadata=None):
         pass

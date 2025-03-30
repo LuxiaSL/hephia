@@ -47,7 +47,7 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 class DiscordInbound(BaseModel):
-    channel_id: str
+    channel_id: str  # Keep for backward compatibility
     message_id: str
     author: str
     author_id: str
@@ -56,9 +56,15 @@ class DiscordInbound(BaseModel):
     context: Dict[str, Any]
 
 class DiscordChannelUpdate(BaseModel):
-    channel_id: str
+    channel_id: str  # Keep for backward compatibility
     channel_name: str
+    guild_name: Optional[str] = None
     new_message_count: int
+    
+    @property
+    def path(self) -> str:
+        """Generate channel path from guild and channel names."""
+        return f"{self.guild_name}:{self.channel_name}" if self.guild_name else self.channel_name
 
 class ActionRequest(BaseModel):
     """Model for action execution requests."""
@@ -212,19 +218,27 @@ class HephiaServer:
             try:
                 SystemLogger.info("Received new Discord message.")
             
-                # Prepare context for the AI
+                # Extract channel and guild information from context
+                channel_name = payload.context.get('channel_name', 'Unknown')
+                guild_name = payload.context.get('guild_name')
+                
+                # Create path-based channel reference
+                channel_path = f"{guild_name}:{channel_name}" if guild_name else channel_name
+                
+                # Prepare context for the AI with path-based references
                 message_context = {
                     'current_message': {
                         'id': payload.message_id,
-                        'author': f"<@{payload.author_id}>",  # Discord mention format
-                        'author_id': payload.author_id,
+                        'author': payload.author,  # Use clean author name instead of mention format
+                        'author_id': payload.author_id,  # Keep ID for reference if needed
                         'content': payload.content,
                         'timestamp': payload.timestamp
                     },
                     'channel': {
-                        'id': payload.channel_id,
-                        'name': payload.context.get('channel_name'),
-                        'guild_name': payload.context.get('guild_name'),
+                        'id': payload.channel_id,  # Keep ID for backward compatibility
+                        'name': channel_name,
+                        'guild_name': guild_name,
+                        'path': channel_path,  # Add path for clean references
                         'recent_activity': payload.context.get('message_count')
                     },
                     'conversation_history': payload.context.get('recent_history', [])
@@ -233,8 +247,9 @@ class HephiaServer:
                 response_text = await self.core_processor.handle_discord_message(message_context)
                 SystemLogger.debug(f"AI response: {response_text[:100]}...")
 
-                await self.discord_service.send_message(
-                    channel_id=payload.channel_id,
+                # Use path-based message sending instead of ID-based
+                await self.discord_service.queue_message_by_path(
+                    path=channel_path,
                     content=response_text
                 )
 
@@ -246,9 +261,12 @@ class HephiaServer:
         
         @self.app.post("/discord_channel_update")
         async def discord_channel_update(payload: DiscordChannelUpdate):
+            # Use guild_name from the payload for the path-based approach
             await self.core_processor.handle_discord_channel_update(
                 channel_id=payload.channel_id,
-                channel_name=payload.channel_name
+                channel_name=payload.channel_name,
+                guild_name=payload.guild_name,
+                message_count=payload.new_message_count
             )
             return {"status": "ok"}
         

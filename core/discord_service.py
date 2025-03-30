@@ -98,7 +98,7 @@ class DiscordConnectionManager:
             return False
         try:
             session = await self._ensure_session()
-            async with session.get(f"{self.config.bot_url}/guilds") as resp:
+            async with session.get(f"{self.config.bot_url}/enhanced_history") as resp:
                 healthy = (resp.status == 200)
                 if healthy:
                     self._last_successful_connection = time.time()
@@ -274,125 +274,111 @@ class DiscordService:
     ) -> Tuple[Optional[Any], Optional[int]]:
         """
         Wraps an HTTP request with:
-        - an async context manager for proper response handling,
-        - detailed logging (pre-request state, raw response snippet, and structured error logging),
-        - returns (json_data, status_code) or (None, status_code) on error.
+        - Session validation and timeout handling
+        - Detailed logging of request/response state
+        - Enhanced error reporting for path issues
+        Returns (json_data, status_code) or (None, status_code) on error.
         """
         full_url = f"{self.config.bot_url}{endpoint}"
         SystemLogger.debug(f"Initiating {method} request to {endpoint} with kwargs: {kwargs}")
         SystemLogger.debug(f"Full URL: {full_url}")
-        SystemLogger.debug(f"Current connection status: {self.connection.status}")
-        SystemLogger.debug(f"Session state: {'Active' if self.connection.session and not self.connection.session.closed else 'Inactive'}")
+        SystemLogger.debug(f"Connection status: {self.connection.status}")
 
         try:
-            async with self.connection.session.request(method, full_url, **kwargs) as resp:
-                status = resp.status
-                SystemLogger.debug(f"Response received | Status: {status} | Headers: {resp.headers}")
+            # Ensure session exists and is valid
+            if not self.connection.session or self.connection.session.closed:
+                SystemLogger.warning("Session was closed or missing; creating new session")
+                await self.connection._ensure_session()
 
-                try:
-                    SystemLogger.debug("Attempting to parse response body")
-                    raw_text = await resp.text()
-                    SystemLogger.debug(f"Raw response text (first 1000 chars): {raw_text[:1000]}...")
-                    
-                    data = json.loads(raw_text)
-                    SystemLogger.debug(
-                        f"Successfully parsed JSON response | Data keys: "
-                        f"{list(data.keys()) if isinstance(data, dict) else 'array'}"
-                    )
-                except aiohttp.ClientPayloadError as e:
-                    SystemLogger.error(
-                        f"Connection closed while reading | Endpoint: {endpoint} | "
-                        f"Status: {status} | Error: {str(e)} | "
-                        f"Partial response: {getattr(resp, '_body', 'N/A')[:200]}"
-                    )
-                    data = None
-                except json.JSONDecodeError as e:
-                    SystemLogger.error(
-                        f"Invalid JSON | Endpoint: {endpoint} | Status: {status} | "
-                        f"Error: {str(e)} | Position: {e.pos} | "
-                        f"Line: {e.lineno} | Col: {e.colno} | "
-                        f"Raw text snippet: {raw_text[:200]}"
-                    )
-                    data = None
-                except Exception as e:
-                    SystemLogger.error(
-                        f"Unexpected error parsing response | Endpoint: {endpoint} | "
-                        f"Status: {status} | Error type: {type(e).__name__} | "
-                        f"Error: {str(e)} | "
-                        f"Raw text available: {'Yes' if 'raw_text' in locals() else 'No'}"
-                    )
-                    data = None
+            SystemLogger.debug(f"Session state: {'Active' if self.connection.session and not self.connection.session.closed else 'Inactive'}")
 
-                if status != 200:
-                    if status == 404:
-                        SystemLogger.warning(
-                            f"Not Found | Method: {method} | Endpoint: {endpoint} | "
-                            f"Request kwargs: {kwargs}"
-                        )
-                    else:
-                        SystemLogger.error(
-                            f"Non-200 status | Code: {status} | Method: {method} | "
-                            f"Endpoint: {endpoint} | Headers: {resp.headers} | "
-                            f"Request kwargs: {kwargs}"
-                        )
-                elif data is None:
-                    SystemLogger.warning(
-                        f"Empty or unparseable response | Status: 200 | Method: {method} | "
-                        f"Endpoint: {endpoint} | Headers: {resp.headers} | "
-                        f"Content-Type: {resp.headers.get('Content-Type', 'N/A')}"
-                    )
-                
-                SystemLogger.debug(f"Request completed | Method: {method} | Endpoint: {endpoint} | Status: {status}")
-                return data, status
+            # Make request with timeout handling
+            try:
+                async with asyncio.timeout(self.config.connection_timeout):
+                    async with self.connection.session.request(method, full_url, **kwargs) as resp:
+                        status = resp.status
+                        SystemLogger.debug(f"Response received | Status: {status} | Headers: {resp.headers}")
+
+                        try:
+                            raw_text = await resp.text()
+                            SystemLogger.debug(f"Raw response text (first 1000 chars): {raw_text[:1000]}...")
+
+                            if status != 200:
+                                if status == 404:
+                                    SystemLogger.warning(f"Not Found | Method: {method} | Endpoint: {endpoint}")
+                                    return {"error": f"Endpoint not found: {endpoint}"}, status
+                                else:
+                                    SystemLogger.error(
+                                        f"Non-200 status | Code: {status} | Method: {method} | "
+                                        f"Endpoint: {endpoint} | Response: {raw_text[:200]}"
+                                    )
+
+                            try:
+                                data = json.loads(raw_text)
+                                SystemLogger.debug(
+                                    f"Successfully parsed JSON response | Data keys: "
+                                    f"{list(data.keys()) if isinstance(data, dict) else 'array'}"
+                                )
+                                return data, status
+                            except json.JSONDecodeError as e:
+                                SystemLogger.error(
+                                    f"Invalid JSON | Endpoint: {endpoint} | Status: {status} | "
+                                    f"Error: {str(e)} | Position: {e.pos} | "
+                                    f"Raw text snippet: {raw_text[:200]}"
+                                )
+                                return raw_text, status
+
+                        except Exception as e:
+                            SystemLogger.error(f"Error processing response: {e}")
+                            return None, status
+
+            except asyncio.TimeoutError:
+                SystemLogger.error(f"Request timed out after {self.config.connection_timeout}s")
+                return None, 504
 
         except Exception as e:
             SystemLogger.error(
                 f"Request failed | Method: {method} | Endpoint: {endpoint} | "
-                f"Error: {str(e)} | Connection Status: {self.connection.status}"
+                f"Error: {str(e)} | Connection Status: {self.connection.status}",
+                exc_info=True
             )
             return None, None
+        
+    def _sanitize_path(self, path: str) -> str:
+        """
+        Sanitize a Discord path to ensure consistent formatting.
+        Removes quotes, trims whitespace, etc.
+        """
+        # Strip whitespace
+        path = path.strip()
+        
+        # Remove surrounding quotes if present
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
+            
+        return path
 
-    async def list_guilds(self) -> Tuple[Optional[List[dict]], Optional[int]]:
-        """GET /guilds -> returns ([{id, name, ...}], status_code)."""
-        return await self._perform_request("GET", "/guilds")
-
-    async def list_channels(
+    async def list_guilds_with_channels(self) -> Tuple[Optional[List[dict]], Optional[int]]:
+        """
+        GET /guilds-with-channels -> returns hierarchical data of guilds and their channels
+        """
+        return await self._perform_request("GET", "/guilds-with-channels")
+    
+    # Queue-based version of send_message_by_path
+    async def queue_message_by_path(
         self,
-        guild_id: str
-    ) -> Tuple[Optional[List[dict]], Optional[int]]:
-        """GET /guilds/{guild_id}/channels -> returns ([{id, name, ...}], status)."""
-        endpoint = f"/guilds/{guild_id}/channels"
-        return await self._perform_request("GET", endpoint)
-
-    async def get_message(
-        self,
-        channel_id: str,
-        message_id: str
-    ) -> Tuple[Optional[dict], Optional[int]]:
-        """GET /channels/{channel_id}/messages/{message_id} -> returns (data, status)."""
-        endpoint = f"/channels/{channel_id}/messages/{message_id}"
-        return await self._perform_request("GET", endpoint)
-
-    async def get_history(
-        self,
-        channel_id: str,
-        limit: int = 50
-    ) -> Tuple[Optional[List[dict]], Optional[int]]:
-        """GET /channels/{channel_id}/history?limit=X -> returns ([...], status)."""
-        endpoint = f"/channels/{channel_id}/history"
-        params = {"limit": str(limit)}
-        return await self._perform_request("GET", endpoint, params=params)
-
-    async def send_message(
-        self,
-        channel_id: str,
+        path: str,
         content: str,
         priority: int = 5
     ) -> None:
         """
-        Fire-and-forget style. We queue up a POST to /channels/{channel_id}/send_message.
+        Fire-and-forget style. Send a message to a path using the queue system.
         Messages longer than 1750 characters are automatically split into multiple messages.
-        If you want an immediate response or message_id, use send_message_immediate instead.
+        
+        Args:
+            path: The target in 'Guild:channel' format (e.g., 'MyServer:general')
+            content: Message to send
+            priority: Message priority (lower values = higher priority)
         """
         if not self.config.enabled:
             SystemLogger.warning("Attempted to send a message while Discord integration is disabled.")
@@ -400,7 +386,10 @@ class DiscordService:
 
         # Discord's message length limit
         MAX_LENGTH = 1750
-        endpoint = f"/channels/{channel_id}/send_message"
+        endpoint = f"/send-by-path"
+
+        path = self._sanitize_path(path)
+        SystemLogger.info(f"Queueing message to '{path}' with content length {len(content)}")
 
         # Split message if needed
         if len(content) <= MAX_LENGTH:
@@ -408,23 +397,24 @@ class DiscordService:
                 priority,
                 "POST",
                 endpoint,
-                json={"content": content}
+                json={"path": path, "content": content}
             )
         else:
             # Split content into chunks of MAX_LENGTH while preserving words
             chunks = []
-            while content:
-                if len(content) <= MAX_LENGTH:
-                    chunks.append(content)
+            remaining = content
+            while remaining:
+                if len(remaining) <= MAX_LENGTH:
+                    chunks.append(remaining)
                     break
                 
                 # Find last space before MAX_LENGTH
-                split_point = content.rfind(' ', 0, MAX_LENGTH)
+                split_point = remaining.rfind(' ', 0, MAX_LENGTH)
                 if split_point == -1:  # No space found, force split at MAX_LENGTH
                     split_point = MAX_LENGTH
                 
-                chunks.append(content[:split_point])
-                content = content[split_point:].lstrip()
+                chunks.append(remaining[:split_point])
+                remaining = remaining[split_point:].lstrip()
 
             # Queue each chunk with increasing priority to maintain order
             for i, chunk in enumerate(chunks):
@@ -434,18 +424,144 @@ class DiscordService:
                     chunk_priority,
                     "POST",
                     endpoint,
-                    json={"content": chunk}
+                    json={"path": path, "content": chunk}
                 )
 
-
-    async def send_message_immediate(
+    async def send_message_by_path(
         self,
-        channel_id: str,
+        path: str,
+        content: str,
+        priority: int = 5
+    ) -> Tuple[Optional[dict], Optional[int]]:
+        """
+        Send a message using the friendly 'Server:channel' path format.
+        No queue used here, returns immediately with response data.
+        """
+        # Sanitize the path to ensure it's clean
+        path = self._sanitize_path(path)
+        SystemLogger.info(f"Sending message to '{path}' with content length {len(content)}")
+        
+        # Add specific debugging for this method
+        try:
+            # Construct the request to the bot
+            endpoint = "/send-by-path"
+            full_url = f"{self.config.bot_url}{endpoint}"
+            SystemLogger.debug(f"Making request to: {full_url}")
+            SystemLogger.debug(f"Request payload: path='{path}', content_length={len(content)}")
+            
+            # Make the request with detailed error trapping
+            result, status = await self._perform_request("POST", endpoint, json={
+                "path": path,
+                "content": content
+            })
+            
+            # Log the outcome
+            if status == 200:
+                SystemLogger.info(f"Successfully sent message to '{path}'")
+            else:
+                SystemLogger.error(f"Failed to send message to '{path}': status={status}")
+                if result:
+                    SystemLogger.error(f"Error details: {result}")
+            
+            return result, status
+        except Exception as e:
+            SystemLogger.error(f"Exception in send_message_by_path: {e}", exc_info=True)
+            return None, 500
+    
+    async def find_message(
+        self,
+        path: str,
+        reference: str
+    ) -> Tuple[Optional[dict], Optional[int]]:
+        """Find a specific message using a user-friendly reference."""
+        # Sanitize the path
+        path = self._sanitize_path(path)
+        SystemLogger.info(f"Finding message in '{path}' with reference '{reference}'")
+        
+        endpoint = "/find-message"
+        params = {
+            "path": path,
+            "reference": reference
+        }
+        return await self._perform_request("GET", endpoint, params=params)
+
+    async def get_enhanced_history(
+        self,
+        path: str,
+        limit: int = 50
+    ) -> Tuple[Optional[dict], Optional[int]]:
+        """
+        Get enhanced message history with user-friendly references.
+        
+        Args:
+            path: Channel path in 'Server:channel' format
+            limit: Maximum number of messages to retrieve
+            
+        Returns:
+            Tuple of (history_data, status_code)
+        """
+        path = self._sanitize_path(path)
+        SystemLogger.info(f"Retrieving enhanced history for '{path}' with limit {limit}")
+
+        endpoint = "/enhanced-history"
+        params = {
+            "path": path,
+            "limit": str(limit)
+        }
+        return await self._perform_request("GET", endpoint, params=params)
+
+    async def reply_to_message(
+        self,
+        path: str,
+        reference: str,
         content: str
     ) -> Tuple[Optional[dict], Optional[int]]:
         """
-        Directly POST to /channels/{channel_id}/send_message, returning (json, status).
-        No queue used here, so you can parse the response right away.
+        Reply to a specific message identified by a user-friendly reference.
+        
+        Args:
+            path: Channel path in 'Server:channel' format
+            reference: Reference to message (e.g., "#1", "latest")
+            content: Reply content
+            
+        Returns:
+            Tuple of (response_data, status_code)
         """
-        endpoint = f"/channels/{channel_id}/send_message"
-        return await self._perform_request("POST", endpoint, json={"content": content})
+        # Sanitize inputs
+        path = self._sanitize_path(path)
+        reference = reference.strip()
+        
+        # Log exact values being used
+        SystemLogger.info(f"Replying to message: path='{path}', reference='{reference}'")
+        
+        # Construct request data
+        endpoint = "/reply-to-message" 
+        payload = {
+            "path": path,
+            "reference": reference,
+            "content": content
+        }
+        
+        # Perform the request with detailed error handling
+        try:
+            result, status = await self._perform_request("POST", endpoint, json=payload)
+            
+            if status != 200:
+                SystemLogger.error(f"Reply request failed: status={status}, response={result}")
+                # Include more information in error
+                if isinstance(result, dict) and "error" in result:
+                    error_msg = f"Reply failed: {result['error']}"
+                else:
+                    error_msg = f"Endpoint not found: {endpoint}"
+                    if self.config.bot_url:
+                        error_msg += f" (full URL: {self.config.bot_url}{endpoint})"
+                
+                # Return structured error
+                return {"error": error_msg}, status
+            
+            return result, status
+            
+        except Exception as e:
+            SystemLogger.error(f"Exception in reply_to_message: {e}", exc_info=True)
+            return {"error": f"Exception: {str(e)}"}, 500
+

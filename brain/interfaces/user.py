@@ -174,7 +174,7 @@ Create a concise first-person memory that captures:
 
 Write from my perspective as a natural conversation memory."""
 
-    async def get_relevant_memories(self) -> List[Dict[str, Any]]:
+    async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to user conversations.
         Focuses on direct interaction patterns.

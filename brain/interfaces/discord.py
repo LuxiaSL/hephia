@@ -60,7 +60,7 @@ class DiscordInterface(CognitiveInterface):
             # Build final context string from parts
             formatted_context = context_parts.get('formatted_context', 'No context available')
             other_updates = context_parts.get('updates', '')
-            context = f"{formatted_context}\n\nRecent Updates:\n{other_updates}"
+            context = f"{formatted_context}\n###\nRecent Updates:\n{other_updates}"
             
             # Log the entire context for debugging
             BrainLogger.info(f"[{self.interface_id}] Received cognitive context: {context}")
@@ -78,11 +78,12 @@ class DiscordInterface(CognitiveInterface):
             # Create notification for other interfaces
             notification = await self.create_notification({
                 "response": response,
-                "message_id": message.get('id'),
+                "message_id": message.get('id'),  # Keep for internal use but will hide from display
                 "message": message_content,
                 "author": author,
                 "channel": channel,
                 "guild": channel_data.get('guild_name'),
+                "path": f"{channel_data.get('guild_name', 'Unknown')}:{channel}" if channel_data.get('guild_name') else channel,
                 "channel_type": "server" if channel_data.get('guild_name') else "DM",
                 "timestamp": message.get('timestamp')
             })
@@ -118,24 +119,38 @@ class DiscordInterface(CognitiveInterface):
             BrainLogger.debug(f"notif: {notif}, content: {notif.content}")
             
             if notif.content.get('update_type') == 'channel_activity':
-                # Handle channel activity updates
-                message = (
-                    f"New messages detected in Discord channel {notif.content.get('channel_name', 'Unknown')}"
-                    f"(ID: {notif.content.get('channel_id', 'Unknown')})"
-                )
+                # Handle channel activity updates using path format
+                channel_name = notif.content.get('channel_name', 'Unknown')
+                guild_name = notif.content.get('guild_name', 'Unknown')
+                path = f"{guild_name}:{channel_name}" if guild_name else channel_name
+                message = f"New messages detected in Discord channel {path}"
                 formatted.append(message)
             else:
-                # Handle conversation notifications
+                # Handle conversation notifications with path format
                 content = notif.content
+                # Use path directly if available
+                path = content.get('path')
+                
+                # If path not available, construct it from guild and channel
+                if not path:
+                    channel = content.get('channel', 'Unknown')
+                    guild = content.get('guild')
+                    path = f"{guild}:{channel}" if guild else channel
+
+                author = content.get('author', 'Unknown')
+                
                 summary_text = (
-                    f"Discord update: Replied to {content.get('author', 'Unknown')} in channel {content.get('channel', 'Unknown')}\n"
-                    f"- Message ID: {content.get('message_id', 'Unknown')}\n"
-                    f"- User said: {content.get('message', '')[:250]}{'...' if len(content.get('message', '')) > 250 else ''}\n"
-                    f"- My response: {content.get('response', '')[:50]}{'...' if len(content.get('response', '')) > 50 else ''}"
+                    f"Discord update: Replied to {author} in {path}\n"
+                    f"{author}: {content.get('message', '')}\n"
+                    f"I responded: {content.get('response', '')[:150]}{'...' if len(content.get('response', '')) > 150 else ''}"
                 )
                 formatted.append(summary_text)
         
-        summary = "\n".join(formatted[-5:])  # Last 5 notifications
+        if not formatted:
+            summary = "No recent notifications."
+        else:
+            summary = "\n###".join(formatted)
+
         return f"""Recent Discord Activity:
     {summary}"""
         
@@ -146,6 +161,13 @@ class DiscordInterface(CognitiveInterface):
     ) -> None:
         """Dispatch memory check for Discord interaction."""
         try:
+            # Extract channel and guild information
+            channel_name = message_context.get('channel', {}).get('name', 'Unknown')
+            guild_name = message_context.get('channel', {}).get('guild_name')
+            
+            # Create path format for channel reference
+            channel_path = f"{guild_name}:{channel_name}" if guild_name else channel_name
+            
             memory_data = MemoryData(
                 interface_id=self.interface_id,
                 content=response,
@@ -158,9 +180,10 @@ class DiscordInterface(CognitiveInterface):
                         'timestamp': message_context.get('current_message', {}).get('timestamp')
                     },
                     'channel': {
-                        'name': message_context.get('channel', {}).get('name'),
-                        'guild': message_context.get('channel', {}).get('guild_name'),
-                        'is_dm': not message_context.get('channel', {}).get('guild_name')
+                        'name': channel_name,
+                        'guild': guild_name,
+                        'path': channel_path,
+                        'is_dm': not guild_name
                     },
                     'history': message_context.get('conversation_history', [])[-3:],
                     'mentions_bot': '@hephia' in (
@@ -175,7 +198,6 @@ class DiscordInterface(CognitiveInterface):
         BrainLogger.info(f"Memory data for dispatch (Discord): {memory_data}")
 
         try:
-            # Wrap the MemoryData output in the expected legacy structure.
             final_event_data = {
                 "event_type": "discord",
                 "content": memory_data.content,
@@ -213,8 +235,16 @@ class DiscordInterface(CognitiveInterface):
         """
         message_data = metadata.get('message', {})
         author = message_data.get('author', 'Unknown')
-        channel = message_data.get('channel', {}).get('name', 'Unknown')
-        guild = message_data.get('channel', {}).get('guild_name', 'DM')
+        
+        # Use path directly if available in channel metadata
+        channel_data = metadata.get('channel', {})
+        channel_path = channel_data.get('path')
+        
+        # If path not provided, construct it from guild and channel
+        if not channel_path:
+            channel_name = channel_data.get('name', 'Unknown')
+            guild_name = channel_data.get('guild')
+            channel_path = f"{guild_name}:{channel_name}" if guild_name and guild_name != 'DM' else channel_name
         
         history = metadata.get('history', [])
         history_text = ""
@@ -236,24 +266,23 @@ class DiscordInterface(CognitiveInterface):
             history_text = "\n".join(history_entries)
 
         return f"""Form a memory of this Discord interaction:
-
+###
 Context:
-Channel: #{channel} in {guild}
+Channel: {channel_path}
 Conversation with: {author}
-
+###
 Recent History:
 {history_text}
-
+###
 My Response: {content}
-
+###
 Create a concise first-person memory snippet that captures:
 1. The social dynamics and emotional context
 2. Any relationship developments or insights
 3. Key points of the conversation
-4. Thoughts and reactions
-"""
+4. Thoughts and reactions"""
 
-    async def get_relevant_memories(self, metadata: Optional[str]) -> List[Dict[str, Any]]:
+    async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to current social context.
         Focuses on interaction patterns and relationship context.
@@ -294,16 +323,20 @@ Create a concise first-person memory snippet that captures:
             
         channel_type = "server" if channel_data.get('guild_name') else "DM"
         channel_name = channel_data.get('name', 'Unknown')
+        guild_name = channel_data.get('guild_name')
+        
+        # Create path format for channel
+        channel_path = f"{guild_name}:{channel_name}" if guild_name else channel_name
         
         return f"""Process this Discord interaction from your perspective:
-
-Environment: Discord {channel_type} (#{channel_name})
+###
+Discord {channel_type} ({channel_path})
 From: {author}
 Message: {message_content}
-
+###
 Recent Conversation:
 {history_text}
-
+###
 My Current Context:
 {context}"""
 

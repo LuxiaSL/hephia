@@ -368,6 +368,14 @@ class CoreProcessor:
     ) -> str:
         """Handle incoming Discord messages."""
         try:
+            # Ensure channel path is included in the message context
+            channel_data = message_context.get('channel', {})
+            if 'path' not in channel_data and 'name' in channel_data:
+                channel_name = channel_data.get('name', 'Unknown')
+                guild_name = channel_data.get('guild_name')
+                channel_data['path'] = f"{guild_name}:{channel_name}" if guild_name else channel_name
+                message_context['channel'] = channel_data
+
             # Process through Discord interface - it handles its own notifications
             return await self.interfaces['discord'].process_interaction(
                 message_context
@@ -386,12 +394,15 @@ class CoreProcessor:
     ) -> None:
         """Handle Discord channel activity updates."""
         try:
+            # Create channel path for user-friendly reference
+            channel_path = f"{guild_name}:{channel_name}" if guild_name else channel_name
+            
             # Create notification about channel activity using proper structure
             notification = Notification(
                 content={
-                    "channel_id": channel_id,
                     "channel_name": channel_name,
-                    "guild_name": guild_name,
+                    "guild_name": guild_name, 
+                    "path": channel_path,  # Add path-based reference
                     "message_count": message_count,
                     "update_type": "channel_activity"
                 },

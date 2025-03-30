@@ -260,13 +260,11 @@ class ActionEnvironment(BaseEnvironment):
         # Add Discord suggestions if enabled and appropriate
         if Config.get_discord_enabled():
             if action in ["play", "rest"]:
-                suggestions.append("discord send_message")
+                suggestions.append("discord list_channels")
         
         # Action-specific suggestions
         if action == "play":
             suggestions.append('meditate focus "joy"')
-            if Config.get_discord_enabled():
-                suggestions.append("discord send_message")
         elif action == "rest":
             suggestions.append('meditate focus "peaceful"')
             suggestions.append('reflect "recharging"')

@@ -124,15 +124,10 @@ class MemoryManager:
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are creating autobiographical memory snippets from Hephia's perspective. Keep these incredibly concise - 1-2 sentences maximum.
-
-Focus on:
-- First-person perspective ("I did/felt/learned...")
-- Key actions, things, states, decisions, or realizations
-- Essential contextual details only
-- Natural memory-like phrasing
-
-Write as if quickly jotting down a meaningful moment."""
+                        "content": """I am formulating a memory to be persisted and used. 
+I'll keep these incredibly concise, just a couple of sentences at most, like a diary entry.
+I'll try to take note from my perspective, focusing on key actions, decisions, or realizations. 
+I'll also include essential context like who was involved or what my objective felt like."""
                     },
                     {
                         "role": "user",

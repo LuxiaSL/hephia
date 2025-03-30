@@ -283,13 +283,12 @@ Focus on what was meaningful and any changes in understanding or state."""
         """
         return TerminalFormatter.format_context_summary(state, memories)
 
-    async def get_relevant_memories(self, metadata: Optional[str]) -> List[Dict[str, Any]]:
+    async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to current conversation context.
         """
         if not self.conversation_history:
             return []
-            
         # Get recent context
         recent_context = "\n".join(
             f"{msg['role']}: {msg['content']}"

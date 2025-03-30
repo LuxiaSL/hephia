@@ -4,6 +4,7 @@ import random
 import sys
 import logging
 import asyncio
+from typing import Optional
 import aiohttp
 import discord
 from aiohttp import web
@@ -70,11 +71,16 @@ class RealTimeDiscordBot(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.new_messages = {}
+        self.guild_name_to_id = {}  # Maps guild names to IDs
+        self.channel_path_to_id = {}  # Maps "guild:channel" paths to channel IDs
+        self.id_to_guild_name = {}  # Maps guild IDs to names
+        self.id_to_channel_name = {}  # Maps channel IDs to names (including guild context)
         # We'll store the persistent aiohttp session reference
         self.session = kwargs.get("session", None)
 
     async def on_ready(self):
         logger.info(f"[Bot] Logged in as {self.user} (id={self.user.id})")
+        await self.update_name_mappings()
         await initialize_message_cache(self)
 
     async def on_message(self, message: discord.Message):
@@ -116,7 +122,7 @@ class RealTimeDiscordBot(discord.Client):
             should_respond = True
         # Contains "hephia" but not a direct mention/reply
         elif "hephia" in message.content.lower():
-            # 95% chance to respond
+            # 85% chance to respond
             if random.random() < 0.85:
                 should_respond = True
         else:
@@ -242,218 +248,535 @@ class RealTimeDiscordBot(discord.Client):
         except Exception as e:
             logger.exception(f"[Bot] Failed to forward message to Hephia: {e}")
 
+    async def update_name_mappings(self):
+        """Update all name-to-ID and ID-to-name mappings."""
+        logger.info("[Bot] Updating guild and channel name mappings")
+        
+        # Clear existing mappings
+        self.guild_name_to_id.clear()
+        self.id_to_guild_name.clear()
+        self.channel_path_to_id.clear()
+        self.id_to_channel_name.clear()
+        
+        # Update guild mappings
+        for guild in self.guilds:
+            guild_id = str(guild.id)
+            guild_name = guild.name
+            
+            # Handle potential duplicate guild names by appending ID to duplicates
+            if guild_name in self.guild_name_to_id:
+                logger.warning(f"[Bot] Duplicate guild name detected: {guild_name}")
+                # Keep original mapping but log the conflict
+                self.id_to_guild_name[guild_id] = guild_name
+            else:
+                self.guild_name_to_id[guild_name] = guild_id
+                self.id_to_guild_name[guild_id] = guild_name
+            
+            # Update channel mappings for this guild
+            for channel in guild.channels:
+                if isinstance(channel, discord.TextChannel):
+                    channel_id = str(channel.id)
+                    channel_name = channel.name
+                    
+                    # Create path formats: "Guild:channel" and "guild:channel"
+                    path_case_sensitive = f"{guild_name}:{channel_name}"
+                    path_lower = path_case_sensitive.lower()
+                    
+                    # Store both case-sensitive and lowercase mappings for better matching
+                    self.channel_path_to_id[path_case_sensitive] = channel_id
+                    self.channel_path_to_id[path_lower] = channel_id
+                    
+                    # Store ID to path mapping
+                    self.id_to_channel_name[channel_id] = path_case_sensitive
+        
+        logger.info(f"[Bot] Mapped {len(self.guild_name_to_id)} guilds and {len(self.channel_path_to_id)//2} channels")
+
+    def find_channel_id(self, path: str) -> tuple[str, bool]:
+        """
+        Find channel ID from a path string like "Guild:channel".
+        Returns (channel_id, success) tuple.
+        
+        Supports various formats:
+        - "Guild:channel" - Exact case match
+        - "guild:channel" - Case-insensitive match
+        - Raw channel ID
+        """
+        # If it's already an ID, return as-is
+        if path.isdigit():
+            return path, True
+        
+        # Check direct path matches
+        if path in self.channel_path_to_id:
+            return self.channel_path_to_id[path], True
+        
+        # Try case-insensitive matching
+        path_lower = path.lower()
+        if path_lower in self.channel_path_to_id:
+            return self.channel_path_to_id[path_lower], True
+        
+        # Try to parse as guild:channel format
+        if ":" in path:
+            guild_name, channel_name = path.split(":", 1)
+            
+            # Try to find guild ID
+            guild_id = None
+            if guild_name in self.guild_name_to_id:
+                guild_id = self.guild_name_to_id[guild_name]
+            else:
+                # Try case-insensitive guild match
+                for name, id in self.guild_name_to_id.items():
+                    if name.lower() == guild_name.lower():
+                        guild_id = id
+                        break
+            
+            if guild_id:
+                # Find matching channel in that guild
+                guild = self.get_guild(int(guild_id))
+                if guild:
+                    for channel in guild.channels:
+                        if isinstance(channel, discord.TextChannel):
+                            if channel.name.lower() == channel_name.lower():
+                                return str(channel.id), True
+        
+        # Nothing found
+        return "", False
+    
+    async def find_message_by_reference(self, channel, reference: str) -> Optional[discord.Message]:
+        """
+        Find a message in a channel based on a user-friendly reference.
+        
+        Supported reference formats:
+        - "latest" - The most recent message
+        - "latest-from:<username>" - Latest message from a specific user
+        - "contains:<text>" - Latest message containing specific text
+        - "#<number>" - The Nth message from recent history (1-based, where #1 is newest)
+        
+        Args:
+            channel: Discord channel object
+            reference: User-friendly reference string
+            
+        Returns:
+            discord.Message if found, None otherwise
+        """
+        try:
+            if not isinstance(channel, discord.TextChannel):
+                logger.error(f"[Bot] Invalid channel type: {type(channel)}")
+                return None
+            
+            # Sanitize the reference string first
+            reference = reference.strip()
+            
+            # Remove surrounding quotes if present
+            if (reference.startswith('"') and reference.endswith('"')) or \
+            (reference.startswith("'") and reference.endswith("'")):
+                reference = reference[1:-1].strip()
+                
+            logger.debug(f"[Bot] Searching for message with sanitized reference: '{reference}'")
+                
+            # Handle "latest" reference - simplest case
+            if reference.lower() == "latest":
+                async for message in channel.history(limit=1):
+                    return message
+                return None
+                
+            # Handle "#N" reference (message number)
+            if reference.startswith("#"):
+                try:
+                    logger.debug(f"[Bot] Parsing message number from reference: '{reference}'")
+                    index = int(reference[1:]) - 1  # Convert to 0-based
+                    logger.debug(f"[Bot] Converted to index: {index}")
+                    
+                    if index < 0:
+                        logger.warning(f"[Bot] Invalid negative index: {index}")
+                        return None
+                        
+                    # Fetch messages newest-first, so #1 is the newest message
+                    logger.debug(f"[Bot] Fetching messages newest-first for reference #{index + 1}")
+                    messages = []
+                    
+                    # Use oldest_first=False to get newest messages first
+                    # This ensures #1 is the newest message, #2 is the second newest, etc.
+                    async for msg in channel.history(limit=index + 1 + 5, oldest_first=False):
+                        messages.append(msg)
+                    
+                    logger.debug(f"[Bot] Fetched {len(messages)} messages, need index {index}")
+                    if index < len(messages):
+                        logger.debug(f"[Bot] Found message at index {index} from {messages[index].author.name}")
+                        return messages[index]
+                    else:
+                        logger.warning(f"[Bot] Index {index} exceeds available message count {len(messages)}")
+                    return None
+                except ValueError:
+                    logger.error(f"[Bot] Invalid message number reference: {reference}")
+                    return None
+                
+            # Handle "latest-from:<username>" - already fetches newest first
+            if reference.lower().startswith("latest-from:"):
+                username = reference[12:].strip().lower()
+                if not username:
+                    return None
+                    
+                async for message in channel.history(limit=100):
+                    author_name = message.author.name.lower()
+                    # Try multiple forms of the username
+                    if (username == author_name or 
+                        username in author_name or
+                        (hasattr(message.author, 'display_name') and 
+                        username in message.author.display_name.lower())):
+                        return message
+                return None
+                
+            # Handle "contains:<text>" - already fetches newest first
+            if reference.lower().startswith("contains:"):
+                search_text = reference[9:].strip().lower()
+                if not search_text:
+                    return None
+                    
+                async for message in channel.history(limit=100):
+                    if search_text in message.content.lower():
+                        return message
+                return None
+                
+            # If no recognized format, log with more details
+            logger.warning(f"[Bot] Unrecognized message reference format: '{reference}' (length: {len(reference)})")
+            logger.debug(f"[Bot] First few characters as hex: {':'.join(hex(ord(c)) for c in reference[:5])}")
+            return None
+        except Exception as e:
+            logger.error(f"[Bot] Error finding message by reference: {e}")
+            return None
+        
+    def format_message_for_display(self, message: discord.Message, index: Optional[int] = None) -> dict:
+        """
+        Format a Discord message for display with user-friendly references.
+        
+        Args:
+            message: Discord message to format
+            index: Optional message index/number for referencing
+            
+        Returns:
+            Dictionary with formatted message data
+        """
+        if hasattr(message.author, 'global_name'):
+            author_ref = message.author.name
+        else:
+            author_ref = f"{message.author.display_name}#{message.author.discriminator}"
+            
+        # Clean up message content by replacing bot mentions
+        bot_mention = f'<@{self.user.id}>'
+        bot_mention_bang = f'<@!{self.user.id}>'
+        content = message.content.replace(bot_mention, f'@{self.user.name}')
+        content = content.replace(bot_mention_bang, f'@{self.user.name}')
+        
+        # Get channel path if available
+        channel_id = str(message.channel.id)
+        channel_path = self.id_to_channel_name.get(channel_id, f"Unknown:{message.channel.name}")
+        
+        result = {
+            "id": str(message.id),  # Keep ID for internal use
+            "author": author_ref,
+            "content": content,
+            "timestamp": str(message.created_at.isoformat()),
+            "channel_path": channel_path
+        }
+        
+        # Add index reference if provided
+        if index is not None:
+            result["reference"] = f"#{index + 1}"  # 1-based for user display
+            
+        return result
+
+
 ###############################################################################
 # AIOHTTP SERVER ROUTES: OUTBOUND COMMANDS
 ###############################################################################
-
-async def handle_list_guilds(request: web.Request) -> web.Response:
+async def handle_list_guilds_with_channels(request: web.Request) -> web.Response:
     """
-    GET /guilds -> Returns a JSON list of guilds the bot is in.
-    Example response:
-    [
-      {"id": "1234567890", "name": "MyGuild"},
-      ...
-    ]
+    GET /guilds-with-channels
+    Returns JSON with guild and channel information in hierarchical format.
+    Useful for displaying available destinations to users.
     """
-    guilds = []
-    logger.debug("[Bot] Listing guilds")
-    for g in bot.guilds:
-        guilds.append({"id": str(g.id), "name": g.name})
-    logger.debug(f"[Bot] Found {len(guilds)} guilds")
-    return web.json_response(guilds)
+    result = []
+    
+    for guild in bot.guilds:
+        guild_data = {
+            "id": str(guild.id),
+            "name": guild.name,
+            "channels": []
+        }
+        
+        # Only include text channels
+        for channel in guild.channels:
+            if isinstance(channel, discord.TextChannel):
+                guild_data["channels"].append({
+                    "id": str(channel.id),
+                    "name": channel.name,
+                    "path": f"{guild.name}:{channel.name}"
+                })
+        
+        # Only include guilds with at least one text channel
+        if guild_data["channels"]:
+            result.append(guild_data)
+    
+    return web.json_response(result)
 
-
-async def handle_list_channels(request: web.Request) -> web.Response:
+async def handle_send_by_path(request: web.Request) -> web.Response:
     """
-    GET /guilds/{guild_id}/channels
-    Returns a JSON list of channels in the specified guild.
-    Example response:
-    [
-      {"id": "111111", "name": "#general", "type": "text"},
-      ...
-    ]
-    """
-    guild_id = request.match_info["guild_id"]
-    guild = bot.get_guild(int(guild_id))
-    if not guild:
-        return web.json_response({"error": "Guild not found"}, status=404)
-
-    channels_info = []
-    logger.debug(f"[Bot] Listing channels for guild {guild.name}")
-    for channel in guild.channels:
-        channel_type = str(channel.type)  # "text", "voice", "category", etc.
-        channels_info.append({
-            "id": str(channel.id),
-            "name": channel.name,
-            "type": channel_type
-        })
-    logger.debug(f"[Bot] Found {len(channels_info)} channels in guild {guild.name}")
-    return web.json_response(channels_info)
-
-
-async def handle_get_channel_history(request: web.Request) -> web.Response:
-    """
-    GET /channels/{channel_id}/history?limit=50
-    Returns the last N messages from the channel, in chronological order (oldest first).
-    Example response:
-    [
-      {"id": "...", "author": "username#1234", "content": "...", "timestamp": ...},
-      ...
-    ]
+    POST /send-by-path
+    JSON body: { "path": "Guild:channel", "content": "Hello world!" }
+    Returns: { "status": "ok", "message_id": "<ID>", "channel_id": "<ID>" }
+    
+    Handles sending messages using the friendly path format.
     """
     try:
-        channel_id = str(request.match_info["channel_id"])
-        logger.debug(f"[Bot] Fetching history for channel {channel_id}")
-        limit_str = request.query.get("limit", "50")
-        try:
-            limit = min(int(limit_str), 100)  # Some safe cap
-        except ValueError:
-            limit = 50
-
-        try:
-            channel = bot.get_channel(int(channel_id))
-            if channel is None:
-                logger.debug(f"[Bot] Channel {channel_id} not found in cache, attempting fetch_channel")
-                channel = await bot.fetch_channel(int(channel_id))
-        except discord.NotFound:
-            return web.json_response({"error": f"Channel {channel_id} not found"}, status=404)
-        except discord.Forbidden:
-            return web.json_response({"error": "No permission to access channel"}, status=403)
-            
-        if not isinstance(channel, discord.TextChannel):
-            return web.json_response({"error": "Channel exists but is not a text channel"}, status=404)
-
-        # Fetch up to 'limit' messages, most recent first
-        history_data = []
-        
-        try:
-            history_iter = channel.history(limit=limit, oldest_first=False)
-            async with asyncio.timeout(30.0):  # 30 seconds timeout
-                messages = [msg async for msg in history_iter]
-            messages.reverse()  # earliest first
-        except asyncio.TimeoutError:
-            return web.json_response({"error": "Request timed out while fetching history"}, status=504)
-
-        bot_mention = f'<@{bot.user.id}>'
-        bot_mention_bang = f'<@!{bot.user.id}>'
-
-        for msg in messages:
-            # Get the proper user reference format
-            if hasattr(msg.author, 'global_name'):  # New Discord system
-                author_ref = msg.author.name
-            else:
-                author_ref = f"{msg.author.display_name}#{msg.author.discriminator}"
-            
-            # Clean up message content by replacing bot mentions
-            content = msg.content.replace(bot_mention, f'@{bot.user.name}')
-            content = content.replace(bot_mention_bang, f'@{bot.user.name}')
-            
-            history_data.append({
-                "id": str(msg.id),
-                "author": author_ref,
-                "content": content,
-                "timestamp": str(msg.created_at.isoformat())
-            })
-
-        bot.new_messages[channel_id] = 0  # Reset new message counter for this channel
-        return web.json_response(history_data)
-
+        data = await request.json()
     except Exception as e:
-        logger.exception(f"[Bot] Error in get_channel_history: {e}")
+        return web.json_response({"error": f"Invalid JSON: {str(e)}"}, status=400)
+    
+    path = data.get("path", "").strip()
+    content = data.get("content", "").strip()
+    
+    if not path or not content:
+        return web.json_response({"error": "Path and content are required"}, status=400)
+    
+    channel_id, found = bot.find_channel_id(path)
+    if not found:
+        return web.json_response({"error": f"Channel path '{path}' not found"}, status=404)
+    
+    # Reuse the existing send_message endpoint logic
+    channel = bot.get_channel(int(channel_id))
+    if not channel or not isinstance(channel, discord.TextChannel):
+        return web.json_response({"error": "Channel not found or not a text channel"}, status=404)
+    
+    try:
+        # Discord's message length limit (2000 chars)
+        MAX_LENGTH = 2000
+        if len(content) > MAX_LENGTH:
+            logger.warning(f"[Bot] Message too long ({len(content)} chars), truncating to {MAX_LENGTH}")
+            content = content[:MAX_LENGTH]
+            
+        sent_msg = await channel.send(content)
+        logger.info(f"[Bot] Message sent in channel {channel.name} with ID {sent_msg.id}")
+        return web.json_response({
+            "status": "ok", 
+            "message_id": str(sent_msg.id),
+            "channel_id": channel_id,
+            "path": bot.id_to_channel_name.get(channel_id, path)
+        })
+    except Exception as e:
+        logger.exception(f"[Bot] Failed to send message: {e}")
+        return web.json_response({"error": f"Failed to send message: {e}"}, status=500)
+    
+async def handle_find_message(request: web.Request) -> web.Response:
+    """
+    GET /find-message?path=Server:channel&reference=<reference>
+    
+    Find a message using a user-friendly reference:
+    - "latest" - The most recent message
+    - "latest-from:<username>" - Latest message from a specific user
+    - "contains:<text>" - Latest message containing specific text
+    - "#<number>" - The Nth message from the recent history
+    
+    Returns the message if found.
+    """
+    path = request.query.get("path", "").strip()
+    reference = request.query.get("reference", "").strip()
+    
+    if not path or not reference:
+        return web.json_response(
+            {"error": "Both path and reference parameters are required"}, 
+            status=400
+        )
+    
+    channel_id, found = bot.find_channel_id(path)
+    if not found:
+        return web.json_response(
+            {"error": f"Channel path '{path}' not found"}, 
+            status=404
+        )
+    
+    channel = bot.get_channel(int(channel_id))
+    if not channel or not isinstance(channel, discord.TextChannel):
+        return web.json_response(
+            {"error": "Channel not found or not a text channel"}, 
+            status=404
+        )
+    
+    try:
+        message = await bot.find_message_by_reference(channel, reference)
+        if not message:
+            return web.json_response(
+                {"error": f"No message found matching reference '{reference}'"}, 
+                status=404
+            )
+        
+        result = bot.format_message_for_display(message)
+        return web.json_response(result)
+    except Exception as e:
+        logger.exception(f"[Bot] Error in find_message: {e}")
+        return web.json_response(
+            {"error": f"Error finding message: {str(e)}"}, 
+            status=500
+        )
+
+async def handle_enhanced_history(request: web.Request) -> web.Response:
+    """
+    GET /enhanced-history?path=Server:channel&limit=50
+    
+    Returns history with user-friendly message references and additional metadata.
+    """
+    path = request.query.get("path", "").strip()
+    if not path:
+        return web.json_response({"error": "Path parameter is required"}, status=400)
+    
+    limit_str = request.query.get("limit", "50")
+    try:
+        limit = min(int(limit_str), 100)  # Some safe cap
+    except ValueError:
+        limit = 50
+    
+    channel_id, found = bot.find_channel_id(path)
+    if not found:
+        return web.json_response(
+            {"error": f"Channel path '{path}' not found"}, 
+            status=404
+        )
+    
+    channel = bot.get_channel(int(channel_id))
+    if not channel or not isinstance(channel, discord.TextChannel):
+        return web.json_response(
+            {"error": "Channel not found or not a text channel"}, 
+            status=404
+        )
+    
+    try:
+        # Fetch messages with a timeout - getting NEWEST messages first
+        history_iter = channel.history(limit=limit, oldest_first=False)
+        async with asyncio.timeout(30.0):
+            messages = [msg async for msg in history_iter]
+        
+        # Format messages with indices for easy referencing
+        formatted_messages = []
+        
+        # Process in reverse order to ensure consistent numbering
+        # Message #1 should always be the newest message
+        for i, msg in enumerate(messages):
+            # Note: we're numbering from 1, not 0
+            reference_number = i + 1
+            formatted = bot.format_message_for_display(msg, i)
+            
+            # Ensure the reference is set
+            formatted["reference"] = f"#{reference_number}"
+            formatted_messages.append(formatted)
+            
+        # IMPORTANT: Now reverse the order for display so oldest are first
+        # This keeps the NUMBERING consistent (#1 = newest) but displays oldest first
+        formatted_messages.reverse()
+        
+        result = {
+            "path": path,
+            "channel_id": channel_id,  # Keep for backward compatibility
+            "message_count": len(formatted_messages),
+            "messages": formatted_messages,
+            "display_order": "oldest_first",  # Document the display order
+            "numbering": "newest_first"       # Document the numbering scheme
+        }
+        
+        return web.json_response(result)
+    except asyncio.TimeoutError:
+        return web.json_response(
+            {"error": "Request timed out while fetching history"}, 
+            status=504
+        )
+    except Exception as e:
+        logger.exception(f"[Bot] Error in enhanced_history: {e}")
         return web.json_response(
             {"error": f"Failed to fetch history: {str(e)}"}, 
             status=500
         )
 
-
-async def handle_get_message_by_id(request: web.Request) -> web.Response:
+async def handle_reply_to_message(request: web.Request) -> web.Response:
     """
-    GET /channels/{channel_id}/messages/{message_id}
-    Returns a single message by ID, if it exists.
-    Example response:
-    {
-      "id": "987654321", 
-      "author": "username#1234",
-      "content": "Hello",
-      "timestamp": "2025-01-25T12:34:56.789Z"
+    POST /reply-to-message
+    JSON body: {
+        "path": "Server:channel",
+        "reference": "<reference>",
+        "content": "Reply message"
     }
+    
+    Reply to a specific message identified by a user-friendly reference.
     """
-    channel_id = request.match_info["channel_id"]
-    message_id = request.match_info["message_id"]
-
-    channel = bot.get_channel(int(channel_id))
-    if not channel or not isinstance(channel, discord.TextChannel):
-        return web.json_response({"error": "Channel not found or not a text channel"}, status=404)
-
-    try:
-        msg = await channel.fetch_message(int(message_id))
-        if msg is None:
-            return web.json_response({"error": "Message not found"}, status=404)
-
-        if hasattr(msg.author, 'global_name'):  # New Discord system
-            author_ref = msg.author.name
-        else:
-            author_ref = f"{msg.author.display_name}#{msg.author.discriminator}"
-
-        bot_mention = f'<@{bot.user.id}>'
-        bot_mention_bang = f'<@!{bot.user.id}>'
-        content = msg.content.replace(bot_mention, f'@{bot.user.name}')
-        content = content.replace(bot_mention_bang, f'@{bot.user.name}')
-
-        result = {
-            "id": str(msg.id),
-            "author": author_ref,
-            "content": content,
-            "timestamp": str(msg.created_at.isoformat())
-        }
-        return web.json_response(result)
-
-    except discord.NotFound:
-        return web.json_response({"error": "Message not found"}, status=404)
-    except Exception as e:
-        logger.exception(f"[Bot] Error fetching message: {e}")
-        return web.json_response({"error": f"Failed to fetch message: {e}"}, status=500)
-
-
-async def handle_send_message(request: web.Request) -> web.Response:
-    """
-    POST /channels/{channel_id}/send_message
-    JSON body: { "content": "Hello world!" }
-    Returns: { "status": "ok", "message_id": "<ID>" }
-    """
-    channel_id = request.match_info["channel_id"]
     try:
         data = await request.json()
+        logger.info(f"[Bot] Received reply-to-message request")
     except Exception as e:
         error_msg = f"Invalid JSON payload: {e}"
         logger.error(f"[Bot] {error_msg}")
         return web.json_response({"error": error_msg}, status=400)
-
+    
+    path = data.get("path", "").strip()
+    reference = data.get("reference", "").strip()
     content = data.get("content", "").strip()
-
-    # Validate non-empty content before proceeding
-    if not content:
-        error_msg = "Message content cannot be empty."
+    
+    logger.info(f"[Bot] Attempting to reply to message: path='{path}', reference='{reference}'")
+    logger.debug(f"[Bot] Reply content length: {len(content)}")
+    
+    if not path or not reference or not content:
+        error_msg = "Path, reference, and content are all required"
         logger.error(f"[Bot] {error_msg}")
         return web.json_response({"error": error_msg}, status=400)
-
-    # Discord's message length limit (2000 chars)
-    MAX_LENGTH = 2000
-    if len(content) > MAX_LENGTH:
-        logger.warning(f"[Bot] Message too long ({len(content)} chars), truncating to {MAX_LENGTH}")
-        content = content[:MAX_LENGTH]
-
+    
+    # Find the channel
+    channel_id, found = bot.find_channel_id(path)
+    if not found:
+        error_msg = f"Channel path '{path}' not found"
+        logger.error(f"[Bot] {error_msg}")
+        return web.json_response({"error": error_msg}, status=404)
+    
+    # Log the resolved channel
     channel = bot.get_channel(int(channel_id))
-    if not channel or not isinstance(channel, discord.TextChannel):
-        return web.json_response({"error": "Channel not found or not a text channel"}, status=404)
-
+    if not channel:
+        error_msg = f"Channel with ID {channel_id} not found in bot's cache"
+        logger.error(f"[Bot] {error_msg}")
+        return web.json_response({"error": error_msg}, status=404)
+        
+    logger.info(f"[Bot] Resolved path '{path}' to channel '{channel.name}' in guild '{channel.guild.name if channel.guild else 'DM'}' with ID {channel_id}")
+    
+    if not isinstance(channel, discord.TextChannel):
+        error_msg = "Channel is not a text channel"
+        logger.error(f"[Bot] {error_msg}")
+        return web.json_response({"error": error_msg}, status=404)
+    
     try:
-        sent_msg = await channel.send(content)
-        logger.info(f"[Bot] Message sent in channel {channel.name} with ID {sent_msg.id}")
-        return web.json_response({"status": "ok", "message_id": str(sent_msg.id)})
+        # Find the message to reply to
+        logger.info(f"[Bot] Finding message with reference: '{reference}'")
+        referenced_message = await bot.find_message_by_reference(channel, reference)
+        if not referenced_message:
+            error_msg = f"No message found matching reference '{reference}'"
+            logger.error(f"[Bot] {error_msg}")
+            return web.json_response({"error": error_msg}, status=404)
+        
+        logger.info(f"[Bot] Found message from {referenced_message.author.name} to reply to")
+        
+        # Discord's message length limit (2000 chars)
+        MAX_LENGTH = 2000
+        if len(content) > MAX_LENGTH:
+            logger.warning(f"[Bot] Message too long ({len(content)} chars), truncating to {MAX_LENGTH}")
+            content = content[:MAX_LENGTH]
+        
+        # Send the reply
+        logger.info(f"[Bot] Sending reply to message in {channel.name}")
+        sent_msg = await channel.send(content, reference=referenced_message)
+        logger.info(f"[Bot] Reply sent with ID {sent_msg.id}")
+        
+        # Format the reply for response
+        result = bot.format_message_for_display(sent_msg)
+        result["replied_to"] = bot.format_message_for_display(referenced_message)
+        result["status"] = "ok"
+        
+        return web.json_response(result)
     except Exception as e:
-        logger.exception(f"[Bot] Failed to send message: {e}")
-        return web.json_response({"error": f"Failed to send message: {e}"}, status=500)
+        logger.exception(f"[Bot] Failed to send reply: {e}")
+        return web.json_response({"error": f"Failed to send reply: {e}"}, status=500)
 
 ###############################################################################
 # SETTING UP THE AIOHTTP WEB SERVER
@@ -465,12 +788,11 @@ def create_app() -> web.Application:
     """
     app = web.Application()
 
-    # Routes for listing servers, channels, etc.
-    app.router.add_get("/guilds", handle_list_guilds)
-    app.router.add_get("/guilds/{guild_id}/channels", handle_list_channels)
-    app.router.add_get("/channels/{channel_id}/history", handle_get_channel_history)
-    app.router.add_get("/channels/{channel_id}/messages/{message_id}", handle_get_message_by_id)
-    app.router.add_post("/channels/{channel_id}/send_message", handle_send_message)
+    app.router.add_get("/guilds-with-channels", handle_list_guilds_with_channels)
+    app.router.add_post("/send-by-path", handle_send_by_path)
+    app.router.add_get("/find-message", handle_find_message)
+    app.router.add_get("/enhanced-history", handle_enhanced_history)
+    app.router.add_post("/reply-to-message", handle_reply_to_message)
 
     return app
 
@@ -539,6 +861,19 @@ async def main():
     await site.start()
     logger.info(f"[HTTP] Aiohttp server running at http://0.0.0.0:{BOT_HTTP_PORT}")
 
+    async def periodic_mapping_updates():
+        while True:
+            try:
+                await asyncio.sleep(300)  # Update every 5 minutes
+                await bot.update_name_mappings()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[Bot] Error updating mappings: {e}")
+                await asyncio.sleep(60)  # Retry sooner after error
+
+    mapping_update_task = asyncio.create_task(periodic_mapping_updates())
+
     # 2) Start the Discord bot
     if not DISCORD_TOKEN:
         logger.error("[Bot] DISCORD_BOT_TOKEN is not set. Exiting.")
@@ -551,6 +886,14 @@ async def main():
     finally:
         logger.info("[Bot] Closing Discord bot connection...")
         await bot.close()
+
+        logger.info("[Bot] Stopping periodic mapping updates...")
+        mapping_update_task.cancel()
+        try:
+            await mapping_update_task
+        except asyncio.CancelledError:
+            pass
+
         logger.info("[Bot] Cleaning up the web server...")
         await runner.cleanup()
 

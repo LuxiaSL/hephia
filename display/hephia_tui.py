@@ -406,15 +406,6 @@ def start_monitor():
     """Initialize and start the monitor via curses wrapper."""
     logger.info("Starting monitoring system")
 
-    # Optionally: handle SIGWINCH for immediate resize detection
-    def handle_resize(signum, frame):
-        # Tells curses to resize its internal structures
-        curses.resize_term(0, 0)
-
-    # Only register SIGWINCH if it exists on this platform
-    if hasattr(signal, 'SIGWINCH'):
-        signal.signal(signal.SIGWINCH, handle_resize)
-
     def run_wrapped(stdscr):
         try:
             curses.start_color()

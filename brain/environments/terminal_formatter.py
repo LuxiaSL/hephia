@@ -43,13 +43,13 @@ class TerminalFormatter:
         valence = mood.get('valence', 0)
         arousal = mood.get('arousal', 0)
         mood_str = (
-            f"Experiencing a {mood.get('name', 'neutral')} mood "
+            f"{mood.get('name', 'neutral')} mood "
             f"(valence: {valence:.2f}, arousal: {arousal:.2f}). "
         )
         
         # Format behavior as active state
         behavior_str = (
-            f"Currently in a {behavior.get('name', 'balanced')} behavior"
+            f"{behavior.get('name', 'balanced')} behavior"
         )
         
         # Format needs as motivational state  
@@ -59,31 +59,31 @@ class TerminalFormatter:
                 satisfaction = details['satisfaction'] * 100
                 urgency = "high" if satisfaction < 30 else "moderate" if satisfaction < 70 else "low"
                 needs_lines.append(
-                    f"• {need}: {satisfaction:.1f}% satisfied ({urgency} urgency)"
+                    f"{need}: {satisfaction:.1f}% satisfied ({urgency} urgency)"
                 )
-        needs_str = "Current needs and their satisfaction levels:\n" + "\n".join(needs_lines)
+        needs_str = ", ".join(needs_lines)
         
         # Format emotional state as recent experience
         emotions_str = ""
         if emotional_state:
             recent_emotions = ", ".join(
-                f"{e['name']} ({e['intensity']:.2f})" for e in emotional_state
+                f"{e['name']} (strength: {e['intensity']:.2f})" for e in emotional_state
             )
-            emotions_str = f"\nFeeling: {recent_emotions}"
+            emotions_str = f"{recent_emotions}"
 
         # Build core state string
         state_str = (
-            "=== Current Internal State ===\n"
-            f"{mood_str}\n\n"
-            f"{behavior_str}\n\n"
-            f"{needs_str}"
+            "###\nMy Internal State\n"
+            f"{mood_str}\n"
+            f"{behavior_str}\n"
+            f"{needs_str}\n"
             f"{emotions_str}\n"
-            "==============================="
+            "###"
         )
 
         # Add memories if provided
         if memories:
-            memory_lines = ["\nRelevant Memories:", "---"]
+            memory_lines = ["\nRelevant Memories:", "###"]
             current_time = time.time()
             
             for memory in memories:
@@ -115,7 +115,7 @@ class TerminalFormatter:
                 memory_lines.append("")
 
             # Append all memory lines at once after processing all memories
-            state_str = state_str + "\n" + "\n".join(memory_lines)
+            state_str = state_str + "\n" + "###\n".join(memory_lines)
 
         return state_str
     
@@ -137,7 +137,7 @@ class TerminalFormatter:
         # Format updates section
         update_lines = [
             "\nCognitive Updates:",
-            "####################"
+            "###"
         ]
         
         # Split updates by newlines and format each section
@@ -166,7 +166,7 @@ class TerminalFormatter:
         lines.append(f"Time: {timestamp}")
 
         lines.append(result.message.strip())
-        lines.append("")
+        lines.append("###")
 
         if not result.success and result.error:
             lines.append("Error Details:")
@@ -175,7 +175,7 @@ class TerminalFormatter:
                 lines.append("Suggested Fixes:")
                 for fix in result.error.suggested_fixes:
                     lines.append(f"  • {fix}")
-            lines.append("")
+            lines.append("###")
 
         if result.suggested_commands:
             lines.append("Available Actions:")
@@ -183,7 +183,7 @@ class TerminalFormatter:
                 lines.append(f"• {cmd}")
         else:
             lines.append("Type 'help' for available commands. Try different environments to explore their capabilities.")
-        lines.append("")
+        lines.append("###")
 
         return "\n".join(lines)
 
@@ -223,7 +223,7 @@ class TerminalFormatter:
                     lines.append("  Examples:")
                     for ex in c.examples:
                         lines.append(f"    {ex}")
-                lines.append("")
+                lines.append("###")
 
         # Suggested commands
         suggested = [f"{env.name} help"]
@@ -257,6 +257,7 @@ class TerminalFormatter:
             for rc in error.related_commands:
                 lines.append(f"• {rc}")
         lines.append("Use 'help' for available commands")
+        lines.append("###")
         return "\n".join(lines)
 
     @staticmethod
@@ -264,4 +265,5 @@ class TerminalFormatter:
         return (
             "Welcome to Hephia OS\n"
             "Type 'help' to see available commands\n"
+            "###"
         )

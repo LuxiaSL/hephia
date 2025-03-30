@@ -118,6 +118,9 @@ class SignificanceAnalyzer:
 
 
     def _analyze_social_significance(self, data: MemoryData) -> float:
+        """
+        Analyze significance of social interactions with path-based channel references.
+        """
         score = 0.0
         metadata = data.metadata
         
@@ -128,7 +131,14 @@ class SignificanceAnalyzer:
             score += min(0.3, len(msg_words) / 50)
             
             # Channel context (0.2)
-            if metadata.get('channel', {}).get('is_dm'):
+            channel_data = metadata.get('channel', {})
+            is_dm = channel_data.get('is_dm', False)
+            
+            # If is_dm not explicitly provided, check path for absence of ':'
+            if not is_dm and 'path' in channel_data:
+                is_dm = ':' not in channel_data['path']
+                
+            if is_dm:
                 score += 0.2
             
             # Interaction depth (0.3)
@@ -146,7 +156,7 @@ class SignificanceAnalyzer:
             # Message content (0.4)
             if last_msg := conv_data.get('last_user_message'):
                 score += min(0.4, len(last_msg.split()) / 50)
-            
+                
         return score
 
     def _analyze_environment_significance(self, data: MemoryData) -> float:

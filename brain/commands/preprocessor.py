@@ -62,7 +62,8 @@ class CommandPreprocessor:
                     action=GlobalCommands.HELP,
                     parameters=[],
                     flags={},
-                    raw_input=command
+                    raw_input=command,
+                    applied_fixes=[]
                 ), None
                 
             # Extract only the first valid command from potential multi-command input
@@ -357,7 +358,8 @@ class CommandPreprocessor:
                 action=environment_or_global,
                 parameters=[],
                 flags={},
-                raw_input=command
+                raw_input=command,
+                applied_fixes=[]
             )
             
         # Parse environment commands
@@ -376,7 +378,8 @@ class CommandPreprocessor:
             action=action,
             parameters=params,
             flags=flags,
-            raw_input=command
+            raw_input=command,
+            applied_fixes=[]
         )
 
     def _parse_params_and_flags(self, params_str: str) -> Tuple[List[str], Dict[str, str]]:

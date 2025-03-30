@@ -23,31 +23,36 @@ class DiscordEnvironment(BaseEnvironment):
     def __init__(self, discord_service: DiscordService):
         super().__init__()
         self.discord_service = discord_service
-        self.help_text = """
-        The discord environment lets you communicate with Discord.
-        You can list guilds, list channels, read messages, or post messages.
-        Example usage:
-        - discord list_guilds
-        - discord list_channels <guild_id>
-        - discord get_message <channel_id> <message_id>
-        - discord get_history <channel_id> --limit=10
-        - discord send_message <channel_id> "<content>"
-        """
+        self.help_text = """###
+The Discord environment provides a seamless interface to Discord chat functionality.
+
+Key Commands:
+• Discovery:
+    - discord list_servers     | View all accessible servers and channels
+
+• Messages:
+    - discord send "Server:channel" "message here"    | Send a message
+    - discord history "Server:channel"                | Get channel history
+    - discord show "Server:channel" "#3"             | View specific message
+    - discord reply "Server:channel" "#2" "response" | Reply to a message
+
+Note that the numbers for replies may shift references due to the discrete nature of your interactions.
+###"""
 
     def _register_commands(self) -> None:
         """Register all Discord commands with full validation and help information."""
         
-        # List Guilds - Show available Discord servers
+        # LIST SERVERS - Primary discovery command
         self.register_command(
             CommandDefinition(
-                name="list_guilds",
-                description="List all Discord servers (guilds) the bot has access to",
+                name="list_servers",
+                description="List all Discord servers and channels the bot has access to",
                 parameters=[],
                 flags=[],
                 examples=[
-                    "discord list_guilds"
+                    "discord list_servers"
                 ],
-                related_commands=["list_channels", "get_history"],
+                related_commands=["send", "history"],
                 failure_hints={
                     "network": "Unable to reach Discord bot. Is it running?",
                     "auth": "Bot may not have proper permissions"
@@ -56,41 +61,48 @@ class DiscordEnvironment(BaseEnvironment):
             )
         )
 
-        # List Channels - Show channels in a guild
+        # SEND - Primary message creation command
         self.register_command(
             CommandDefinition(
-                name="list_channels",
-                description="List all channels in a specified Discord server",
+                name="send",
+                description="Send a Discord message to a channel",
                 parameters=[
                     Parameter(
-                        name="guild_id",
-                        description="The Discord server ID to list channels from",
+                        name="channel",
+                        description="Where to send the message, in 'Server:channel' format",
+                        type=ParameterType.STRING,
+                        required=True
+                    ),
+                    Parameter(
+                        name="message",
+                        description="The message to send (use quotes for spaces)",
                         type=ParameterType.STRING,
                         required=True
                     )
                 ],
                 flags=[],
                 examples=[
-                    "discord list_channels <guild_id>"
+                    'discord send "ServerName:channel" "message here..."',
                 ],
-                related_commands=["list_guilds", "get_history", "send_message"],
+                related_commands=["list_servers", "history", "reply"],
                 failure_hints={
-                    "invalid_guild": "Server ID not found. Use list_guilds to see available servers",
-                    "permissions": "Bot may not have access to this server"
+                    "invalid_channel": "Channel not found. Use list_servers to see available channels",
+                    "permissions": "Bot may not have permission to send messages to this channel",
+                    "content_empty": "Message content cannot be empty"
                 },
-                category="Discovery"
+                category="Messages"
             )
         )
 
-        # Get Message History
+        # HISTORY - View channel conversation
         self.register_command(
             CommandDefinition(
-                name="get_history",
+                name="history",
                 description="Retrieve recent message history from a Discord channel",
                 parameters=[
                     Parameter(
-                        name="channel_id",
-                        description="The Discord channel ID to fetch messages from",
+                        name="channel",
+                        description="Channel to fetch messages from, in 'Server:channel' format",
                         type=ParameterType.STRING,
                         required=True
                     )
@@ -105,81 +117,89 @@ class DiscordEnvironment(BaseEnvironment):
                     )
                 ],
                 examples=[
-                    "discord get_history <channel_id>",
-                    "discord get_history <channel_id> --limit=<number>"
+                    'discord history "MyServer:general"',
+                    'discord history "MyServer:announcements" --limit=20'
                 ],
-                related_commands=["list_channels", "get_message"],
+                related_commands=["list_servers", "send", "show", "reply"],
                 failure_hints={
-                    "invalid_channel": "Channel not found. Use list_channels to see available channels",
-                    "limit_exceeded": "Limit must be between 1 and 100 messages",
+                    "invalid_channel": "Channel not found. Use list_servers to see available channels",
                     "permissions": "Bot may not have permission to read this channel"
                 },
                 category="Messages"
             )
         )
 
-        # Get Specific Message
+        # SHOW - Find and display specific messages
         self.register_command(
             CommandDefinition(
-                name="get_message",
-                description="Retrieve a specific Discord message by its ID",
+                name="show",
+                description="Find and display a specific message from a Discord channel",
                 parameters=[
                     Parameter(
-                        name="channel_id",
-                        description="The Discord channel ID containing the message",
+                        name="channel",
+                        description="Channel to find message in, in 'Server:channel' format",
                         type=ParameterType.STRING,
                         required=True
                     ),
                     Parameter(
-                        name="message_id",
-                        description="The specific Discord message ID to retrieve",
+                        name="reference",
+                        description="Reference to the message (see examples)",
                         type=ParameterType.STRING,
-                        required=True
+                        required=False,
+                        default="latest"
                     )
                 ],
                 flags=[],
                 examples=[
-                    "discord get_message <channel_id> <message_id>"
+                    'discord show "MyServer:general"',  # Shows latest message
+                    'discord show "MyServer:general" "#3"',  # Shows message #3 from history
+                    'discord show "MyServer:general" "latest-from:username"',  # Latest from user
+                    'discord show "MyServer:general" "contains:keyword"'  # Message containing text
                 ],
-                related_commands=["get_history", "send_message"],
+                related_commands=["history", "reply"],
                 failure_hints={
-                    "invalid_channel": "Channel not found. Use list_channels to see available channels",
-                    "invalid_message": "Message not found or has been deleted",
-                    "permissions": "Bot may not have permission to read this message"
+                    "invalid_channel": "Channel not found. Use list_servers to see available channels",
+                    "invalid_reference": "Message reference not found or invalid"
                 },
                 category="Messages"
             )
         )
 
-        # Send Message
+        # REPLY - Respond to specific messages
         self.register_command(
             CommandDefinition(
-                name="send_message",
-                description="Send a new message to a Discord channel",
+                name="reply",
+                description="Reply to a specific message in a Discord channel",
                 parameters=[
                     Parameter(
-                        name="channel_id",
-                        description="The Discord channel ID to send the message to",
+                        name="channel",
+                        description="Channel containing the message, in 'Server:channel' format",
+                        type=ParameterType.STRING,
+                        required=True
+                    ),
+                    Parameter(
+                        name="reference",
+                        description="Reference to the message to reply to",
                         type=ParameterType.STRING,
                         required=True
                     ),
                     Parameter(
                         name="content",
-                        description="The message text to send (use quotes for spaces)",
+                        description="Reply content (use quotes for spaces)",
                         type=ParameterType.STRING,
                         required=True
                     )
                 ],
                 flags=[],
                 examples=[
-                    'discord send_message <channel_id> "<message>"'
+                    'discord reply "MyServer:general" "#3" "Replying to the third message"',
+                    'discord reply "MyServer:announcements" "contains:event" "Will this event be recorded?"'
                 ],
-                related_commands=["list_channels", "get_history"],
+                related_commands=["show", "send", "history"],
                 failure_hints={
-                    "invalid_channel": "Channel not found. Use list_channels to see available channels",
-                    "permissions": "Bot may not have permission to send messages to this channel",
-                    "content_empty": "Message content cannot be empty",
-                    "content_invalid": "Message content must be enclosed in quotes if it contains spaces"
+                    "invalid_channel": "Channel not found. Use list_servers to see available channels",
+                    "invalid_reference": "Message reference not found or invalid",
+                    "content_empty": "Reply content cannot be empty"
                 },
                 category="Messages"
             )
@@ -192,35 +212,37 @@ class DiscordEnvironment(BaseEnvironment):
         flags: Dict[str, Any],
         context: Dict[str, Any]
     ) -> CommandResult:
+        """Execute a Discord command."""
         try:
-            if action == "list_guilds":
-                return await self._list_guilds()
-            elif action == "list_channels":
-                return await self._list_channels(params)
-            elif action == "get_message":
-                return await self._get_message(params)
-            elif action == "get_history":
-                return await self._get_history(params, flags)
-            elif action == "send_message":
-                return await self._send_message(params)
+            # Process primary commands first
+            if action == "list_servers":
+                return await self._list_servers()
+            elif action == "send":
+                return await self._send(params)
+            elif action == "history":
+                return await self._history(params, flags)
+            elif action == "show":
+                return await self._show(params)
+            elif action == "reply":
+                return await self._reply(params)
             else:
                 error = CommandValidationError(
                     message=f"Unknown action: {action}",
-                    suggested_fixes=["Check command spelling", "Use help to see available commands"],
-                    related_commands=["discord help", "discord list_guilds"],
-                    examples=["discord list_guilds", "discord list_channels <guild_id>"]
+                    suggested_fixes=["Check command spelling", "Use 'discord help' to see available commands"],
+                    related_commands=["discord help", "discord list_servers"],
+                    examples=["discord list_servers"]
                 )
                 return CommandResult(
                     success=False,
                     message=f"Unknown command '{action}'",
-                    suggested_commands=["discord help", "discord list_guilds"],
+                    suggested_commands=["discord help", "discord list_servers"],
                     error=error
                 )
         except CommandValidationError as cve:
             return CommandResult(
                 success=False,
                 message=f"Validation error: {str(cve)}",
-                suggested_commands=["discord help", "help"],
+                suggested_commands=["discord help"],
                 error=cve,
                 data={"error_type": "validation", "error_details": str(cve)}
             )
@@ -228,303 +250,129 @@ class DiscordEnvironment(BaseEnvironment):
             error = CommandValidationError(
                 message=str(e),
                 suggested_fixes=["Try a simpler command", "Check command parameters"],
-                related_commands=["discord help", "discord list_guilds"],
-                examples=["discord list_guilds"]
+                related_commands=["discord help", "discord list_servers"],
+                examples=["discord list_servers"]
             )
             return CommandResult(
                 success=False,
                 message=f"Unexpected error: {e}",
-                suggested_commands=["discord help", "discord list_guilds"],
+                suggested_commands=["discord help", "discord list_servers"],
                 error=error,
                 data={"error_type": "unexpected", "error_details": str(e)}
             )
 
-    async def _list_guilds(self) -> CommandResult:
-        data, status_code = await self.discord_service.list_guilds()
+    async def _list_servers(self) -> CommandResult:
+        """List servers and their channels in a user-friendly format."""
+        data, status_code = await self.discord_service.list_guilds_with_channels()
         if status_code != 200 or data is None:
             error = CommandValidationError(
-                message=f"Failed to list guilds: HTTP {status_code}",
+                message=f"Failed to list Discord servers: HTTP {status_code}",
                 suggested_fixes=["Check bot permissions", "Verify bot is running"],
                 related_commands=["discord help"],
-                examples=["discord list_guilds"]
+                examples=["discord list_servers"]
             )
             return CommandResult(
                 success=False,
-                message=f"Failed to list guilds: {status_code}",
+                message=f"Failed to list Discord servers: {status_code}",
                 suggested_commands=["discord help"],
                 error=error,
                 data={"status_code": status_code}
             )
 
-        lines = ["Available Discord Servers:", "---"]
+        lines = ["Available Discord Servers and Channels:", "###"]
+        
+        # Build list of suggested commands for common channels
+        suggested_commands = []
+        
         for guild in data:
-            lines.append(f"• {guild.get('name', 'Unnamed')} (ID: {guild['id']})")
-            if 'member_count' in guild:
-                lines.append(f"  Members: {guild['member_count']}")
-        lines.append("---")
-        lines.append("Use 'discord list_channels <guild_id>' to see available channels")
+            guild_name = guild.get('name', 'Unnamed Server')
+            lines.append(f"• {guild_name}")
+            
+            # Sort channels alphabetically
+            channels = sorted(guild.get('channels', []), key=lambda c: c.get('name', ''))
+            
+            for channel in channels:
+                channel_name = channel.get('name', 'unnamed')
+                path = channel.get('path', f"{guild_name}:{channel_name}")
+                
+                lines.append(f"  - #{channel_name} (use as \"{path}\")")
+                
+                # Add first channel from each server to suggested commands
+                if len(suggested_commands) < 5 and channel == channels[0]:
+                    suggested_commands.append(f'discord send "{path}" "Hello there!"')
+                    suggested_commands.append(f'discord history "{path}"')
+        
+        lines.append("###")
+        lines.append("Use these server:channel names with the following commands:")
+        lines.append('- discord send "ServerName:channel-name" "Your message here"')
+        lines.append('- discord history "ServerName:channel-name"')
+        lines.append('- discord show "ServerName:channel-name"')
 
         return CommandResult(
             success=True,
             message="\n".join(lines),
             data=data,
-            suggested_commands=[
-                f"discord list_channels {guild['id']}" for guild in data[:3]
-            ]
+            suggested_commands=suggested_commands[:5]  # Limit to 5 suggestions
         )
-
-    async def _list_channels(self, params: List[str]) -> CommandResult:
-        if len(params) < 1:
-            error = CommandValidationError(
-                message="Guild ID required", 
-                suggested_fixes=["Provide a guild ID", "Use list_guilds to find guild IDs"],
-                related_commands=["discord list_guilds"],
-                examples=["discord list_channels 123456789"]
-            )
-            return CommandResult(
-                success=False,
-                message="Guild ID is required",
-                suggested_commands=["discord list_guilds"],
-                error=error
-            )
-
-        guild_id = params[0]
-        data, status_code = await self.discord_service.list_channels(guild_id)
-        if status_code != 200 or data is None:
-            error = CommandValidationError(
-                message=f"Failed to list channels: HTTP {status_code}",
-                suggested_fixes=["Check guild ID", "Verify bot permissions"],
-                related_commands=["discord list_guilds"],
-                examples=["discord list_channels <valid_guild_id>"]
-            )
-            return CommandResult(
-                success=False,
-                message=f"Failed to list channels: {status_code}",
-                suggested_commands=["discord list_guilds"],
-                error=error,
-                data={"status_code": status_code, "guild_id": guild_id}
-            )
-
-        # Format the message for direct LLM consumption
-        lines = ["Available Discord Channels:"]
-        lines.append("---")
-        for channel in data:
-            # Basic channel info
-            channel_type = channel.get('type', 'Unknown')
-            lines.append(f"• {channel.get('name', 'Unnamed')} (ID: {channel['id']})")
-            # Add channel details if available
-            if channel.get('topic'):
-                lines.append(f"  Topic: {channel['topic']}")
-            if channel.get('nsfw'):
-                lines.append("  [NSFW]")
-            # Add channel type
-            lines.append(f"  Type: {channel_type}")
-        lines.append("---")
-        lines.append("Use 'discord get_history <channel_id>' to view message history")
-
-        return CommandResult(
-            success=True,
-            message="\n".join(lines),
-            data=data,
-            suggested_commands=[
-                f"discord get_history {channel['id']}"
-                for channel in data[:3]  # Suggest first 3 channels
-            ]
-        )
-
-    async def _get_message(self, params: List[str]) -> CommandResult:
+    
+    async def _send(self, params: List[str]) -> CommandResult:
+        """Send a message using the friendly path format."""
         if len(params) < 2:
             error = CommandValidationError(
-                message="Channel ID and Message ID required",
-                suggested_fixes=["Provide both channel and message IDs"],
-                related_commands=["discord list_channels", "discord get_history"],
-                examples=["discord get_message <channel_id> <message_id>"]
+                message="Channel path and message content required", 
+                suggested_fixes=["Provide both channel path and message content", 
+                            "Use quotes around message content"],
+                related_commands=["discord list_servers"],
+                examples=['discord send "Server:channel" "Hello world!"'] 
             )
             return CommandResult(
                 success=False,
-                message="Both channel ID and message ID are required",
-                suggested_commands=["discord list_channels", "discord get_history"],
+                message="Both channel path and message content are required",
+                suggested_commands=["discord list_servers"],
                 error=error
             )
 
-        channel_id, message_id = params
-        channel_id, message_id = params
-        data, status_code = await self.discord_service.get_message(channel_id, message_id)
-        if status_code != 200 or data is None:
-            error = CommandValidationError(
-                message=f"Failed to get message: HTTP {status_code}",
-                suggested_fixes=["Check message ID", "Verify channel access"],
-                related_commands=["discord get_history"],
-                examples=["discord get_history <channel_id>"]
-            )
-            return CommandResult(
-                success=False,
-                message=f"Failed to get message: {status_code}",
-                suggested_commands=["discord get_history <channel_id>"],
-                error=error,
-                data={"status_code": status_code, "channel_id": channel_id, "message_id": message_id}
-            )
-
-        # Format message data for LLM consumption
-        lines = ["Discord Message:"]
-        lines.append("---")
-        lines.append(f"Author: {data.get('author', 'Unknown')}")
-        lines.append(f"Channel ID: {channel_id}")
-        lines.append(f"Sent at: {data.get('timestamp', 'Unknown')}")
-        lines.append("Content:")
-        lines.append(data.get('content', 'No content'))
+        # Get the raw path and content, ensuring proper cleanup
+        raw_path, content = params
         
-        lines.append("---")
-        lines.append("Available Actions:")
-        lines.append("• Get channel history")
-        lines.append("• Send a reply")
-
-        return CommandResult(
-            success=True,
-            message="\n".join(lines),
-            data=data,
-            suggested_commands=[
-                f"discord get_history {channel_id}",
-                f"discord send_message {channel_id} \"@{data.get('author', 'Unknown')} ...\""
-            ]
-        )
-
-    async def _get_history(self, params: List[str], flags: Dict[str, Any]) -> CommandResult:
-        if len(params) < 1:
-            error = CommandValidationError(
-                message="Channel ID required",
-                suggested_fixes=["Provide a channel ID", "Use list_channels to find channel IDs"],
-                related_commands=["discord list_channels"],
-                examples=["discord get_history <channel_id>"]
-            )
-            return CommandResult(
-                success=False,
-                message="Channel ID is required",
-                suggested_commands=["discord list_channels"],
-                error=error
-            )
-
-        channel_id = params[0]
-        limit = flags.get("limit", 50)
-        data, status_code = await self.discord_service.get_history(channel_id, limit)
-        if status_code != 200 or data is None:
-            error = CommandValidationError(
-                message=f"Failed to get history: HTTP {status_code}",
-                suggested_fixes=["Check channel ID", "Verify channel access"],
-                related_commands=["discord list_channels"],
-                examples=["discord get_history <valid_channel_id>"]
-            )
-            return CommandResult(
-                success=False,
-                message=f"Failed to get channel history: {status_code}",
-                suggested_commands=["discord list_channels"],
-                error=error,
-                data={"status_code": status_code, "channel_id": channel_id}
-            )
-            
-        # Constants for message formatting
-        MAX_MSG_LENGTH = 500  # Characters per message
-        MAX_TOTAL_TOKENS = 2000  # Reserve room for other content
-        MAX_TOTAL_CHARS = MAX_TOTAL_TOKENS * 4  
-
-        # Format messages for LLM consumption
-        lines = ["Discord Channel History:"]
-        lines.append("---")
+        # Clean up the path - strip any surrounding quotes that might have been included
+        path = raw_path.strip()
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
         
-        # Pre-format all messages
-        formatted_messages = []
-        for msg in data:
-            try:
-                timestamp = msg.get('timestamp', '')[:16]  # YYYY-MM-DD HH:MM
-            except Exception:
-                timestamp = 'Unknown time'
-            
-            author = msg.get('author', 'Unknown')
-            content = msg.get('content', '').replace('\n', ' ')
-            if len(content) > MAX_MSG_LENGTH:
-                content = content[:MAX_MSG_LENGTH-3] + "..."
-            
-            msg_line = f"{msg['id']} {author} [{timestamp}]: {content}"
-            formatted_messages.append(msg_line)
-
-        # Start from the most recent messages and work backwards
-        total_chars = len("\n".join(lines))
-        message_count = 0
-        truncated = False
-
-        # Process messages from newest to oldest, but will display oldest to newest
-        kept_messages = []
-        for msg_line in reversed(formatted_messages):
-            if total_chars + len(msg_line) + 2 > MAX_TOTAL_CHARS:
-                truncated = True
-                break
-            
-            kept_messages.append(msg_line)
-            total_chars += len(msg_line) + 1
-            message_count += 1
-
-        # Add messages in chronological order (oldest first)
-        lines.extend(reversed(kept_messages))
-
-        # Add summary footer
-        lines.append("---")
-        status = f"Showing {message_count} of {len(data)} messages"
-        if truncated:
-            status += " (older messages truncated to conserve tokens)"
-        lines.append(status)
-        lines.append(f"Channel ID: {channel_id}")
-        
-        return CommandResult(
-            success=True,
-            message="\n".join(lines),
-            data=data,
-            suggested_commands=[
-                f"discord send_message {channel_id} \"Reply...\"",
-                f"discord get_history {channel_id} --limit={min(100, limit + 10)}"
-            ]
-        )
-
-    async def _send_message(self, params: List[str]) -> CommandResult:
-        if len(params) < 2:
-            error = CommandValidationError(
-                message="Channel ID and message content required", 
-                suggested_fixes=["Provide channel ID and message content", "Use quotes around message content"],
-                related_commands=["discord list_channels"],
-                examples=['discord send_message <channel_id> "Hello\nworld"'] 
-            )
-            return CommandResult(
-                success=False,
-                message="Channel ID and message content are required",
-                suggested_commands=["discord list_channels"],
-                error=error
-            )
-
-        channel_id, content = params
-        data, status_code = await self.discord_service.send_message_immediate(channel_id, content)
+        # Try sending the message
+        data, status_code = await self.discord_service.send_message_by_path(path, content)
 
         if status_code != 200 or data is None:
+            # Enhanced error message with path details
+            error_detail = f"Failed to send to '{path}'"
+            if isinstance(data, dict) and "error" in data:
+                error_detail += f": {data['error']}"
+            
             error = CommandValidationError(
                 message=f"Failed to send message: HTTP {status_code}",
-                suggested_fixes=["Check channel ID", "Verify bot permissions"],
-                related_commands=["discord list_channels"],
-                examples=['discord send_message <valid_channel_id> "Hello\nworld"']  # Added multiline example
+                suggested_fixes=[
+                    "Check channel path spelling", 
+                    "Use list_servers to see available channels",
+                    f"Tried to send to: '{path}'"
+                ],
+                related_commands=["discord list_servers"],
+                examples=['discord send "Server:general" "Hello world!"']
             )
             return CommandResult(
                 success=False,
-                message=f"Failed to send message: {status_code}",
-                suggested_commands=["discord list_channels"],
+                message=f"Failed to send message to {path}: {status_code}",
+                suggested_commands=["discord list_servers"],
                 error=error,
-                data={"status_code": status_code, "channel_id": channel_id}
+                data={"status_code": status_code, "path": path, "error": data if isinstance(data, dict) else None}
             )
 
-        lines = ["Message Sent Successfully:", "---"]
-        lines.append(f"Channel ID: {channel_id}")
+        lines = ["Message Sent Successfully:", "###"]
+        lines.append(f"To: {path}")
         preview = content[:100] + ('...' if len(content) > 100 else '')
         lines.append("Content:")
-        lines.append(preview)  # Changed to preserve newlines in preview
-        if 'message_id' in data:
-            lines.append(f"Message ID: {data['message_id']}")
-        lines.append("---")
+        lines.append(preview)
+        lines.append("###")
         lines.append("Available Actions:")
         lines.append("• View channel history")
         lines.append("• Send another message")
@@ -534,7 +382,272 @@ class DiscordEnvironment(BaseEnvironment):
             message="\n".join(lines),
             data=data,
             suggested_commands=[
-                f"discord get_history {channel_id}",
-                f"discord send_message {channel_id} \"Another message...\""
+                f'discord history "{path}"',
+                f'discord send "{path}" "Another message..."'
+            ]
+        )
+
+    async def _history(self, params: List[str], flags: Dict[str, Any]) -> CommandResult:
+        """Get message history using friendly path format."""
+        if len(params) < 1:
+            error = CommandValidationError(
+                message="Channel path required",
+                suggested_fixes=["Provide a channel path in 'Server:channel' format", 
+                                "Use list_servers to see available channels"],
+                related_commands=["discord list_servers"],
+                examples=['discord history "Server:general"']
+            )
+            return CommandResult(
+                success=False,
+                message="Channel path is required",
+                suggested_commands=["discord list_servers"],
+                error=error
+            )
+
+        # Get and clean the path
+        raw_path = params[0]
+        path = raw_path.strip()
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
+        
+        limit = flags.get("limit", 50)
+
+        data, status_code = await self.discord_service.get_enhanced_history(path, limit)
+        
+        if status_code != 200 or data is None:
+            # Enhanced error message with path details
+            error_detail = f"Failed to get history from '{path}'"
+            if isinstance(data, dict) and "error" in data:
+                error_detail += f": {data['error']}"
+                
+            error = CommandValidationError(
+                message=f"Failed to get history: HTTP {status_code}",
+                suggested_fixes=[
+                    "Check channel path spelling", 
+                    "Verify channel access", 
+                    "Use list_servers to see available channels"
+                ],
+                related_commands=["discord list_servers"],
+                examples=['discord history "Server:general"']
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to get channel history for {path}: {status_code}",
+                suggested_commands=["discord list_servers"],
+                error=error,
+                data={"status_code": status_code, "path": path, "error": data if isinstance(data, dict) else None}
+            )
+            
+        # Format messages for LLM consumption
+        lines = ["Discord Channel History:"]
+        lines.append("###")
+        lines.append(f"Channel: {path}")
+        
+        # Format messages (adjusted to match enhanced_history response format)
+        messages = data.get("messages", [])
+        if not messages:
+            lines.append("No messages found in channel history.")
+        else:
+            for msg in messages:
+                try:
+                    ref = msg.get('reference', '')
+                    timestamp = msg.get('timestamp', '')[:16]  # YYYY-MM-DD HH:MM
+                    author = msg.get('author', 'Unknown')
+                    content = msg.get('content', '').replace('\n', ' ')
+                    if len(content) > 500:  # Truncate very long messages
+                        content = content[:500] + "..."
+                    
+                    # Include reference ID for easy referencing in commands
+                    lines.append(f"[{timestamp}] {ref} {author}: {content}")
+                except Exception as e:
+                    lines.append(f"[Error formatting message: {e}]")
+
+        # Add summary footer
+        lines.append("###")
+        status = f"Showing {len(messages)} messages"
+        lines.append(status)
+        lines.append("You can reference messages by their number (e.g., \"#1\") in commands:")
+        lines.append('Example: discord show "' + path + '" "#1"')
+        lines.append('Example: discord reply "' + path + '" "#2" "Your reply"')
+        
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f'discord send "{path}" "New message..."',
+                f'discord reply "{path}" "#1" "Reply to the first message..."',
+                f'discord history "{path}" --limit={min(100, limit + 10)}'
+            ]
+        )
+
+    async def _show(self, params: List[str]) -> CommandResult:
+        """Find and display a specific message."""
+        if len(params) < 1:
+            error = CommandValidationError(
+                message="Channel path is required",
+                suggested_fixes=["Provide a channel path in 'Server:channel' format"],
+                related_commands=["discord list_servers"],
+                examples=['discord show "MyServer:general"']
+            )
+            return CommandResult(
+                success=False,
+                message="Channel path is required",
+                suggested_commands=["discord list_servers"],
+                error=error
+            )
+        
+        # Get and clean the path (same pattern as other methods)
+        raw_path = params[0]
+        path = raw_path.strip()
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
+        
+        reference = params[1] if len(params) > 1 else "latest"
+        
+        data, status_code = await self.discord_service.find_message(path, reference)
+        
+        if status_code != 200 or data is None:
+            error_msg = "Failed to find message"
+            if isinstance(data, dict) and "error" in data:
+                error_msg += f": {data['error']}"
+                
+            error = CommandValidationError(
+                message=f"{error_msg}: HTTP {status_code}",
+                suggested_fixes=[
+                    "Check the channel path and message reference",
+                    "Try a different reference format",
+                    "Ensure the message exists"
+                ],
+                related_commands=["discord history", "discord list_servers"],
+                examples=[
+                    'discord show "MyServer:general"',
+                    'discord show "MyServer:general" "#1"'
+                ]
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to find message: {error_msg}",
+                suggested_commands=["discord history", "discord list_servers"],
+                error=error
+            )
+        
+        # Format message data for display
+        lines = ["Discord Message:", "###"]
+        lines.append(f"Channel: {path}")
+        lines.append(f"Author: {data.get('author', 'Unknown')}")
+        
+        # Format timestamp nicely if available
+        timestamp = data.get('timestamp', '')
+        if timestamp:
+            try:
+                date_part = timestamp.split('T')[0]
+                time_part = timestamp.split('T')[1][:8]
+                lines.append(f"Time: {date_part} {time_part}")
+            except IndexError:
+                lines.append(f"Time: {timestamp}")
+        
+        lines.append("Content:")
+        content = data.get('content', 'No content')
+        lines.append(content)
+        
+        lines.append("###")
+        lines.append("Available Actions:")
+        lines.append(f'• Reply: discord reply "{path}" "{reference}" "Your reply"')
+        lines.append(f'• View more: discord history "{path}"')
+        
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f'discord reply "{path}" "{reference}" "Your reply here"',
+                f'discord history "{path}"'
+            ]
+        )
+
+    async def _reply(self, params: List[str]) -> CommandResult:
+        """Reply to a specific message."""
+        if len(params) < 3:
+            error = CommandValidationError(
+                message="Channel path, message reference, and content are required",
+                suggested_fixes=["Provide all required parameters"],
+                related_commands=["discord show", "discord history"],
+                examples=['discord reply "MyServer:general" "latest" "Your reply here"']
+            )
+            return CommandResult(
+                success=False,
+                message="Channel path, message reference, and content are all required",
+                suggested_commands=["discord show", "discord history"],
+                error=error
+            )
+        
+        # Get and clean the path and reference
+        raw_path = params[0]
+        raw_reference = params[1]
+        content = params[2]
+        
+        # Clean up path
+        path = raw_path.strip()
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
+        
+        reference = raw_reference.strip()
+        if (reference.startswith('"') and reference.endswith('"')) or (reference.startswith("'") and reference.endswith("'")):
+            reference = reference[1:-1]
+        
+        data, status_code = await self.discord_service.reply_to_message(path, reference, content)
+        
+        if status_code != 200 or data is None:
+            error_msg = "Failed to send reply"
+            if isinstance(data, dict) and "error" in data:
+                error_msg += f": {data['error']}"
+                
+            error = CommandValidationError(
+                message=f"{error_msg}: HTTP {status_code}",
+                suggested_fixes=[
+                    "Check the channel path and message reference",
+                    "Make sure the message to reply to exists",
+                    "Verify that the bot has permission to send messages"
+                ],
+                related_commands=["discord show", "discord history"],
+                examples=['discord reply "MyServer:general" "#3" "Your reply here"']
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to send reply: {error_msg}",
+                suggested_commands=["discord show", "discord history"],
+                error=error
+            )
+        
+        # Format success message
+        lines = ["Reply Sent Successfully:", "###"]
+        lines.append(f"Channel: {path}")
+        
+        # Show what we replied to
+        if "replied_to" in data:
+            replied_to = data["replied_to"]
+            lines.append(f"Replied to: {replied_to.get('author', 'Unknown')}")
+            original_content = replied_to.get('content', '')
+            if len(original_content) > 100:
+                original_content = original_content[:97] + "..."
+            lines.append(f"Original: {original_content}")
+        
+        # Show our reply
+        lines.append("Your reply:")
+        lines.append(content)
+        
+        lines.append("###")
+        lines.append("Available Actions:")
+        lines.append(f'• View history: discord history "{path}"')
+        lines.append(f'• Send another message: discord send "{path}" "Message"')
+        
+        return CommandResult(
+            success=True,
+            message="\n".join(lines),
+            data=data,
+            suggested_commands=[
+                f'discord history "{path}"',
+                f'discord show "{path}" "latest"'
             ]
         )

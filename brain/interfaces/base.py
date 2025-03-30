@@ -51,16 +51,16 @@ class CognitiveInterface(NotificationInterface, ABC):
         pass
     
     @brain_trace
-    async def get_cognitive_context(self) -> AsyncGenerator[tuple[str, Any], None]:
+    async def get_cognitive_context(self, metadata: Optional[Dict[str, Any]] = None) -> AsyncGenerator[tuple[str, Any], None]:
         """Get formatted cognitive context including state and notifications, yielding each piece."""
         brain_trace.context.memory("Getting relevant memories")
-        memories = await self.get_relevant_memories() or []
+        memories = await self.get_relevant_memories(metadata=metadata) or []
         BrainLogger.debug(f"[{self.interface_id}] Got memories: {memories}")
 
         brain_trace.context.state("Retrieving API context")
         state = await self.state_bridge.get_api_context() or {}
         BrainLogger.debug(f"[{self.interface_id}] Got API context: {state}")
-        
+
         brain_trace.context.format("Formatting cognitive context")
         formatted_context = await self.format_cognitive_context(state, memories) or "No context available"
         yield ("formatted_context", formatted_context)
@@ -71,7 +71,7 @@ class CognitiveInterface(NotificationInterface, ABC):
         yield ("updates", other_updates)
     
     @abstractmethod
-    async def get_relevant_memories(self, metadata: Optional[Dict[str, any]]) -> List[Dict[str, Any]]:
+    async def get_relevant_memories(self, metadata: Optional[Dict[str, any]] = None) -> List[Dict[str, Any]]:
         """Retrieve memories relevant to this interface's current context."""
         pass
 
