@@ -98,7 +98,7 @@ class DiscordConnectionManager:
             return False
         try:
             session = await self._ensure_session()
-            async with session.get(f"{self.config.bot_url}/enhanced-history") as resp:
+            async with session.get(f"{self.config.bot_url}/health") as resp:
                 healthy = (resp.status == 200)
                 if healthy:
                     self._last_successful_connection = time.time()

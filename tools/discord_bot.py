@@ -793,6 +793,7 @@ def create_app() -> web.Application:
     app.router.add_get("/find-message", handle_find_message)
     app.router.add_get("/enhanced-history", handle_enhanced_history)
     app.router.add_post("/reply-to-message", handle_reply_to_message)
+    app.router.add_get("/health", lambda _: web.Response(text="OK"))
 
     return app
 
