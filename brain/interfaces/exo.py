@@ -5,24 +5,340 @@ Implements the ExoProcessor interface for the command-based terminal environment
 Handles command processing, LLM interactions, and maintenance of cognitive continuity
 for the core command loop while integrating with the broader cognitive architecture.
 """
-
-from typing import Dict, List, Any, Optional
-from datetime import datetime
 import asyncio
+from datetime import datetime
+from enum import Enum
+from pydantic import BaseModel, Field, field_validator
+from typing import Dict, List, Any, Optional
 
-from brain.utils.tracer import brain_trace
-from brain.interfaces.base import CognitiveInterface
 from brain.cognition.notification import Notification, NotificationManager
-from brain.core.command_handler import CommandHandler
-from core.state_bridge import StateBridge
-from brain.commands.model import CommandResult, ParsedCommand, GlobalCommands
 from brain.cognition.memory.significance import MemoryData, SourceType
+from brain.commands.model import CommandResult, ParsedCommand, GlobalCommands
+from brain.core.command_handler import CommandHandler
 from brain.environments.terminal_formatter import TerminalFormatter
+from brain.interfaces.base import CognitiveInterface
+from brain.utils.tracer import brain_trace
+
+from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
+
 from config import Config
 from loggers import BrainLogger
 from api_clients import APIManager
 from event_dispatcher import global_event_dispatcher, Event
+
+class MessageRole(str, Enum):
+    """Defines the possible roles in a conversation."""
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+class Message(BaseModel):
+    """Represents a single message in the conversation."""
+    role: MessageRole
+    content: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator('content')
+    @classmethod
+    def content_not_empty(cls, v):
+        """Validate that content is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Message content cannot be empty")
+        return v
+
+class ConversationPair(BaseModel):
+    """Represents an assistant-user message pair."""
+    assistant: Message
+    user: Message
+    
+    @field_validator('assistant')
+    @classmethod
+    def validate_assistant_role(cls, v):
+        """Ensure assistant message has the correct role."""
+        if v.role != MessageRole.ASSISTANT:
+            raise ValueError("First message in pair must have assistant role")
+        return v
+        
+    @field_validator('user')
+    @classmethod
+    def validate_user_role(cls, v):
+        """Ensure user message has the correct role."""
+        if v.role != MessageRole.USER:
+            raise ValueError("Second message in pair must have user role")
+        return v
+
+class ConversationState(BaseModel):
+    """
+    Manages the state of a conversation with strict structural validation.
+    
+    A conversation consists of:
+    - A system message (instructions/context)
+    - An optional initial user message (for the first prompt)
+    - A list of assistant-user exchange pairs
+    
+    This ensures the conversation always follows the pattern:
+    [system, assistant, user, assistant, user, ...]
+    And always ends with a user message, ready for the next assistant response.
+    """
+    system_message: Message
+    initial_user_message: Optional[Message] = None
+    pairs: List[ConversationPair] = Field(default_factory=list)
+    
+    @field_validator('system_message')
+    @classmethod
+    def validate_system_role(cls, v):
+        """Ensure system message has the correct role."""
+        if v.role != MessageRole.SYSTEM:
+            raise ValueError("System message must have system role")
+        return v
+    
+    @field_validator('initial_user_message')
+    @classmethod
+    def validate_initial_user_role(cls, v):
+        """Ensure initial user message has the correct role."""
+        if v is not None and v.role != MessageRole.USER:
+            raise ValueError("Initial user message must have user role")
+        return v
+    
+    @classmethod
+    def create_initial(cls, system_content: str, user_content: str) -> "ConversationState":
+        """
+        Create a new conversation with just system and initial user message.
+        
+        Args:
+            system_content: Content for the system message
+            user_content: Content for the initial user message
+            
+        Returns:
+            A new ConversationState with just system and user messages
+        """
+        return cls(
+            system_message=Message(role=MessageRole.SYSTEM, content=system_content),
+            initial_user_message=Message(role=MessageRole.USER, content=user_content)
+        )
+    
+    @classmethod
+    def from_message_list(cls, messages: List[Dict[str, str]]) -> "ConversationState":
+        """
+        Convert a traditional message list to a ConversationState.
+        
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'
+        
+        Returns:
+            A validated ConversationState object
+            
+        Raises:
+            ValueError: If the message list doesn't follow the expected pattern
+        """
+        if not messages:
+            raise ValueError("Cannot create ConversationState from empty message list")
+            
+        # Extract system message
+        if messages[0]['role'] != 'system':
+            raise ValueError("First message must be a system message")
+            
+        system_message = Message(
+            role=MessageRole.SYSTEM,
+            content=messages[0]['content']
+        )
+        
+        # Process remaining messages as pairs
+        pairs = []
+        i = 1
+        
+        # Check for special case: only system + user (initialization state)
+        if len(messages) == 2 and messages[1]['role'] == 'user':
+            return cls(
+                system_message=system_message,
+                initial_user_message=Message(
+                    role=MessageRole.USER,
+                    content=messages[1]['content']
+                )
+            )
+        
+        # Process remaining messages as pairs
+        initial_user_message = None
+        pairs = []
+        i = 1
+        
+        # Handle special case: if we start with a user message after system
+        if len(messages) > 1 and messages[1]['role'] == 'user':
+            initial_user_message = Message(
+                role=MessageRole.USER,
+                content=messages[1]['content']
+            )
+            i = 2
+        
+        # Process remaining messages as pairs
+        while i < len(messages) - 1:
+            if messages[i]['role'] != 'assistant' or messages[i+1]['role'] != 'user':
+                raise ValueError(f"Expected assistant-user pair at positions {i},{i+1}")
+                
+            assistant_msg = Message(
+                role=MessageRole.ASSISTANT,
+                content=messages[i]['content']
+            )
+            
+            user_msg = Message(
+                role=MessageRole.USER,
+                content=messages[i+1]['content']
+            )
+            
+            pairs.append(ConversationPair(assistant=assistant_msg, user=user_msg))
+            i += 2
+            
+        # Check if we have a trailing assistant message
+        if i == len(messages) - 1 and messages[i]['role'] == 'assistant':
+            raise ValueError("Conversation cannot end with an assistant message")
+            
+        return cls(
+            system_message=system_message,
+            initial_user_message=initial_user_message,
+            pairs=pairs
+        )
+    
+    def to_message_list(self) -> List[Dict[str, str]]:
+        """
+        Convert the conversation state to a traditional message list format.
+        
+        Returns:
+            List of message dictionaries with 'role' and 'content'
+        """
+        messages = [{"role": "system", "content": self.system_message.content}]
+        
+        # Add initial user message if present
+        if self.initial_user_message:
+            messages.append({
+                "role": "user",
+                "content": self.initial_user_message.content
+            })
+        
+        # Add all pairs
+        for pair in self.pairs:
+            messages.append({
+                "role": "assistant",
+                "content": pair.assistant.content
+            })
+            messages.append({
+                "role": "user",
+                "content": pair.user.content
+            })
+            
+        return messages
+    
+    def add_exchange(self, assistant_content: str, user_content: str, 
+                    assistant_metadata: Optional[Dict[str, Any]] = None,
+                    user_metadata: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Add a complete assistant-user exchange to the conversation.
+        
+        Args:
+            assistant_content: Content of the assistant's message
+            user_content: Content of the user's message
+            assistant_metadata: Optional metadata for assistant message
+            user_metadata: Optional metadata for user message
+        """
+        assistant_msg = Message(
+            role=MessageRole.ASSISTANT,
+            content=assistant_content,
+            metadata=assistant_metadata or {}
+        )
+        
+        user_msg = Message(
+            role=MessageRole.USER,
+            content=user_content,
+            metadata=user_metadata or {}
+        )
+        
+        self.pairs.append(ConversationPair(
+            assistant=assistant_msg,
+            user=user_msg
+        ))
+    
+    def get_contextual_history(self, context: str) -> List[Dict[str, str]]:
+        """
+        Get message history with ephemeral context injected for LLM processing.
+        
+        Args:
+            context: Context information to inject
+            
+        Returns:
+            Message list with context injected after system message
+        """
+        messages = self.to_message_list()
+        
+        # Insert context as second message (after system message)
+        return [
+            messages[0],  # System message
+            {"role": "system", "content": context},  # Injected context
+            *messages[1:]  # Rest of conversation
+        ]
+    
+    def prune_last_exchange(self) -> bool:
+        """
+        Remove the most recent exchange (assistant-user pair).
+        
+        Returns:
+            True if successful, False if no pairs to remove
+        """
+        if not self.pairs:
+            return False
+            
+        self.pairs.pop()
+        return True
+    
+    def trim_to_size(self, max_pairs: int) -> int:
+        """
+        Limit conversation to maximum number of exchange pairs by removing oldest.
+        
+        Args:
+            max_pairs: Maximum number of pairs to keep
+            
+        Returns:
+            Number of pairs removed
+        """
+        if len(self.pairs) <= max_pairs:
+            return 0
+            
+        pairs_to_remove = len(self.pairs) - max_pairs
+        self.pairs = self.pairs[-max_pairs:]
+        return pairs_to_remove
+    
+    def get_recent_content(self, num_pairs: int = 3) -> str:
+        """
+        Get concatenated content from recent exchanges for context retrieval.
+        
+        Args:
+            num_pairs: Number of recent pairs to include
+            
+        Returns:
+            Concatenated string of recent exchanges
+        """
+        recent_pairs = self.pairs[-num_pairs:] if self.pairs else []
+        content_parts = []
+        
+        for pair in recent_pairs:
+            content_parts.append(f"assistant: {pair.assistant.content}")
+            content_parts.append(f"user: {pair.user.content}")
+            
+        return "\n".join(content_parts)
+    
+    def is_valid(self) -> bool:
+        """
+        Check if the conversation state is structurally valid.
+        
+        Returns:
+            True if valid, False otherwise
+        """
+        try:
+            # Convert to message list and back as validation
+            messages = self.to_message_list()
+            test_state = ConversationState.from_message_list(messages)
+            return True
+        except Exception:
+            return False
 
 class ExoProcessorInterface(CognitiveInterface):
     def __init__(
@@ -36,7 +352,7 @@ class ExoProcessorInterface(CognitiveInterface):
         super().__init__("exo_processor", state_bridge, cognitive_bridge, notification_manager)
         self.api = api_manager
         self.command_handler = command_handler
-        self.conversation_history = []
+        self.conversation_state = None
         self.last_successful_turn = None
         self.last_summary_time = None
         self.cached_summary = ""
@@ -44,6 +360,36 @@ class ExoProcessorInterface(CognitiveInterface):
         # Timing configuration
         self.min_interval = Config.get_exo_min_interval()
         self.llm_timeout = Config.LLM_TIMEOUT
+
+    async def initialize(self, brain_state = None) -> None:
+        """Initialize the exo processor interface and conversation history."""
+        if brain_state and len(brain_state) > 2:
+            try:
+                # Check if the last message is from assistant and remove if so
+                if brain_state[-1]["role"] == "assistant":
+                    brain_state = brain_state[:-1]
+                # Create conversation state from existing messages 
+                self.conversation_state = ConversationState.from_message_list(brain_state)
+                BrainLogger.info("Restored conversation state from brain state")
+                return
+            except ValueError as e:
+                BrainLogger.error(f"Error restoring brain state: {e}, starting fresh")
+            
+        initial_state = await self.state_bridge.get_api_context()
+        formatted_state = TerminalFormatter.format_context_summary(initial_state)
+        
+        # Create initial welcome message
+        welcome_text = TerminalFormatter.format_welcome()
+        initial_content = f"{welcome_text}\n{formatted_state}"
+        
+        # Create conversation with just system and initial user message
+        self.conversation_state = ConversationState.create_initial(
+            system_content=Config.SYSTEM_PROMPT,
+            user_content=initial_content
+        )
+
+        # Reset timing trackers
+        self.last_successful_turn = None
 
     @brain_trace
     async def process_interaction(self, content: Any) -> Any:
@@ -56,6 +402,11 @@ class ExoProcessorInterface(CognitiveInterface):
         """
         try:
             async with asyncio.timeout(self.llm_timeout):
+                if not self.conversation_state:
+                    # Initialize with a basic state if none exists
+                    BrainLogger.error("No or invalid conversation state found, re-initializing")
+                    await self.initialize()
+
                 # Get cognitive context
                 brain_trace.interaction.context("Getting cognitive context")
                 context_data = {}
@@ -80,9 +431,13 @@ class ExoProcessorInterface(CognitiveInterface):
                     # cleaning only for when hallucinated context is terribly long
                     cleaned_response = await self.clean_errored_response(llm_response)
                     brain_trace.interaction.error(error_msg=error)
-                    self._add_to_history("assistant", cleaned_response)
                     error_message = TerminalFormatter.format_error(error)
-                    self._add_to_history("user", error_message)
+                    self.conversation_state.add_exchange(
+                        assistant_content=cleaned_response,
+                        user_content=error_message,
+                        assistant_metadata={"error": True},
+                        user_metadata={"error_message": error}
+                    )
                     return error_message
                 
                 # Execute command
@@ -100,18 +455,22 @@ class ExoProcessorInterface(CognitiveInterface):
                 brain_trace.interaction.update("Updating conversation state")
 
                 #just return the llm response; the final_response should carry all information relating to any processing *we* did.
-                self._add_to_history("assistant", llm_response)
-                self._add_to_history("user", final_response)
+                self.conversation_state.add_exchange(
+                    assistant_content=llm_response,
+                    user_content=final_response,
+                    assistant_metadata={"command": command if command else None},
+                    user_metadata={"result": result if result else None}
+                )
                 self.last_successful_turn = datetime.now()
 
                 # Log conversation history to file
                 log_path = "data/logs/exo_conversation.log"
                 try:
                     with open(log_path, "w", encoding="utf-8") as f:
-                        for msg in self.conversation_history:
-                            f.write(f"{msg['role']}: {msg['content']}\n")
+                        for message in self.conversation_state.to_message_list():
+                            f.write(f"<{message['role']}> {message['content']}\n")
                 except Exception as e:
-                    BrainLogger.error(f"Failed to write conversation log: {e}") 
+                    BrainLogger.error(f"Failed to write conversation log: {e}")
                 
                 # Create notification for other interfaces
                 brain_trace.interaction.notify("Final updates")
@@ -127,7 +486,7 @@ class ExoProcessorInterface(CognitiveInterface):
                     "state_changes": result.state_changes or {}
                 })
 
-                await self.announce_cognitive_context(self.conversation_history, notification)
+                await self.announce_cognitive_context(self.conversation_state.to_message_list(), notification)
                 await self._dispatch_memory_check(formatted_response, command, result)
                 
                 return formatted_response
@@ -196,35 +555,6 @@ class ExoProcessorInterface(CognitiveInterface):
                 BrainLogger.info("Event dispatched successfully.")
             except Exception as e:
                 BrainLogger.error(f"Error dispatching memory event: {e}", exc_info=True)
-        
-    async def initialize(self, brain_state = None) -> None:
-        """Initialize the exo processor interface and conversation history."""
-        if len(brain_state) > 2: 
-                if brain_state[-1]["role"] == "assistant":
-                    # Remove last assistant message to avoid duplicate responses
-                    brain_state = brain_state[:-1]
-                self.conversation_history = brain_state
-                return
-            
-        initial_state = await self.state_bridge.get_api_context()
-        formatted_state = TerminalFormatter.format_context_summary(initial_state)
-        
-        # Initial system prompt and welcome message
-        welcome_message = {
-            "role": "system",
-            "content": Config.SYSTEM_PROMPT
-        }
-        
-        initial_message = {
-            "role": "user", 
-            "content": f"{TerminalFormatter.format_welcome()}\n\n{formatted_state}"
-        }
-        
-        if not self.conversation_history:
-            self.conversation_history = [welcome_message, initial_message]
-        
-        # Reset timing trackers
-        self.last_successful_turn = None
     
     async def format_memory_context(
         self,
@@ -262,14 +592,13 @@ class ExoProcessorInterface(CognitiveInterface):
         else:
             result_message = 'No result'
         
-        return f"""Review this significant interaction and form a memory:
+        return f"""Review this significant interaction and form a clear first person memory:
 
 Context:
 - Command: {command_input}
 - Response: {content}
 - Result: {result_message}
 
-Create a clear first-person memory as Hephia would form it about this interaction.
 Focus on what was meaningful and any changes in understanding or state."""
 
     async def format_cognitive_context(
@@ -287,13 +616,11 @@ Focus on what was meaningful and any changes in understanding or state."""
         """
         Retrieve memories relevant to current conversation context.
         """
-        if not self.conversation_history:
+        if not self.conversation_state or not self.conversation_state.pairs:
             return []
-        # Get recent context
-        recent_context = "\n".join(
-            f"{msg['role']}: {msg['content']}"
-            for msg in self.conversation_history[-3:]
-        )
+        
+        # Get recent context from conversation state
+        recent_context = self.conversation_state.get_recent_content(num_pairs=3)
         
         return await self.cognitive_bridge.retrieve_memories(
             query=recent_context,
@@ -306,16 +633,12 @@ Focus on what was meaningful and any changes in understanding or state."""
         model_config = Config.AVAILABLE_MODELS[model_name]
         
         # Create temporary history with context
-        temp_history = [
-            self.conversation_history[0],  # System prompt
-            {"role": "system", "content": context},
-            *self.conversation_history[1:]
-        ]
-        
+        contextual_messages = self.conversation_state.get_contextual_history(context)
+
         return await self.api.create_completion(
             provider=model_config.provider.value,
             model=model_config.model_id,
-            messages=temp_history,
+            messages=contextual_messages,
             temperature=model_config.temperature,
             max_tokens=model_config.max_tokens,
             return_content_only=True
@@ -326,22 +649,27 @@ Focus on what was meaningful and any changes in understanding or state."""
         Create a concise summary of recent cognitive activity.
         Transforms command/response pairs into a coherent narrative.
         """
+        summary = None
+
+        if not self.conversation_state or not self.conversation_state.pairs:
+            return "no history available; fresh start!"
+        
+        # Calculate how many pairs to include (2 messages per pair)
+        pair_count = min(window_size // 2, len(self.conversation_state.pairs))
+
+        # Format conversation context
+        conversation_text = []
+        message_list = self.conversation_state.to_message_list()
+
+        # Skip system message and get recent messages
+        recent_messages = message_list[1:1+pair_count*2]
+
+        for msg in recent_messages:
+            role = 'Hephia' if msg['role'] == 'assistant' else 'exo'
+            content = msg['content'].replace('\n', ' ').strip()
+            conversation_text.append(f"{role}: {content}")
+
         try:
-            if not self.conversation_history:
-                return "No conversation history available."
-                
-            # Get recent messages
-            recent = self.conversation_history[-min(window_size, len(self.conversation_history)):]
-            if not recent:
-                return "No recent cognitive activity."
-            
-            # Format conversation context
-            conversation_text = []
-            for msg in recent:
-                role = 'Hephia' if msg['role'] == 'assistant' else 'ExoProcessor'
-                content = msg['content'].replace('\n', ' ').strip()
-                conversation_text.append(f"{role}: {content}")
-            
             model_name = Config.get_summary_model()
             model_config = Config.AVAILABLE_MODELS[model_name]
             
@@ -351,7 +679,7 @@ Your summaries track the ongoing state of mind, decisions, and context.
 Your response will be used to maintain continuity of self across many instances.
 Focus on key decisions, realizations, and state changes.
 Be concise and clear. Think of summarizing the 'current train of thought' ongoing for Hephia.
-The message history you're given is between an LLM (Hephia) and a terminal OS (exoprocessor). 
+The message history you're given is between an LLM (Hephia) and a simulated terminal OS (exo). 
 Maintain first person perspective, as if you were Hephia thinking to itself.
 Return only the summary in autobiographical format as if writing a diary entry. Cite names and key details directly."""
 
@@ -363,7 +691,7 @@ Return only the summary in autobiographical format as if writing a diary entry. 
 1. Key decisions or actions taken
 2. Important realizations or changes
 3. Current focus or goals
-4. Relevant emotional or cognitive state
+4. Relevant state info
 
 Current conversation context:
 {chr(10).join(conversation_text)}
@@ -382,12 +710,49 @@ Current state context:
                 max_tokens=400,
                 return_content_only=True
             )
-            
-            return summary if summary else "Failed to generate cognitive summary."
-            
         except Exception as e:
             BrainLogger.error(f"Error generating cognitive summary: {e}")
-            return "Error in cognitive summary generation."
+            
+        if not summary:
+            try:
+                summary = await self.get_fallback_summary(window_size)
+            except Exception as e:
+                BrainLogger.error(f"Fallback summary also failed: {e}")
+    
+        return summary if summary else "Failed to generate cognitive summary."
+    
+    async def get_fallback_summary(self, window_size: int) -> str:
+        """Generate a simple fallback summary from recent conversation history."""
+        try:
+            if not self.conversation_state or not self.conversation_state.pairs:
+                return "No conversation history available."
+                
+            # Get recent messages from conversation state
+            message_list = self.conversation_state.to_message_list()
+            # Skip system message and get recent messages 
+            pair_count = min(window_size // 2, len(self.conversation_state.pairs))
+            recent_messages = message_list[1:1+pair_count*2]
+
+            # Format as IRC style logs
+            summary_lines = []
+            # Add introductory line matching cognitive continuity theme
+            summary_lines.append("Recent cognitive activity trace, your issued commands and responses; maintaining continuity of interaction flow:")
+            
+            for msg in recent_messages:
+                role = 'Hephia' if msg['role'] == 'assistant' else 'ExoProcessor'
+                content = msg['content']
+                
+                # Truncate user messages
+                if msg['role'] == 'user':
+                    content = content[:250] + ('...' if len(content) > 250 else '')
+                    
+                summary_lines.append(f"<{role}> {content}")
+                
+            return "\n".join(summary_lines)
+            
+        except Exception as e:
+            BrainLogger.error(f"Error generating fallback summary: {e}")
+            return "Error generating any summary format."
 
     async def _generate_summary(self, notifications: List[Notification]) -> str:
         """
@@ -419,48 +784,19 @@ Current state context:
             return (self.cached_summary if self.cached_summary 
                    else "Error generating cognitive summary.")
 
-    def _add_to_history(self, role: str, content: str) -> None:
-        """Add message to conversation history."""
-        self.conversation_history.append({
-            "role": role,
-            "content": content
-        })
-        self._trim_conversation()
-
-    def _trim_conversation(self, max_length: int = Config.EXO_MAX_MESSAGES) -> None:
-        """Trim conversation history while maintaining a rolling window of most recent messages.
-        Ensures the last message is always a user message for proper LLM prompting."""
+    def _add_exchange(self, assistant_content: str, user_content: str,
+                 assistant_metadata: Optional[Dict[str, Any]] = None,
+                 user_metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Add a complete exchange to the conversation and trim if needed."""
+        self.conversation_state.add_exchange(
+            assistant_content=assistant_content,
+            user_content=user_content,
+            assistant_metadata=assistant_metadata,
+            user_metadata=user_metadata
+        )
         
-        if len(self.conversation_history) > max_length:
-            # Always keep system message (index 0) and max_length-1 most recent messages
-            self.conversation_history = [
-                self.conversation_history[0],  # Keep system prompt
-                *self.conversation_history[-(max_length-1):]  # Keep most recent messages
-            ]
-            
-            # Validate conversation pairs are intact (user followed by assistant)
-            # Start from beginning after system message
-            i = 1
-            while i < len(self.conversation_history) - 1:
-                current = self.conversation_history[i]
-                next_msg = self.conversation_history[i + 1]
-                
-                if (current["role"] == "user" and next_msg["role"] == "assistant"):
-                    i += 2  # Move to next pair
-                else:
-                    # Found unpaired message, remove it
-                    self.conversation_history.pop(i)
-                    
-            # Final check - if last message is assistant, remove it to ensure user message is last
-            if len(self.conversation_history) > 1:
-                if self.conversation_history[-1]["role"] == "assistant":
-                    self.conversation_history.pop()
-                    
-            # If we somehow end up with an assistant message at the end after all that,
-            # keep removing messages until we get to a user message
-            while (len(self.conversation_history) > 1 and 
-                   self.conversation_history[-1]["role"] == "assistant"):
-                self.conversation_history.pop()
+        max_pairs = (Config.EXO_MAX_MESSAGES - 1) // 2  # -1 for system message, divided by 2 for pairs
+        self.conversation_state.trim_to_size(max_pairs)
 
     async def clean_errored_response(self, response: str) -> str:
         """Clean up the LLM response in case of an error."""
@@ -474,8 +810,9 @@ Current state context:
 
     async def prune_conversation(self):
         """Remove the last message pair from conversation history and update state."""
-        if len(self.conversation_history) > 2:  # Keep system prompt + at least 1 exchange
-            # Remove last two messages (user/assistant pair)
-            self.conversation_history = self.conversation_history[:-2]
-            
+        if self.conversation_state.prune_last_exchange():
             BrainLogger.debug("Pruned last conversation pair")
+            return True
+        else:
+            BrainLogger.debug("No pairs to prune")
+            return False

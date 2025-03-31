@@ -6,6 +6,7 @@ Handles message processing, memory formation, and cognitive continuity
 while maintaining natural social engagement patterns.
 """
 
+import asyncio
 from typing import Dict, List, Any, Optional
 
 from brain.environments.terminal_formatter import TerminalFormatter
@@ -73,7 +74,21 @@ class DiscordInterface(CognitiveInterface):
                 content.get('conversation_history', []),
                 context
             )
-            response = await self._get_social_response(prompt)
+
+            # Try up to 3 times with exponential backoff
+            max_retries = 3
+            response = None
+            for attempt in range(max_retries):
+                response = await self._get_social_response(prompt)
+                if response is not None:
+                    break
+                # Wait 2^attempt seconds before retrying (1s, 2s, 4s)
+                await asyncio.sleep(2 ** attempt)
+            
+            # If all retries failed, return empty string
+            if response is None:
+                BrainLogger.error("Failed to get social response after 3 attempts")
+                return ""
             
             # Create notification for other interfaces
             notification = await self.create_notification({

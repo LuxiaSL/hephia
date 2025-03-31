@@ -5,7 +5,12 @@ Provides unified interfaces for multiple API services while maintaining
 provider-specific optimizations and requirements.
 """
 
+import copy
 import platform
+import random
+import time
+import traceback
+import uuid
 import aiohttp
 from aiohttp import UnixConnector, TCPConnector
 import os
@@ -485,6 +490,7 @@ class UnixSocketClient(BaseAPIClient):
         )
         self.socket_path = socket_path
         self.max_retries = 10
+        self.advanced_logging = Config.get_advanced_c2_logging()
     
     def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
         """Get headers for Unix socket requests"""
@@ -506,56 +512,217 @@ class UnixSocketClient(BaseAPIClient):
     ) -> Dict[str, Any]:
         """Make request via Unix socket with retry logic."""
         headers = self._get_headers(extra_headers)
+        request_id = str(uuid.uuid4())[:8] if self.advanced_logging else ""
+        
+        # Basic request logging - always done
+        SystemLogger.info(f"API Request{' ' + request_id if request_id else ''} ({self.service_name}): "
+                         f"Endpoint: {endpoint}, Method: {method}")
+        
+        # Detailed payload logging - only if advanced logging is enabled
+        if self.advanced_logging:
+            payload_log = copy.deepcopy(payload) if payload else {}
+            if payload_log and "messages" in payload_log:
+                # Keep only first and last messages if there are many
+                if len(payload_log["messages"]) > 2:
+                    msg_count = len(payload_log["messages"])
+                    payload_log["messages"] = [
+                        payload_log["messages"][0],
+                        f"... ({msg_count-2} messages omitted) ...",
+                        payload_log["messages"][-1]
+                    ]
+            SystemLogger.debug(f"API Request {request_id} Payload: {json.dumps(payload_log)}")
+            SystemLogger.debug(f"API Request {request_id} Socket Path: {self.socket_path}")
         
         for attempt in range(self.max_retries):
+            start_time = time.time() if self.advanced_logging else None
+            connector = None
+            
             try:
+                if self.advanced_logging:
+                    SystemLogger.debug(f"API Request {request_id} Attempt {attempt+1}/{self.max_retries}: "
+                                      f"Connecting to socket {self.socket_path}")
+                
                 connector = UnixConnector(path=self.socket_path)
                 async with aiohttp.ClientSession(connector=connector) as session:
                     url = f"http://localhost/{endpoint.lstrip('/')}"
+                    
+                    if self.advanced_logging:
+                        SystemLogger.debug(f"API Request {request_id} Sending to URL: {url}")
+                    
+                    timeout = aiohttp.ClientTimeout(total=30) if self.advanced_logging else None
+                    
+                    # Make the actual request
                     async with session.request(
                         method,
                         url,
                         headers=headers,
-                        json=payload
+                        json=payload,
+                        timeout=timeout  # Only set timeout if advanced logging enabled
                     ) as response:
+                        elapsed_time = time.time() - start_time if self.advanced_logging else 0
+                        
+                        # Get full response text regardless of status
+                        response_text = await response.text()
+                        
+                        # Try to parse as JSON if possible
+                        try:
+                            response_data = json.loads(response_text)
+                            is_json = True
+                        except json.JSONDecodeError:
+                            response_data = response_text
+                            is_json = False
+                        
+                        # Log response basics (always)
+                        log_prefix = f"API Response{' ' + request_id if request_id else ''} ({self.service_name}): "
+                        basic_log = f"Status: {response.status}"
+                        if self.advanced_logging:
+                            basic_log += f", Time: {elapsed_time:.2f}s"
+                        SystemLogger.info(log_prefix + basic_log)
+                        
                         if response.status == 200:
+                            # Success case - standard logging
                             SystemLogger.log_api_request(
                                 self.service_name, 
                                 endpoint,
                                 response.status
                             )
-                            return await response.json()
+                            
+                            # Additional success details for advanced logging
+                            if self.advanced_logging:
+                                SystemLogger.debug(f"API Response {request_id} Success: "
+                                                 f"Content type: {response.content_type}, "
+                                                 f"Content length: {response.content_length}")
+                                
+                                if is_json:
+                                    summary = self._summarize_response(response_data)
+                                    SystemLogger.debug(f"API Response {request_id} Data summary: {summary}")
+                            
+                            return response_data if is_json else {"text": response_text}
                         
-                        error_text = await response.text()
+                        # Error case - standard error logging
+                        error_log = f"API Error{' ' + request_id if request_id else ''} ({self.service_name}): "
+                        error_log += f"Endpoint: {endpoint}, Status: {response.status}"
+                        SystemLogger.error(error_log)
+                        
+                        # Advanced error details if enabled
+                        if self.advanced_logging:
+                            SystemLogger.error(f"API Error {request_id} Headers: {dict(response.headers)}")
+                            
+                            # Log full response content on error
+                            error_content = f"Full response: {response_text[:5000]}"
+                            if len(response_text) > 5000:
+                                error_content += f" ... (truncated, total length: {len(response_text)})"
+                            SystemLogger.error(f"API Error {request_id} Response: {error_content}")
+                        
+                        # Standard error logging for system logger
                         SystemLogger.log_api_request(
                             self.service_name,
                             endpoint,
                             response.status,
-                            error_text
+                            error_text=response_text[:1000]  # Truncate very long errors
                         )
                         
                         if response.status >= 500:
+                            retry_msg = f"Server error: {response.status}"
                             SystemLogger.log_api_retry(
                                 self.service_name,
                                 attempt + 1,
                                 self.max_retries,
-                                f"Server error"
+                                retry_msg
                             )
-                            await asyncio.sleep(0.2)  # 200ms backoff
+                            
+                            # Add backoff with jitter for retries
+                            backoff_time = 0.2 * (1.5 ** attempt) + (random.random() * 0.1)
+                            
+                            if self.advanced_logging:
+                                SystemLogger.debug(f"API Request {request_id} Retry backoff: {backoff_time:.2f}s")
+                                
+                            await asyncio.sleep(backoff_time)
                             continue
                             
-                        raise Exception(f"Unix socket error: Status {response.status}")
+                        raise Exception(f"Unix socket error: Status {response.status}, Response: {response_text[:200]}")
                         
+            except asyncio.TimeoutError as te:
+                if self.advanced_logging:
+                    elapsed_time = time.time() - start_time
+                    SystemLogger.error(f"API Timeout {request_id} ({self.service_name}): "
+                                     f"Attempt {attempt+1}/{self.max_retries}, "
+                                     f"Elapsed time: {elapsed_time:.2f}s")
+                else:
+                    SystemLogger.error(f"API Timeout ({self.service_name}): "
+                                     f"Attempt {attempt+1}/{self.max_retries}")
+                
+                if attempt < self.max_retries - 1:
+                    backoff_time = 0.2 * (1.5 ** attempt) + (random.random() * 0.1)
+                    await asyncio.sleep(backoff_time)
+                    continue
+                    
+                raise
+                
             except Exception as e:
+                # Standard exception logging
+                exc_type = type(e).__name__
+                retry_msg = f"{exc_type}: {str(e)}"
+                
+                if self.advanced_logging:
+                    elapsed_time = time.time() - start_time
+                    exc_tb = traceback.format_exc()
+                    
+                    SystemLogger.error(f"API Exception {request_id} ({self.service_name}): "
+                                     f"Type: {exc_type}, Message: {str(e)}, "
+                                     f"Attempt: {attempt+1}/{self.max_retries}, "
+                                     f"Elapsed time: {elapsed_time:.2f}s")
+                    SystemLogger.debug(f"API Exception {request_id} Traceback: {exc_tb}")
+                else:
+                    SystemLogger.error(f"API Exception ({self.service_name}): "
+                                     f"Type: {exc_type}, Message: {str(e)}, "
+                                     f"Attempt: {attempt+1}/{self.max_retries}")
+                
                 SystemLogger.log_api_retry(
                     self.service_name,
                     attempt + 1, 
                     self.max_retries,
-                    str(e)
+                    retry_msg
                 )
-                await asyncio.sleep(0.2)  # 200ms backoff
-                if attempt == self.max_retries - 1:
-                    raise
+                
+                if attempt < self.max_retries - 1:
+                    backoff_time = 0.2 * (1.5 ** attempt) + (random.random() * 0.1)
+                    await asyncio.sleep(backoff_time)
+                    continue
+                    
+                # On final attempt, re-raise with detailed error
+                raise Exception(f"Unix socket error after {self.max_retries} attempts: {exc_type}: {str(e)}")
+            
+            finally:
+                # Ensure connector is closed properly
+                if connector and hasattr(connector, 'close'):
+                    connector.close()
+
+    def _summarize_response(self, response_data):
+        """Create a short summary of response data for logging"""
+        if not isinstance(response_data, dict):
+            return f"Non-dict response: {type(response_data).__name__}"
+            
+        summary = {}
+        
+        # Include basic response structure
+        if "choices" in response_data:
+            choices = response_data["choices"]
+            summary["choices_count"] = len(choices)
+            
+            if choices and "message" in choices[0]:
+                message = choices[0]["message"]
+                if "content" in message:
+                    content = message["content"]
+                    summary["content_length"] = len(content)
+                    summary["content_preview"] = content[:50] + "..." if len(content) > 50 else content
+        
+        # Include any top-level metadata fields that might be useful
+        for key in ["model", "id", "created", "usage"]:
+            if key in response_data:
+                summary[key] = response_data[key]
+                
+        return json.dumps(summary)
 
 
 class Chapter2Client(BaseAPIClient):
@@ -565,6 +732,7 @@ class Chapter2Client(BaseAPIClient):
         self.is_unix = platform.system() != "Windows"
         self.socket_path = socket_path or Config.get_chapter2_socket_path()
         self.http_port = http_port or Config.get_chapter2_http_port()
+        self.advanced_logging = Config.get_advanced_c2_logging()
         
         # Initialize base class with HTTP configuration first
         super().__init__(
@@ -577,8 +745,12 @@ class Chapter2Client(BaseAPIClient):
         self.use_unix = self.is_unix and os.path.exists(self.socket_path)
         if self.use_unix:
             self.unix_client = UnixSocketClient(self.socket_path, "Chapter2")
+            if self.advanced_logging:
+                SystemLogger.info(f"Chapter2Client initialized with Unix socket: {self.socket_path}")
         else:
             self.unix_client = None
+            if self.advanced_logging:
+                SystemLogger.info(f"Chapter2Client initialized with HTTP: localhost:{self.http_port}")
     
     def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
         """Get headers for HTTP requests"""
@@ -601,34 +773,111 @@ class Chapter2Client(BaseAPIClient):
         **kwargs
     ) -> Union[Dict[str, Any], str]:
         """Route completion request to appropriate client."""
+        request_id = str(uuid.uuid4())[:8] if self.advanced_logging else ""
+        
         # Add name: system for user messages
         formatted_messages = [
             {**msg, "name": "system"} if msg.get("role") == "user" else msg 
             for msg in messages
         ]
         
-        if self.use_unix:
-            response = await self.unix_client._make_request(
-                "v1/chat/completions",
-                payload={
-                    "model": model,
-                    "messages": formatted_messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
+        # Basic request logging - always done
+        log_prefix = f"Completion Request{' ' + request_id if request_id else ''}: "
+        basic_info = f"Model: {model}, Messages: {len(formatted_messages)}"
+        
+        if self.advanced_logging:
+            basic_info += f", Temperature: {temperature}, Max Tokens: {max_tokens}, Using Unix: {self.use_unix}"
+        
+        SystemLogger.info(log_prefix + basic_info)
+        
+        # Detailed message logging - only if advanced logging is enabled
+        if self.advanced_logging:
+            msg_count = len(formatted_messages)
+            if msg_count > 0:
+                first_msg = formatted_messages[0]
+                first_content = first_msg.get("content", "")
+                SystemLogger.debug(f"Completion Request {request_id} First message: "
+                                 f"Role: {first_msg.get('role')}, "
+                                 f"Content: {first_content[:100]}...")
+                
+                if msg_count > 1:
+                    last_msg = formatted_messages[-1]
+                    last_content = last_msg.get("content", "")
+                    SystemLogger.debug(f"Completion Request {request_id} Last message: "
+                                     f"Role: {last_msg.get('role')}, "
+                                     f"Content: {last_content[:100]}...")
+        
+        start_time = time.time() if self.advanced_logging else None
+        
+        try:
+            if self.use_unix:
+                if self.advanced_logging:
+                    SystemLogger.debug(f"Completion Request {request_id}: Using Unix socket client")
+                    
+                response = await self.unix_client._make_request(
+                    "v1/chat/completions",
+                    payload={
+                        "model": model,
+                        "messages": formatted_messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        **kwargs
+                    }
+                )
+            else:
+                if self.advanced_logging:
+                    SystemLogger.debug(f"Completion Request {request_id}: Using HTTP client")
+                    
+                # For HTTP, use the base class _make_request
+                response = await super().create_completion(
+                    messages=formatted_messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    return_content_only=False,  # We'll handle this below
                     **kwargs
-                }
-            )
-            return self._extract_message_content(response) if return_content_only else response
+                )
             
-        # For HTTP, simply use the base class _make_request
-        return await super().create_completion(
-            messages=formatted_messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            return_content_only=return_content_only,
-            **kwargs
-        )
+            # Success logging
+            if self.advanced_logging:
+                elapsed_time = time.time() - start_time
+                
+                if isinstance(response, dict) and "choices" in response:
+                    content = self._extract_message_content(response)
+                    content_preview = content[:100] + "..." if len(content) > 100 else content
+                    
+                    SystemLogger.info(f"Completion Response {request_id}: Success, "
+                                    f"Time: {elapsed_time:.2f}s, "
+                                    f"Content length: {len(content)}")
+                    SystemLogger.debug(f"Completion Response {request_id} Content preview: {content_preview}")
+                    
+                    if "usage" in response:
+                        usage = response["usage"]
+                        SystemLogger.debug(f"Completion Response {request_id} Usage: {usage}")
+            else:
+                SystemLogger.info("Completion Response: Success")
+            
+            # Return appropriate format
+            if return_content_only:
+                return self._extract_message_content(response)
+            return response
+            
+        except Exception as e:
+            # Error logging
+            exc_type = type(e).__name__
+            
+            if self.advanced_logging:
+                elapsed_time = time.time() - start_time
+                exc_tb = traceback.format_exc()
+                
+                SystemLogger.error(f"Completion Error {request_id}: Type: {exc_type}, "
+                                 f"Message: {str(e)}, Time: {elapsed_time:.2f}s")
+                SystemLogger.debug(f"Completion Error {request_id} Traceback: {exc_tb}")
+            else:
+                SystemLogger.error(f"Completion Error: Type: {exc_type}, Message: {str(e)}")
+            
+            # Re-raise the exception
+            raise
 
 
 class APIManager:

@@ -945,17 +945,16 @@ class NotesEnvironment(BaseEnvironment):
         
         try:
             cursor.execute("""
-                SELECT notes.*, GROUP_CONCAT(t.name) as tag_list, rank
+                SELECT notes.*, GROUP_CONCAT(t.name) as tag_list, notes_fts.rank as search_rank
                 FROM notes_fts
                 JOIN notes ON notes_fts.rowid = notes.rowid
                 LEFT JOIN note_tags nt ON notes.id = nt.note_id
-                LEFT JOIN tags t ON nt.tag_id = t.id,
-                (SELECT rank FROM notes_fts WHERE notes_fts MATCH ? ORDER BY rank) ranks
+                LEFT JOIN tags t ON nt.tag_id = t.id
                 WHERE notes_fts MATCH ?
                 GROUP BY notes.id
-                ORDER BY rank
+                ORDER BY search_rank
                 LIMIT ?
-            """, (query, query, limit))
+            """, (query, limit))
             
             notes = cursor.fetchall()
             

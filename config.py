@@ -185,6 +185,11 @@ class Config:
     @classmethod
     def get_log_prompts(cls) -> bool:
         return os.getenv("LOG_PROMPTS", "False").lower() in ("true", "1", "yes")
+    
+    @staticmethod
+    def get_advanced_c2_logging():
+        """Return whether advanced Chapter2 logging is enabled"""
+        return os.environ.get('ADVANCED_C2_LOGGING', 'False').lower() in ('true', '1', 'yes')
 
     DISCORD_BOT_URL = "http://localhost:5518"
 
