@@ -619,7 +619,7 @@ class UnixSocketClient(BaseAPIClient):
                             self.service_name,
                             endpoint,
                             response.status,
-                            error_text=response_text[:1000]  # Truncate very long errors
+                            error=response_text[:1000]  # Truncate very long errors
                         )
                         
                         if response.status >= 500:
