@@ -213,7 +213,7 @@ class ReflectEnvironment(BaseEnvironment):
                     response = "Recent memories:\n\n" + "\n".join(descriptions)
                     
                     # Suggest relevant follow-ups based on content
-                    suggested = ['reflect query "expand on recent"']
+                    suggested = ['reflect query "any topic"']
                     if len(recent_nodes) == limit:
                         suggested.append(f'reflect recent --limit={limit + 3}')
                     

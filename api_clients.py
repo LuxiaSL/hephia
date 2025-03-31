@@ -631,8 +631,7 @@ class UnixSocketClient(BaseAPIClient):
                                 retry_msg
                             )
                             
-                            # Add backoff with jitter for retries
-                            backoff_time = 0.2 * (1.5 ** attempt) + (random.random() * 0.1)
+                            backoff_time = 0.2 
                             
                             if self.advanced_logging:
                                 SystemLogger.debug(f"API Request {request_id} Retry backoff: {backoff_time:.2f}s")
@@ -653,7 +652,7 @@ class UnixSocketClient(BaseAPIClient):
                                      f"Attempt {attempt+1}/{self.max_retries}")
                 
                 if attempt < self.max_retries - 1:
-                    backoff_time = 0.2 * (1.5 ** attempt) + (random.random() * 0.1)
+                    backoff_time = 0.2 
                     await asyncio.sleep(backoff_time)
                     continue
                     
@@ -686,7 +685,7 @@ class UnixSocketClient(BaseAPIClient):
                 )
                 
                 if attempt < self.max_retries - 1:
-                    backoff_time = 0.2 * (1.5 ** attempt) + (random.random() * 0.1)
+                    backoff_time = 0.2 
                     await asyncio.sleep(backoff_time)
                     continue
                     
