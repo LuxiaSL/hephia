@@ -501,7 +501,7 @@ class ExoProcessorInterface(CognitiveInterface):
             brain_trace.error(
                 error=e,
                 context={
-                    "conversation_length": len(self.conversation_history),
+                    "conversation_length": len(self.conversation_state.to_message_list()),
                     "last_successful": self.last_successful_turn.isoformat() if self.last_successful_turn else None
                 }
             )
