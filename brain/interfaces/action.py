@@ -83,3 +83,6 @@ class ActionInterface(CognitiveInterface):
 
     async def get_relevant_memories(self, metadata=None):
         pass
+
+    async def get_fallback_memory(self, memory_data):
+        pass

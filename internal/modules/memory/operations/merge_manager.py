@@ -2,6 +2,7 @@
 merge_manager.py
 """
 
+import time
 from typing import List, Optional, Dict, Any, Union
 
 from loggers.loggers import MemoryLogger
@@ -245,17 +246,57 @@ class MergeManager:
     async def _handle_reg_cognitive_merge(self, child: CognitiveMemoryNode, parent: CognitiveMemoryNode) -> None:
         """
         Handle a regular cognitive memory merge without conflicts.
+        Distills the child node's content into the parent node, managing memory size
+        and preserving key information from both nodes.
         
         Args:
             child: Node to be merged.
             parent: Node that absorbs the child node.
         """
         self.logger.info(f"[MergeManager] Merging CognitiveMemoryNode {child.node_id} into {parent.node_id}")
+        
+        # Calculate new strength with diminishing returns
         parent.strength += child.strength * 0.5
+        
+        MAX_CONTENT_LENGTH = 2000  # Maximum desired content length
+        available_space = MAX_CONTENT_LENGTH - len(parent.text_content)
+        
+        # If child content needs to be chunked
+        if len(child.text_content) > available_space:
+            # Divide available space into chunks
+            chunk_size = available_space // 3  # Allow for 3 chunks with some buffer
+            
+            # Take beginning, middle and end sections of child content
+            start_chunk = child.text_content[:chunk_size]
+            mid_point = len(child.text_content) // 2
+            mid_chunk = child.text_content[mid_point - chunk_size//2:mid_point + chunk_size//2]
+            end_chunk = child.text_content[-chunk_size:]
+            
+            # Combine with markers
+            child_content = f"{start_chunk}...[condensed]...{mid_chunk}...[condensed]...{end_chunk}"
+        else:
+            child_content = child.text_content
+
+        # Append child content to parent
+        parent.text_content = f"{parent.text_content}\n[Merged Memory]: {child_content}"
+        
+        # Update semantic context with merged information
+        parent.semantic_context.update({
+            f"merged_{child.node_id}": {
+                "timestamp": time.time(),
+                "source_strength": child.strength
+            }
+        })
+        
+        # Mark child as ghosted and set parent reference
         child.ghosted = True
         child.parent_node_id = parent.node_id
+        
+        # Update both nodes in the network
         await self.cognitive_network.update_node(parent)
         await self.cognitive_network.update_node(child)
+        
+        self.logger.info(f"[MergeManager] Successfully merged {child.node_id} into {parent.node_id}")
 
     # -------------------------------------------------------------------------
     # Conflict / Synthesis Handling

@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum
 
 from brain.commands.model import ParsedCommand
+from config import Config
 
 class SourceType(Enum):
     COMMAND = "command"        # ExoProcessor commands
@@ -52,13 +53,14 @@ class MemoryData:
         )
     
 class SignificanceAnalyzer:
-    """Analyzes memory significance across different source types."""
+    """Analyzes memory significance across different source types.
+    This should eventually pull from the memory network metrics as well."""
     
     def __init__(self):
         self.thresholds: Dict[str, float] = {
-            "exo_processor": 0.5,
-            "discord": 0.4,
-            "user": 0.4
+            "exo_processor": Config.MEMORY_SIGNIFICANCE_THRESHOLD,
+            "discord": Config.MEMORY_SIGNIFICANCE_THRESHOLD * 0.8, # more lenient for pieces outside of exo
+            "user": Config.MEMORY_SIGNIFICANCE_THRESHOLD * 0.75
         }
 
     def analyze_significance(self, memory_data: MemoryData) -> bool:

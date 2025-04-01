@@ -44,7 +44,7 @@ class WebEnvironment(BaseEnvironment):
         self.preview_limits = {
             "short": 500,
             "medium": 1000,
-            "full": 5000
+            "full": 50000
         }
 
         self.help_text = """

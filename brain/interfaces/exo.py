@@ -1,5 +1,5 @@
 """
-brain/interfaces/exo_interface.py
+brain/interfaces/exo.py
 
 Implements the ExoProcessor interface for the command-based terminal environment.
 Handles command processing, LLM interactions, and maintenance of cognitive continuity
@@ -240,6 +240,7 @@ class ConversationState(BaseModel):
             assistant_metadata: Optional metadata for assistant message
             user_metadata: Optional metadata for user message
         """
+        BrainLogger.debug(f"Adding exchange: {assistant_content[:25]} | {user_content[:25]}")
         assistant_msg = Message(
             role=MessageRole.ASSISTANT,
             content=assistant_content,
@@ -429,16 +430,17 @@ class ExoProcessorInterface(CognitiveInterface):
                 
                 if error:
                     # cleaning only for when hallucinated context is terribly long
+                    print("error hit")
                     cleaned_response = await self.clean_errored_response(llm_response)
-                    brain_trace.interaction.error(error_msg=error)
-                    error_message = TerminalFormatter.format_error(error)
                     self.conversation_state.add_exchange(
                         assistant_content=cleaned_response,
-                        user_content=error_message,
+                        user_content=error,
                         assistant_metadata={"error": True},
                         user_metadata={"error_message": error}
                     )
-                    return error_message
+                    print('added')
+                    brain_trace.interaction.error(error_msg=error)
+                    return error
                 
                 # Execute command
                 brain_trace.interaction.execute("Executing command")
@@ -600,6 +602,39 @@ Context:
 - Result: {result_message}
 
 Focus on what was meaningful and any changes in understanding or state."""
+    
+    async def get_fallback_memory(self, memory_data: MemoryData) -> Optional[str]:
+        """
+        Generate a fallback memory for the ExoProcessor interface.
+        
+        Args:
+            memory_data: Memory data object containing context and content
+        """
+        try:
+            # Extract core components from memory data
+            command = memory_data.metadata.get('command')
+            response = memory_data.metadata.get('response', '')
+            
+            # Format command input
+            if isinstance(command, ParsedCommand):
+                command_str = command.raw_input
+            elif isinstance(command, dict):
+                command_str = command.get('raw_input', 'Unknown command')
+            else:
+                command_str = 'Unknown command'
+
+            # Create a simple structured memory entry
+            memory_parts = [
+                "Command interaction memory:",
+                f"I issued the command: {command_str}",
+                f"The response was: {response[:250]}..." if len(response) > 250 else f"The response was: {response}"
+            ]
+            
+            return "\n".join(memory_parts)
+            
+        except Exception as e:
+            BrainLogger.error(f"Error generating fallback memory: {e}")
+            return None
 
     async def format_cognitive_context(
         self,
@@ -661,8 +696,8 @@ Focus on what was meaningful and any changes in understanding or state."""
         conversation_text = []
         message_list = self.conversation_state.to_message_list()
 
-        # Skip system message and get recent messages
-        recent_messages = message_list[1:1+pair_count*2]
+        # Skip system message (index 1 onwards) then take last N messages
+        recent_messages = message_list[1:][-pair_count*2:]
 
         for msg in recent_messages:
             role = 'Hephia' if msg['role'] == 'assistant' else 'exo'
@@ -731,7 +766,7 @@ Current state context:
             message_list = self.conversation_state.to_message_list()
             # Skip system message and get recent messages 
             pair_count = min(window_size // 2, len(self.conversation_state.pairs))
-            recent_messages = message_list[1:1+pair_count*2]
+            recent_messages = message_list[1:][-pair_count*2:]
 
             # Format as IRC style logs
             summary_lines = []

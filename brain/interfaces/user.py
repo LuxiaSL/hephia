@@ -173,6 +173,31 @@ Create a concise first-person memory that captures:
 4. My thoughts and reactions
 
 Write from my perspective as a natural conversation memory."""
+    
+    async def get_fallback_memory(self, memory_data: MemoryData) -> Optional[str]:
+        """
+        Generate a fallback memory for user direct conversations when primary memory generation fails.
+        
+        Args:
+            memory_data: Memory data object containing interaction context and content
+        """
+        try:
+            # Extract core components from memory data
+            conversation_data = memory_data.metadata.get('conversation', {})
+            last_user_message = conversation_data.get('last_user_message', 'Unknown message')
+
+            # Create simple structured fallback memory
+            memory_parts = [
+                "Direct user conversation:",
+                f"User said: {last_user_message}",
+                f"I responded: {memory_data.content}"
+            ]
+
+            return "\n".join(memory_parts)
+
+        except Exception as e:
+            BrainLogger.error(f"Error generating user conversation fallback memory: {e}")
+            return None
 
     async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """

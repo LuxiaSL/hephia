@@ -11,6 +11,7 @@ from loggers import BrainLogger
 from event_dispatcher import global_event_dispatcher, Event
 from brain.utils.tracer import brain_trace
 from brain.cognition.notification import Notification, NotificationManager, NotificationInterface
+from brain.cognition.memory.significance import MemoryData
 
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
@@ -48,6 +49,11 @@ class CognitiveInterface(NotificationInterface, ABC):
         Format context specifically for memory formation.
         Uses same context as regular interactions but formatted for memory creation.
         """
+        pass
+
+    @abstractmethod
+    async def get_fallback_memory(self, memory_data: MemoryData) -> Optional[str]:
+        """Get a fallback memory for this interface."""
         pass
     
     @brain_trace

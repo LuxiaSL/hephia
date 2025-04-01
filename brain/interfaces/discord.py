@@ -272,11 +272,11 @@ class DiscordInterface(CognitiveInterface):
                     date = timestamp.split('T')[0]
                     time = timestamp.split('T')[1][:8]
                     history_entries.append(
-                        f"[{date} {time}] {msg.get('author', 'Unknown')}: {msg.get('content', '')}"
+                        f"[{date} {time}] <{msg.get('author', 'Unknown')}>: {msg.get('content', '')}"
                     )
                 except (KeyError, IndexError, AttributeError):
                     # Fallback for malformed entries
-                    history_entries.append(f"{msg.get('author', 'Unknown')}: {msg.get('content', '')}")
+                    history_entries.append(f"<{msg.get('author', 'Unknown')}>: {msg.get('content', '')}")
             
             history_text = "\n".join(history_entries)
 
@@ -296,6 +296,47 @@ Create a concise first-person memory snippet that captures:
 2. Any relationship developments or insights
 3. Key points of the conversation
 4. Thoughts and reactions"""
+    
+    async def get_fallback_memory(self, memory_data: MemoryData) -> Optional[str]:
+        """
+        Generate a fallback memory for Discord interactions when primary memory generation fails.
+        
+        Args:
+            memory_data: Memory data object containing interaction context and content
+        """
+        try:
+            # Extract core components from memory data
+            message_data = memory_data.metadata.get('message', {})
+            channel_data = memory_data.metadata.get('channel', {})
+            history = memory_data.metadata.get('history', [])[-5:]  
+            
+            # Get channel path
+            channel_path = channel_data.get('path')
+            if not channel_path:
+                channel_name = channel_data.get('name', 'Unknown')
+                guild_name = channel_data.get('guild')
+                channel_path = f"{guild_name}:{channel_name}" if guild_name and guild_name != 'DM' else channel_name
+
+            # Format recent history concisely
+            history_parts = []
+            for msg in history:
+                author = msg.get('author', 'Unknown')
+                content = msg.get('content', '')[:150]  # Trim long messages
+                history_parts.append(f"<{author}>: {content}...")
+
+            # Create structured fallback memory
+            memory_parts = [
+                f"Discord interaction in {channel_path}",
+                f"Conversation with {message_data.get('author', 'Unknown')}:",
+                *history_parts,
+                f"My response: {memory_data.content}"
+            ]
+
+            return "\n".join(memory_parts)
+
+        except Exception as e:
+            BrainLogger.error(f"Error generating Discord fallback memory: {e}")
+            return None
 
     async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """

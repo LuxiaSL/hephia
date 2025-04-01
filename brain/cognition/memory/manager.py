@@ -143,6 +143,7 @@ I'll also include essential context like who was involved or what my objective f
                 brain_trace.memory.success(content_length=len(content))
             else:
                 brain_trace.memory.fail(reason="empty content")
+                content = await interface.get_fallback_memory(memory_data)
                 
             return content
             
