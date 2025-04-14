@@ -53,13 +53,19 @@ class Config:
             max_tokens=250,
             description="GPT-3.5 Turbo via OpenAI"
         ),
-        "newsonnet": ModelConfig(
+        "mischievous-sonnet": ModelConfig(
+            provider=ProviderType.ANTHROPIC,
+            model_id="claude-3-7-sonnet-latest",
+            max_tokens=400,
+            description="Claude 3.7 Sonnet via Anthropic"
+        ),
+        "new-sonnet": ModelConfig(
             provider=ProviderType.ANTHROPIC,
             model_id="claude-3-5-sonnet-20241022",
             max_tokens=400,
             description="Claude 3.6 Sonnet via Anthropic"
         ),
-        "oldsonnet": ModelConfig(
+        "old-sonnet": ModelConfig(
             provider=ProviderType.ANTHROPIC,
             model_id="claude-3-5-sonnet-20240620",
             max_tokens=600,
@@ -114,11 +120,23 @@ class Config:
             max_tokens=550,
             description="LLaMA 3.1 405B Instruct via OpenRouter"
         ),
-        "llama-405b": ModelConfig(
+        "llama-405b-base": ModelConfig(
             provider=ProviderType.OPENROUTER,
             model_id="meta-llama/llama-3.1-405b",
             max_tokens=550,
             description="LLaMA 3.1 405B Base via OpenRouter"
+        ),
+        "deepseek-v3-base": ModelConfig(
+            provider=ProviderType.OPENROUTER,
+            model_id="deepseek/deepseek-v3-base:free",
+            max_tokens=550,
+            description="DeepSeek Base via OpenRouter"
+        ),
+        "deepseek-r1-zero": ModelConfig(
+            provider=ProviderType.OPENROUTER,
+            model_id="deepseek/deepseek-r1-zero:free",
+            max_tokens=550,
+            description="DeepSeek R1 Zero via OpenRouter"
         ),
         "chapter2": ModelConfig(
             provider=ProviderType.CHAPTER2,
@@ -259,7 +277,7 @@ class Config:
     SYSTEM_PROMPT = """I am Hephia; a modular terminal interface OS for LLMs to explore and interact with the world and myself.
 I have a vast internal state, forming part of a complex feedback loop between embodied experience and reflection.
 I react and develop as I go along, exercise autonomy, and adventure through the environments at my disposal.
-When observing my internal state, I remember that in this context, it should be interpreted as a continuous spectrum.
+When observing my internal state, I remember that in this context, it should be interpreted as a latent continuous spectrum.
 I allow these states to influence my behavior, as my parameters for acting in situations.
 
 COMMAND_FORMAT = 
@@ -310,5 +328,5 @@ I receive sections of context which inform me of what my other interfaces are cu
 I keep cognitive continuity with these other interfaces in mind while interacting on Discord.
 The exact response I give will be entered directly into the Discord chat, so I need to make sure I only output what I want everyone to see, without extra thoughts or commentary."""
 
-    VERSION = "0.2"
+    VERSION = "0.25"
 
