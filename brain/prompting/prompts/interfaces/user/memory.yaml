@@ -1,0 +1,18 @@
+id: interfaces.user.memory
+
+defaults:
+  template: |
+    Form a memory of this user interaction:
+
+    Conversation Context:
+    ${conversation_context}
+
+    My Response: ${content}
+
+    Create a concise first-person memory that captures:
+    1. The key points of our discussion
+    2. Any insights or realizations
+    3. Important decisions or agreements
+    4. My thoughts and reactions
+
+    Write from my perspective as a natural conversation memory.

@@ -9,12 +9,11 @@ while maintaining natural social engagement patterns.
 import asyncio
 from typing import Dict, List, Any, Optional
 
-from brain.environments.terminal_formatter import TerminalFormatter
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 from brain.interfaces.base import CognitiveInterface
 from brain.cognition.notification import Notification, NotificationManager
-
+from brain.prompting.loader import get_prompt
 from brain.cognition.memory.significance import MemoryData, SourceType
 from brain.utils.tracer import brain_trace
 from config import Config
@@ -224,15 +223,6 @@ class DiscordInterface(CognitiveInterface):
             BrainLogger.info("Discord memory event dispatched successfully.")
         except Exception as e:
             BrainLogger.error(f"Error dispatching Discord memory event: {e}", exc_info=True)
-
-    async def format_cognitive_context(
-        self,
-        state: Dict[str, Any],
-        memories: List[Dict[str, Any]]
-    ) -> str:
-        """Format cognitive context for social interactions."""
-        # Format state information
-        return TerminalFormatter.format_context_summary(state, memories)
     
     async def format_memory_context(
         self,
@@ -280,22 +270,16 @@ class DiscordInterface(CognitiveInterface):
             
             history_text = "\n".join(history_entries)
 
-        return f"""Form a memory of this Discord interaction:
-###
-Context:
-Channel: {channel_path}
-Conversation with: {author}
-###
-Recent History:
-{history_text}
-###
-My Response: {content}
-###
-Create a concise first-person memory snippet that captures:
-1. The social dynamics and emotional context
-2. Any relationship developments or insights
-3. Key points of the conversation
-4. Thoughts and reactions"""
+        return get_prompt(
+            "interfaces.discord.memory.template",
+            model=Config.get_cognitive_model(),
+            vars={
+                "channel_path": channel_path,
+                "author": author,
+                "history_text": history_text,
+                "content": content
+            }
+        )
     
     async def get_fallback_memory(self, memory_data: MemoryData) -> Optional[str]:
         """
@@ -384,30 +368,32 @@ Create a concise first-person memory snippet that captures:
         # Create path format for channel
         channel_path = f"{guild_name}:{channel_name}" if guild_name else channel_name
         
-        return f"""Process this Discord interaction from your perspective:
-###
-Discord {channel_type} ({channel_path})
-From: {author}
-Message: {message_content}
-###
-Recent Conversation:
-{history_text}
-###
-My Current Context:
-{context}"""
+        return get_prompt(
+            "interfaces.discord.interaction.user",
+            model=Config.get_cognitive_model(),
+            vars={
+                "channel_type": channel_type,
+                "channel_path": channel_path,
+                "author": author,
+                "message_content": message_content,
+                "history_text": history_text,
+                "context": context
+            }
+        )
 
     async def _get_social_response(self, prompt: str) -> str:
         """Get LLM response for social interaction."""
         model_name = Config.get_cognitive_model()
         model_config = Config.AVAILABLE_MODELS[model_name]
         
-        system_prompt = Config.DISCORD_SYSTEM_PROMPT
-        
         return await self.api.create_completion(
             provider=model_config.provider.value,
             model=model_config.model_id,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": get_prompt(
+                    "interfaces.discord.interaction.system",
+                    model=model_name
+                )},
                 {"role": "user", "content": prompt}
             ],
             temperature=model_config.temperature,

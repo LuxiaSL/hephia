@@ -18,6 +18,8 @@ from .model import (
     EnvironmentCommands,
     ParameterType
 )
+from brain.environments.environment_registry import EnvironmentRegistry
+from brain.prompting.loader import get_prompt
 
 class CommandPreprocessor:
     """
@@ -25,7 +27,7 @@ class CommandPreprocessor:
     Handles hallucination detection, command parsing, and basic validation.
     """
     
-    def __init__(self, api_manager: APIManager):
+    def __init__(self, api_manager: APIManager, environment_registry: EnvironmentRegistry):
         self.api = api_manager
         self.error_count = 0
         self.max_errors = 3
@@ -38,6 +40,8 @@ class CommandPreprocessor:
             'decorators': r'(-{3,}|\[.*?\])',
             'system_msg': r'Hephia.*?:',
         }
+
+        self.environment_registry = environment_registry
 
     async def preprocess_command(
         self, 
@@ -541,39 +545,34 @@ class CommandPreprocessor:
         model_name = Config.get_validation_model()
         model_config = Config.AVAILABLE_MODELS[model_name]
         try:
-            # Format available commands for LLM
-            command_help = {}
-            for env_name, env in available_commands.items():
-                command_help[env_name] = {
-                    "description": env.description,
-                    "commands": {
-                        name: {
-                            "description": cmd.description,
-                            "parameters": [p.name for p in cmd.parameters],
-                            "flags": [f.name for f in cmd.flags],
-                            "examples": cmd.examples
-                        }
-                        for name, cmd in env.commands.items()
-                    }
-                }
+            global_help = self.environment_registry.format_global_help()
             
+            sys = get_prompt(
+                "interfaces.exo.preprocessor.system",
+                model=model_name,
+                vars={
+                    "help_text": global_help.message
+                }
+            )
+
+            user = get_prompt(
+                "interfaces.exo.preprocessor.user",
+                model=model_name,
+                vars={
+                    "command_input": command.raw_input,
+                    #"error_message": to be added...
+                }
+            )
+
             result = await self.api.create_completion(
                 messages=[
                     {
                         "role": "system",
-                        "content": f"""You are a command preprocessor for an OS simulator. Your task is to correct invalid commands and provide helpful feedback.
-Available commands: {command_help}
-
-Rules:
-1. If a command is missing its environment prefix (e.g., 'create' instead of 'notes create'), add the correct prefix
-2. If the syntax is incorrect, correct it (e.g., 'notes --"this is an example"' becomes 'notes create "this is an example"')
-3. Return a JSON object with two fields: "command" (the corrected command) and "explanation" (what was fixed)
-4. Keep the command clean, but maintain any necessary information
-5. Make sure parameters and flags match the command definition exactly"""
+                        "content": sys
                     },
                     {
                         "role": "user",
-                        "content": f'Command: "{command.raw_input}"'
+                        "content": user
                     }
                 ],
                 provider=model_config.provider.value,

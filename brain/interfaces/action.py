@@ -75,9 +75,6 @@ class ActionInterface(CognitiveInterface):
     async def process_interaction(self, content):
         pass
 
-    async def format_cognitive_context(self, state, memories):
-        pass
-
     async def format_memory_context(self, content, state, metadata=None):
         pass
 

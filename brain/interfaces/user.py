@@ -8,10 +8,10 @@ proper context and memory formation.
 
 from typing import Dict, List, Any, Optional
 
-from brain.environments.terminal_formatter import TerminalFormatter
 from brain.interfaces.base import CognitiveInterface
 from brain.cognition.notification import Notification, NotificationManager
 from brain.cognition.memory.significance import MemoryData, SourceType
+from brain.prompting.loader import get_prompt
 from brain.utils.tracer import brain_trace
 from config import Config
 from core.state_bridge import StateBridge
@@ -126,17 +126,6 @@ class UserInterface(CognitiveInterface):
         except Exception as e:
             BrainLogger.error(f"Error dispatching direct chat memory event: {e}", exc_info=True)
 
-    async def format_cognitive_context(
-        self,
-        state: Dict[str, Any],
-        memories: List[Dict[str, Any]]
-    ) -> str:
-        """
-        Format cognitive context for command processing.
-        Includes state context and relevant memories.
-        """
-        return TerminalFormatter.format_context_summary(state, memories)
-
     async def format_memory_context(
         self,
         content: Any,
@@ -159,20 +148,14 @@ class UserInterface(CognitiveInterface):
             for msg in conversation[-3:]  # Last 3 messages
         ]) if conversation else "No conversation context"
 
-        return f"""Form a memory of this user interaction:
-
-Conversation Context:
-{conversation_context}
-
-My Response: {content}
-
-Create a concise first-person memory that captures:
-1. The key points of our discussion
-2. Any insights or realizations
-3. Important decisions or agreements
-4. My thoughts and reactions
-
-Write from my perspective as a natural conversation memory."""
+        return get_prompt(
+            "interfaces.user.memory.template",
+            model=Config.get_cognitive_model(),
+            vars={
+                "conversation_context": conversation_context,
+                "content": content
+            }
+        )
     
     async def get_fallback_memory(self, memory_data: MemoryData) -> Optional[str]:
         """
@@ -224,7 +207,10 @@ Write from my perspective as a natural conversation memory."""
             messages = [
                 {
                     "role": "system",
-                    "content": Config.USER_SYSTEM_PROMPT
+                    "content": get_prompt(
+                        "interfaces.user.interaction.system",
+                        model=model_name
+                    )
                 },
                 {
                     "role": "system",

@@ -18,6 +18,7 @@ from brain.core.command_handler import CommandHandler
 from brain.environments.terminal_formatter import TerminalFormatter
 from brain.interfaces.base import CognitiveInterface
 from brain.utils.tracer import brain_trace
+from brain.prompting.loader import get_prompt
 
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
@@ -321,8 +322,8 @@ class ConversationState(BaseModel):
         content_parts = []
         
         for pair in recent_pairs:
-            content_parts.append(f"assistant: {pair.assistant.content}")
-            content_parts.append(f"user: {pair.user.content}")
+            content_parts.append(f"hephia: {pair.assistant.content}")
+            content_parts.append(f"exo: {pair.user.content}")
             
         return "\n".join(content_parts)
     
@@ -375,18 +376,24 @@ class ExoProcessorInterface(CognitiveInterface):
                 return
             except ValueError as e:
                 BrainLogger.error(f"Error restoring brain state: {e}, starting fresh")
-            
+        
+        # first/default run
+        model_name = Config.get_cognitive_model()
         initial_state = await self.state_bridge.get_api_context()
         formatted_state = TerminalFormatter.format_context_summary(initial_state)
         
-        # Create initial welcome message
-        welcome_text = TerminalFormatter.format_welcome()
-        initial_content = f"{welcome_text}\n{formatted_state}"
-        
-        # Create conversation with just system and initial user message
         self.conversation_state = ConversationState.create_initial(
-            system_content=Config.SYSTEM_PROMPT,
-            user_content=initial_content
+            system_content=get_prompt(
+                'interfaces.exo.turn.system',
+                model=model_name
+            ),
+            user_content=get_prompt(
+                'interfaces.exo.welcome.template',
+                model=model_name,
+                vars={
+                    "state_summary": formatted_state
+                }
+            )
         )
 
         # Reset timing trackers
@@ -430,7 +437,6 @@ class ExoProcessorInterface(CognitiveInterface):
                 
                 if error:
                     # cleaning only for when hallucinated context is terribly long
-                    print("error hit")
                     cleaned_response = await self.clean_errored_response(llm_response)
                     self.conversation_state.add_exchange(
                         assistant_content=cleaned_response,
@@ -438,7 +444,6 @@ class ExoProcessorInterface(CognitiveInterface):
                         assistant_metadata={"error": True},
                         user_metadata={"error_message": error}
                     )
-                    print('added')
                     brain_trace.interaction.error(error_msg=error)
                     return error
                 
@@ -449,9 +454,7 @@ class ExoProcessorInterface(CognitiveInterface):
                 # Format response
                 brain_trace.interaction.format("Formatting response")
                 formatted_response = TerminalFormatter.format_command_result(result)
-                BrainLogger.debug(f"Terminal Response: {formatted_response}")
                 final_response = TerminalFormatter.format_notifications(other_updates, formatted_response)
-                BrainLogger.debug(f"Attached updates: {other_updates}")
                 BrainLogger.debug(f"Final Response: {final_response}")
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
@@ -594,14 +597,16 @@ class ExoProcessorInterface(CognitiveInterface):
         else:
             result_message = 'No result'
         
-        return f"""Review this significant interaction and form a clear first person memory:
-
-Context:
-- Command: {command_input}
-- Response: {content}
-- Result: {result_message}
-
-Focus on what was meaningful and any changes in understanding or state."""
+        return get_prompt(
+            'interfaces.exo.memory.template',
+            model=Config.get_cognitive_model(),
+            vars={
+                "command_input": command_input,
+                "content": content,
+                "result_message": result_message
+            }
+        )
+        
     
     async def get_fallback_memory(self, memory_data: MemoryData) -> Optional[str]:
         """
@@ -635,17 +640,6 @@ Focus on what was meaningful and any changes in understanding or state."""
         except Exception as e:
             BrainLogger.error(f"Error generating fallback memory: {e}")
             return None
-
-    async def format_cognitive_context(
-        self,
-        state: Dict[str, Any],
-        memories: List[Dict[str, Any]]
-    ) -> str:
-        """
-        Format cognitive context for command processing.
-        Includes state context and relevant memories.
-        """
-        return TerminalFormatter.format_context_summary(state, memories)
 
     async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
@@ -709,42 +703,36 @@ Focus on what was meaningful and any changes in understanding or state."""
             model_config = Config.AVAILABLE_MODELS[model_name]
             
             # Create summarization prompt
-            system_prompt = """You are maintaining cognitive continuity for an autonomous AI system.
-Your summaries track the ongoing state of mind, decisions, and context.
-Your response will be used to maintain continuity of self across many instances.
-Focus on key decisions, realizations, and state changes.
-Be concise and clear. Think of summarizing the 'current train of thought' ongoing for Hephia.
-The message history you're given is between an LLM (Hephia) and a simulated terminal OS (exo). 
-Maintain first person perspective, as if you were Hephia thinking to itself.
-Return only the summary in autobiographical format as if writing a diary entry. Cite names and key details directly."""
+            sys = get_prompt(
+                'interfaces.exo.summary.system',
+                model=model_name
+            )
 
             # Get current state for context
             current_state = await self.state_bridge.get_api_context()
             state_summary = TerminalFormatter.format_context_summary(current_state)
             
-            user_prompt = f"""Create a concise but complete summary of my current state and context. Include:
-1. Key decisions or actions taken
-2. Important realizations or changes
-3. Current focus or goals
-4. Relevant state info
-
-Current conversation context:
-{chr(10).join(conversation_text)}
-
-Current state context:
-{state_summary}"""
+            user = get_prompt(
+                'interfaces.exo.summary.user',
+                model=model_name,
+                vars={
+                    "conversation_text": chr(10).join(conversation_text),
+                    "state_summary": state_summary
+                }
+            )
 
             summary = await self.api.create_completion(
                 provider=model_config.provider.value,
                 model=model_config.model_id,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "system", "content": sys},
+                    {"role": "user", "content": user}
                 ],
-                temperature=0.4,
-                max_tokens=400,
+                temperature=model_config.temperature,
+                max_tokens=model_config.max_tokens,
                 return_content_only=True
             )
+
         except Exception as e:
             BrainLogger.error(f"Error generating cognitive summary: {e}")
             
@@ -806,7 +794,7 @@ Current state context:
             cognitive_summary = await self.summarize_cognitive_state()
             
             # Update cache
-            self.cached_summary = f"""Current Cognitive State:
+            self.cached_summary = f"""Current Internal Cognitive State:
 {cognitive_summary}
 """
             self.last_summary_time = current_time
@@ -818,20 +806,6 @@ Current state context:
             # Return last cached version if available, otherwise error message
             return (self.cached_summary if self.cached_summary 
                    else "Error generating cognitive summary.")
-
-    def _add_exchange(self, assistant_content: str, user_content: str,
-                 assistant_metadata: Optional[Dict[str, Any]] = None,
-                 user_metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Add a complete exchange to the conversation and trim if needed."""
-        self.conversation_state.add_exchange(
-            assistant_content=assistant_content,
-            user_content=user_content,
-            assistant_metadata=assistant_metadata,
-            user_metadata=user_metadata
-        )
-        
-        max_pairs = (Config.EXO_MAX_MESSAGES - 1) // 2  # -1 for system message, divided by 2 for pairs
-        self.conversation_state.trim_to_size(max_pairs)
 
     async def clean_errored_response(self, response: str) -> str:
         """Clean up the LLM response in case of an error."""

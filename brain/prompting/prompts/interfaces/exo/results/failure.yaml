@@ -1,0 +1,4 @@
+id: interfaces.exo.results.failure
+
+defaults:
+  template: # todo: chunk apart process_interaction and define parts

@@ -79,6 +79,8 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     # Load environment variables
     load_dotenv()
 
+    Config.load_user_models()
+
     if not validate_configuration():
         return
     

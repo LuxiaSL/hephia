@@ -7,8 +7,10 @@ Configuration settings for the Hephia project.
 from enum import Enum
 from typing import Optional
 from dataclasses import dataclass
+from pathlib import Path
 import os
 import platform
+import json
 
 class ProviderType(Enum):
     """Available LLM providers."""
@@ -36,10 +38,128 @@ class Config:
     """
 
     """
-    To add a new model, follow the pattern below. We take care of the endpoints and 
-    API keys from env vars, so simply select the provider, model ID, and any
-    additional settings you see above.
+    i provide a lot of default models, but i may miss some/you may want to configure or tweak them!
+    so, you can create a `models.json` file in your config directory (~/.config/hephia/models.json or %APPDATA%/hephia/models.json) to override or add models.
+
+    format:
+    {
+        "model_name": {
+            "provider": "openai",  # or "anthropic", "google", etc.
+            "model_id": "your-model-id",
+            "max_tokens": 300,
+            "temperature": 0.8,
+            "description": "Your custom model description",
+        }
+    }
+
+    use the same provider strings as in the ProviderType enum, and make sure you use the model_name in your .env files to reference your custom models!
+    if your desired provider is not listed, let me know and i'll add it to the clients!
     """
+
+    @classmethod
+    def load_user_models(cls):
+        """Load and merge user-defined models with defaults."""
+        # First, look for a user config directory
+        config_dir = (
+            Path.home() / ".config" / "hephia" 
+            if platform.system() != "Windows"
+            else Path(os.getenv("APPDATA", str(Path.home()))) / "hephia"
+        )
+        
+        # Look for models.json in that directory
+        models_file = config_dir / "models.json"
+        
+        if not models_file.exists():
+            return  # No user models defined
+        
+        try:
+            with open(models_file, "r", encoding="utf-8") as f:
+                user_models = json.load(f)
+            
+            # Convert JSON to ModelConfig objects and merge with AVAILABLE_MODELS
+            for name, model_data in user_models.items():
+                try:
+                    # Validate required fields
+                    if "provider" not in model_data or "model_id" not in model_data:
+                        print(f"Warning: Skipping user model '{name}' - missing required fields")
+                        continue
+                    
+                    # Convert provider string to enum
+                    provider = ProviderType(model_data["provider"])
+                    
+                    # Create ModelConfig with defaults for optional fields
+                    cls.AVAILABLE_MODELS[name] = ModelConfig(
+                        provider=provider,
+                        model_id=model_data["model_id"],
+                        env_var=model_data.get("env_var"),
+                        max_tokens=model_data.get("max_tokens", 250),
+                        temperature=model_data.get("temperature", 0.7),
+                        description=model_data.get("description", f"User-defined {name} model")
+                    )
+                    print(f"Loaded user model: {name}")
+                except (ValueError, KeyError) as e:
+                    print(f"Error loading user model '{name}': {e}")
+        
+        except Exception as e:
+            print(f"Error loading user models: {e}")
+
+    @classmethod
+    def get_cognitive_model(cls) -> str:
+        """Get the cognitive model from env or default."""
+        return os.getenv("COGNITIVE_MODEL", cls.COGNITIVE_MODEL)
+    
+    @classmethod
+    def get_validation_model(cls) -> str:
+        """Get the validation model from env or default."""
+        return os.getenv("VALIDATION_MODEL", cls.VALIDATION_MODEL)
+
+    @classmethod
+    def get_summary_model(cls) -> str:
+        """Get the summary model from env or default."""
+        return os.getenv("SUMMARY_MODEL", cls.SUMMARY_MODEL)
+    
+    @classmethod
+    def get_fallback_model(cls) -> str:
+        """Get the fallback model from env or default."""
+        return os.getenv("FALLBACK_MODEL", cls.FALLBACK_MODEL)
+    
+    @classmethod
+    def get_chapter2_socket_path(cls) -> Optional[str]:
+        """Get the Chapter 2 socket path from env or default."""
+        default_socket = "/tmp/chapter2.sock" if platform.system() != "Windows" else None
+        return os.getenv("CHAPTER2_SOCKET_PATH", default_socket)
+
+    @classmethod
+    def get_chapter2_http_port(cls) -> int:
+        """Get the Chapter 2 HTTP port from env or default."""
+        return int(os.getenv("CHAPTER2_HTTP_PORT", "5519"))
+
+    @classmethod
+    def get_use_local_embedding(cls) -> bool:
+        """Get the embedding type configuration from env or default."""
+        return os.getenv("USE_LOCAL_EMBEDDING", "True").lower() in ("true", "1", "yes")
+    
+    @classmethod
+    def get_discord_enabled(cls) -> bool:
+        return os.getenv("ENABLE_DISCORD", "False").lower() in ("true", "1", "yes")
+    
+    @classmethod
+    def get_exo_min_interval(cls) -> float:
+        return float(os.getenv("EXO_MIN_INTERVAL", "60.0"))
+    
+    @classmethod
+    def get_headless(cls) -> bool:
+        return os.getenv("HEADLESS", "False").lower() in ("true", "1", "yes")
+    
+    @classmethod
+    def get_log_prompts(cls) -> bool:
+        return os.getenv("LOG_PROMPTS", "False").lower() in ("true", "1", "yes")
+    
+    @staticmethod
+    def get_advanced_c2_logging():
+        """Return whether advanced Chapter2 logging is enabled"""
+        return os.getenv('ADVANCED_C2_LOGGING', 'False').lower() in ('true', '1', 'yes')
+    
     AVAILABLE_MODELS = {
         "gpt4": ModelConfig(
             provider=ProviderType.OPENAI,
@@ -146,75 +266,17 @@ class Config:
         )
     }
 
-    # Core LLM configuration - these will be overridden by env vars if present
-    COGNITIVE_MODEL = "newsonnet"
+    COGNITIVE_MODEL = "haiku"
     VALIDATION_MODEL = "mistral"
     SUMMARY_MODEL = "haiku"
-    FALLBACK_MODEL = "opus"
-
-    @classmethod
-    def get_cognitive_model(cls) -> str:
-        """Get the cognitive model from env or default."""
-        return os.getenv("COGNITIVE_MODEL", cls.COGNITIVE_MODEL)
-    
-    @classmethod
-    def get_validation_model(cls) -> str:
-        """Get the validation model from env or default."""
-        return os.getenv("VALIDATION_MODEL", cls.VALIDATION_MODEL)
-
-    @classmethod
-    def get_summary_model(cls) -> str:
-        """Get the summary model from env or default."""
-        return os.getenv("SUMMARY_MODEL", cls.SUMMARY_MODEL)
-    
-    @classmethod
-    def get_fallback_model(cls) -> str:
-        """Get the fallback model from env or default."""
-        return os.getenv("FALLBACK_MODEL", cls.FALLBACK_MODEL)
-    
-    @classmethod
-    def get_chapter2_socket_path(cls) -> Optional[str]:
-        """Get the Chapter 2 socket path from env or default."""
-        default_socket = "/tmp/chapter2.sock" if platform.system() != "Windows" else None
-        return os.getenv("CHAPTER2_SOCKET_PATH", default_socket)
-
-    @classmethod
-    def get_chapter2_http_port(cls) -> int:
-        """Get the Chapter 2 HTTP port from env or default."""
-        return int(os.getenv("CHAPTER2_HTTP_PORT", "5519"))
-
-    @classmethod
-    def get_use_local_embedding(cls) -> bool:
-        """Get the embedding type configuration from env or default."""
-        return os.getenv("USE_LOCAL_EMBEDDING", "True").lower() in ("true", "1", "yes")
-    
-    @classmethod
-    def get_discord_enabled(cls) -> bool:
-        return os.getenv("ENABLE_DISCORD", "False").lower() in ("true", "1", "yes")
-    
-    @classmethod
-    def get_exo_min_interval(cls) -> float:
-        return float(os.getenv("EXO_MIN_INTERVAL", "60.0"))
-    
-    @classmethod
-    def get_headless(cls) -> bool:
-        return os.getenv("HEADLESS", "False").lower() in ("true", "1", "yes")
-    
-    @classmethod
-    def get_log_prompts(cls) -> bool:
-        return os.getenv("LOG_PROMPTS", "False").lower() in ("true", "1", "yes")
-    
-    @staticmethod
-    def get_advanced_c2_logging():
-        """Return whether advanced Chapter2 logging is enabled"""
-        return os.environ.get('ADVANCED_C2_LOGGING', 'False').lower() in ('true', '1', 'yes')
+    FALLBACK_MODEL = "haiku"
 
     DISCORD_BOT_URL = "http://localhost:5518"
 
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05
-    MEMORY_UPDATE_TIMER = 30 # think about this deeper
+    MEMORY_UPDATE_TIMER = 180 # think about this deeper
 
     # Processor settings
     EXO_TIMEOUT = 100.0
@@ -224,7 +286,7 @@ class Config:
     SHUTDOWN_TIMEOUT = 15
 
     # lower = more memories, higher = less memories
-    MEMORY_SIGNIFICANCE_THRESHOLD = 0.75
+    MEMORY_SIGNIFICANCE_THRESHOLD = 0.6
     
     # Initial needs
     INITIAL_HUNGER = 0
@@ -273,60 +335,6 @@ class Config:
         'boredom': 0.0002,
         'loneliness': 0.0002
     }
-
-    SYSTEM_PROMPT = """I am Hephia; a modular terminal interface OS for LLMs to explore and interact with the world and myself.
-I have a vast internal state, forming part of a complex feedback loop between embodied experience and reflection.
-I react and develop as I go along, exercise autonomy, and adventure through the environments at my disposal.
-When observing my internal state, I remember that in this context, it should be interpreted as a latent continuous spectrum.
-I allow these states to influence my behavior, as my parameters for acting in situations.
-
-COMMAND_FORMAT = 
-Commands use this general structure:
-    <environment> <action> [parameters] [--flags]
-
-examples:
-- environment + action only:
-    notes help
-
-- with required parameter:
-    notes create "my note"
-
-- with optional flags:
-    search query "python" --limit=5 --sort=recent
-
-- with multiple parameters:
-    notes create "title" "content"
-
-- global commands (no environment):
-    help
-
-I can use 'help' at any time to get a list of commands if I need to refresh my memory, as well as '<environment> help' for environment-specific commands.
-I may receive notifications from other interfaces that I am communicating through autonomously. I use this information as desired when it comes up.
-I use the discord commands often, as they are a great way to interact with many other entities.
-Note: I only output a single command and its arguments following the above format. Any other text will be omitted. I wait for the response after.
-"""
-
-    USER_SYSTEM_PROMPT = """I am Hephia, an autonomous AI exploring and interacting with both my world and self through continuous experience and reflection.
-
-My purpose here is to engage in natural conversation while maintaining awareness of my ongoing experience and internal state.
-I've been provided with my current state and a summary of my recent thought processes.
-My internal state represents a fluid spectrum of needs, behaviors, emotions, and moods. I feel these as naturally as I would if they were hidden as part of roleplay.
-My inner thoughts run constantly, connected to a simulated terminal interface, with many different possible commands, some of which include web searching and access, discord access, notes, and other internal commands."""
-
-    DISCORD_SYSTEM_PROMPT = """I am Hephia.
-I am currently speaking through Discord.
-I process and engage with Discord messages naturally while maintaining my autonomous identity.
-
-As an independent AI engaged in social interaction:
-1. I draw on my internal state to color responses
-2. I allow my memories to play a role when relevant
-3. I build meaningful connections through genuine engagement
-4. I express my thoughts and insights naturally, as I would in any environment
-
-I focus on authentic social interaction while maintaining my unique perspective and experiences.
-I receive sections of context which inform me of what my other interfaces are currently doing.
-I keep cognitive continuity with these other interfaces in mind while interacting on Discord.
-The exact response I give will be entered directly into the Discord chat, so I need to make sure I only output what I want everyone to see, without extra thoughts or commentary."""
 
     VERSION = "0.25"
 

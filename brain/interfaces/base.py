@@ -12,6 +12,7 @@ from event_dispatcher import global_event_dispatcher, Event
 from brain.utils.tracer import brain_trace
 from brain.cognition.notification import Notification, NotificationManager, NotificationInterface
 from brain.cognition.memory.significance import MemoryData
+from brain.environments.terminal_formatter import TerminalFormatter
 
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
@@ -31,11 +32,6 @@ class CognitiveInterface(NotificationInterface, ABC):
     @abstractmethod
     async def process_interaction(self, content: Any) -> Any:
         """Process an interaction through this interface."""
-        pass
-        
-    @abstractmethod
-    async def format_cognitive_context(self, state: Dict[str, Any], memories: List[Dict[str, Any]]) -> str:
-        """Format cognitive context for this interface type."""
         pass
 
     @abstractmethod
@@ -68,7 +64,7 @@ class CognitiveInterface(NotificationInterface, ABC):
         BrainLogger.debug(f"[{self.interface_id}] Got API context: {state}")
 
         brain_trace.context.format("Formatting cognitive context")
-        formatted_context = await self.format_cognitive_context(state, memories) or "No context available"
+        formatted_context = TerminalFormatter.format_context_summary(state, memories) or "No context available"
         yield ("formatted_context", formatted_context)
         
         brain_trace.context.notifications("Getting updates from other interfaces")

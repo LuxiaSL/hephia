@@ -12,6 +12,7 @@ import asyncio
 from brain.utils.tracer import brain_trace
 from brain.interfaces.base import CognitiveInterface
 from brain.cognition.memory.significance import SignificanceAnalyzer, MemoryData
+from brain.prompting.loader import get_prompt
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 from api_clients import APIManager
@@ -124,18 +125,18 @@ class MemoryManager:
                 messages=[
                     {
                         "role": "system",
-                        "content": """I am formulating a memory to be persisted and used. 
-I'll keep these incredibly concise, just a couple of sentences at most, like a diary entry.
-I'll try to take note from my perspective, focusing on key actions, decisions, or realizations. 
-I'll also include essential context like who was involved or what my objective felt like."""
+                        "content": get_prompt(
+                            "memory.formation.system",
+                            model=model_name
+                        )
                     },
                     {
                         "role": "user",
                         "content": memory_prompt
                     }
                 ],
-                temperature=0.3,
-                max_tokens=400,
+                temperature=model_config.temperature,
+                max_tokens=model_config.max_tokens,
                 return_content_only=True
             )
 
@@ -232,7 +233,7 @@ I'll also include essential context like who was involved or what my objective f
 
             # Get resolution
             brain_trace.conflict.resolve("Getting resolution")
-            synthesis = await self._get_memory_content(prompt)
+            synthesis = await self._get_conflict_content(prompt)
             
             if synthesis:
                 brain_trace.conflict.dispatch(
@@ -281,54 +282,40 @@ I'll also include essential context like who was involved or what my objective f
             conflict_details.append(f"Emotional conflicts: {conflicts['emotional']}")
         if "state" in conflicts:
             conflict_details.append(f"State conflicts: {conflicts['state']}")
+        
+        return get_prompt(
+            "memory.conflict.user",
+            model=Config.get_cognitive_model(),
+            vars={
+                "content_a": content_a,
+                "content_b": content_b,
+                "conflict_details_text": "\n".join(f"- {detail}" for detail in conflict_details),
+                "semantic_metrics": metrics.get('semantic', {}).get('embedding_similarity', 'N/A'),
+                "emotional_metrics": metrics.get('emotional', {}).get('vector_similarity', 'N/A'),
+                "state_metrics": metrics.get('state', {}).get('overall_consistency', 'N/A')
+            }
+        )
 
-        return f"""We have two memories that conflict in specific ways:
-
-Memory A: {content_a}
-Memory B: {content_b}
-
-Detected Conflicts:
-{chr(10).join(f"- {detail}" for detail in conflict_details)}
-
-Similarity Analysis:
-- Semantic similarity: {metrics.get('semantic', {}).get('embedding_similarity', 'N/A')}
-- Emotional alignment: {metrics.get('emotional', {}).get('vector_similarity', 'N/A')}
-- State consistency: {metrics.get('state', {}).get('overall_consistency', 'N/A')}
-
-Please resolve these specific conflicts and unify the memories into a single coherent memory that:
-1. Addresses the identified contradictions
-2. Preserves the core truth from both memories
-3. Maintains emotional and state consistency
-
-Return only the unified memory text, no extra commentary."""
-
-    async def _get_memory_content(self, prompt: str) -> Optional[str]:
+    async def _get_conflict_content(self, prompt: str) -> Optional[str]:
         """
         Get one-turn LLM completion for memory formation.
-        Uses lightweight model config.
         """
         try:
             model_name = Config.get_summary_model()
             model_config = Config.AVAILABLE_MODELS[model_name]
-            
-            system_prompt = """You are forming memories for an autonomous AI system.
-Focus on creating clear, first-person memories that capture:
-1. Key events and decisions
-2. Emotional context and reactions
-3. Important realizations or changes
-4. Relationship dynamics and social context
-
-Keep memories concise but complete. Write naturally as if forming an autobiographical memory."""
 
             result = await self.api.create_completion(
                 provider=model_config.provider.value,
                 model=model_config.model_id,
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": get_prompt(
+                        "memory.conflict.system",
+                        model=model_name
+                    )},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
-                max_tokens=400,
+                temperature=model_config.temperature,
+                max_tokens=model_config.max_tokens,
                 return_content_only=True
             )
 

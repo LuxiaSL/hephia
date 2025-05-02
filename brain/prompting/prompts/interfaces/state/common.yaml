@@ -1,0 +1,9 @@
+id: state.common
+defaults:
+  divider: "###"
+  internal_header: |
+    Internal State:
+  memory_header: |
+    Relevant Memories:
+  notifications_header: |
+    Cognitive Notifications:

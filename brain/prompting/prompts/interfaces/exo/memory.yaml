@@ -1,0 +1,12 @@
+id: interfaces.exo.memory
+
+defaults:
+  template: |
+    Review this significant interaction and form a clear first person memory:
+
+    Context:
+    - Command: ${command_input}
+    - Response: ${content}
+    - Result: ${result_message}
+
+    Focus on what was meaningful and any changes in understanding or state.

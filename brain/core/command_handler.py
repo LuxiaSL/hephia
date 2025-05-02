@@ -32,7 +32,7 @@ class CommandHandler:
         self.api = api_manager
         self.environment_registry = environment_registry
         self.state_bridge = state_bridge
-        self.command_preprocessor = CommandPreprocessor(self.api)
+        self.command_preprocessor = CommandPreprocessor(self.api, environment_registry)
         self.last_environment = None
 
     async def preprocess_command(

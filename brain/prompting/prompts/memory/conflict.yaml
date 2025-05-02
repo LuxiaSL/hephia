@@ -1,0 +1,23 @@
+id: memory.conflict
+
+defaults:
+  sections:
+    system: |
+      I am identifying a conflict in my memories that requires an advanced resolution.
+      I'll keep this concise, focusing on the key points of divergence, each of their most salient parts, and their resultant synthesis.
+      I'll analyze these memories, seeing why and how they diverge, and then unify them into a greater and coherent whole.
+    user: |
+      Two memories that conflict in specific ways:
+
+      Memory A: ${content_a}
+      Memory B: ${content_b}
+
+      Detected Conflicts:
+      ${conflict_details_text}
+
+      Similarity Analysis:
+      - Semantic similarity: ${semantic_metrics}
+      - Emotional alignment: ${emotional_metrics}
+      - State consistency: ${state_metrics}
+
+      I will unify the memories into a single coherent memory that addresses the identified contradictions & preserves the core truth from both memories.

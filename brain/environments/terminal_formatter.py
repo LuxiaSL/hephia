@@ -196,7 +196,7 @@ class TerminalFormatter:
         # Group commands by category
         categorized: Dict[str, List[CommandDefinition]] = {}
         for cmd in env.commands.values():
-            category = cmd.category or "General"
+            category = cmd.category or "Global"
             categorized.setdefault(category, []).append(cmd)
 
         # Format each category
