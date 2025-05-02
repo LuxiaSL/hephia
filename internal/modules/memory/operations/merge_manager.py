@@ -6,7 +6,7 @@ import time
 from typing import List, Optional, Dict, Any, Union
 
 from loggers.loggers import MemoryLogger
-
+from event_dispatcher import global_event_dispatcher, Event
 from .synthesis.manager import SynthesisManager  
 from .synthesis.conflict import detect_cognitive_conflict
 from ..nodes.body_node import BodyMemoryNode
@@ -238,7 +238,7 @@ class MergeManager:
         conflict_data = detect_cognitive_conflict(child, parent, {'component_metrics': dissonance_metrics}, self.metrics_orchestrator)
 
         if conflict_data.get('has_conflicts') and self.synthesis_manager:
-            return await self._handle_conflict_merge(child, parent, conflict_data)
+            return await self._handle_conflict_merge(child, parent, conflict_data, dissonance_metrics)
         else:
             await self._handle_reg_cognitive_merge(child, parent)
             return True
@@ -305,7 +305,8 @@ class MergeManager:
         self,
         child: CognitiveMemoryNode, 
         parent: CognitiveMemoryNode,
-        conflict_data: Dict[str, Any]
+        conflict_data: Dict[str, Any],
+        dissonance_metrics: Dict[str, Any]
     ) -> bool:
         """
         Handle cognitive memory conflicts by creating a synthesis node.
@@ -313,34 +314,50 @@ class MergeManager:
         Args:
             child: Node to be merged.
             parent: Node that would absorb the child.
-            conflict_data: Conflict analysis details.
-        
+            conflict_data: Conflict analysis details from detect_cognitive_conflict.
+            dissonance_metrics: The raw metrics calculated between child and parent.
         Returns:
-            True if conflict was successfully resolved.
+            True if conflict was sent for resolution.
         """
         self.logger.info(f"[MergeManager] Conflict merging {child.node_id} -> {parent.node_id}")
         try:
             # Adjust strengths proportionally.
-            child_contrib = child.strength * 0.3
-            parent_contrib = parent.strength * 0.3
-            child.strength -= child_contrib
-            parent.strength -= parent_contrib
+            child_contrib = child.strength * 0.2
+            parent_contrib = parent.strength * 0.2
+            child.strength = max(0.05, child.strength - child_contrib) # Ensure strength doesn't go to zero
+            parent.strength = max(0.05, parent.strength - parent_contrib)
 
             # Update nodes with new strengths.
             await self.cognitive_network.update_node(child)
             await self.cognitive_network.update_node(parent)
 
+             # Extract the detailed list of divergences for the 'conflicts' field
+            key_divergences = conflict_data.get('details', {}).get('key_divergences', [])
+            if not key_divergences:
+                self.logger.warning("[MergeManager] No key divergences found in conflict data.")
+                return False
+            
+            event_payload = {
+                'conflict_data': {
+                    'node_a_id': child.node_id,
+                    'node_b_id': parent.node_id,
+                    'conflicts': key_divergences,  # Pass the list of divergence details
+                    'metrics': dissonance_metrics,  # Pass the original comparison metrics
+                    # Optionally include other analysis data if useful for receiver
+                    'analysis': {
+                         'severity': conflict_data.get('severity'),
+                         'resolution_path': conflict_data.get('resolution_path'),
+                         'requires_reflection': conflict_data.get('requires_reflection')
+                     }
+                }
+            }
             # Create synthesis node via the synthesis manager.
-            synthesis_node_id = await self.synthesis_manager.handle_conflict_synthesis(
-                conflict_data=conflict_data,
-                child=child,
-                parent=parent,
-                synthesis_content="",  # Insert LLM-provided synthesis content as needed.
-                synthesis_embedding=[],  # Insert pre-calculated embedding as needed.
-                additional_strength=(child_contrib + parent_contrib)
-            )
+            global_event_dispatcher.dispatch_event(Event(
+                "cognitive:memory:conflict_detected",
+                event_payload
+            ))
 
-            self.logger.info(f"[MergeManager] Created synthesis node {synthesis_node_id}")
+            self.logger.info(f"[MergeManager] Dispatched conflict synthesis for nodes {child.node_id} and {parent.node_id}")
             return True
         except Exception as e:
             self.logger.error(f"[MergeManager] Conflict merge failed: {e}")

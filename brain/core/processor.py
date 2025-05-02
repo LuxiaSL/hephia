@@ -174,6 +174,11 @@ class CoreProcessor:
             priority=10  # Higher priority for error handling
         )
 
+        global_event_dispatcher.add_listener(
+            "memory:conflict_detected",
+            self._handle_memory_conflict
+        )
+
     async def _load_initial_state(self) -> None:
         """Load initial system state and perform startup validation."""
         try:
@@ -425,6 +430,25 @@ class CoreProcessor:
 
         except Exception as e:
             BrainLogger.error(f"Action request error: {e}")
+            raise e
+        
+    async def _handle_memory_conflict(self, event: Event) -> None:
+        """Handle memory conflicts detected by the MemoryManager."""
+        try:
+            conflict_data = event.data.get('conflict_data')
+            if not conflict_data:
+                BrainLogger.warning("Memory conflict event missing data")
+                return
+
+            self.memory_manager.handle_conflict(
+                node_a_id=conflict_data.get('node_a_id'),
+                node_b_id=conflict_data.get('node_b_id'),
+                conflicts=conflict_data.get('conflicts'),
+                metrics=conflict_data.get('metrics')
+            )
+
+        except Exception as e:
+            BrainLogger.error(f"Memory conflict handling error: {e}")
             raise e
 
     async def prune_conversation(self) -> None:

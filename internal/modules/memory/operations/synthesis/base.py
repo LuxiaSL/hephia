@@ -5,7 +5,7 @@ Defines abstract/base classes for the synthesis system, plus any shared data str
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 class ISynthesisHandler(ABC):
     """
@@ -19,6 +19,8 @@ class ISynthesisHandler(ABC):
         conflict_data: Dict[str, Any],
         child: Any,
         parent: Any,
+        synthesis_content: str,  # From LLM resolution
+        synthesis_embedding: List[float],  # Pre-calculated
         additional_strength: float = 0.0
     ) -> str:
         """

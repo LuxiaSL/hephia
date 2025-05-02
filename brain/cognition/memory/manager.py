@@ -6,7 +6,7 @@ across all interfaces. Operates "subconsciously" - accessing but
 not generating notifications/events.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import asyncio
 
 from brain.utils.tracer import brain_trace
@@ -202,7 +202,7 @@ class MemoryManager:
         self,
         node_a_id: str,
         node_b_id: str,
-        conflicts: Dict[str, Any],
+        conflicts: List[Dict[str, Any]],
         metrics: Dict[str, Any]
     ) -> None:
         """
@@ -271,30 +271,74 @@ class MemoryManager:
         self,
         content_a: str,
         content_b: str,
-        conflicts: Dict[str, Any],
+        conflicts: List[Dict[str, Any]],
         metrics: Dict[str, Any]
     ) -> str:
         """Format prompt for memory conflict resolution."""
         conflict_details = []
-        if "semantic" in conflicts:
-            conflict_details.append(f"Semantic conflicts: {conflicts['semantic']}")
-        if "emotional" in conflicts:
-            conflict_details.append(f"Emotional conflicts: {conflicts['emotional']}")
-        if "state" in conflicts:
-            conflict_details.append(f"State conflicts: {conflicts['state']}")
-        
-        return get_prompt(
-            "memory.conflict.user",
-            model=Config.get_cognitive_model(),
-            vars={
-                "content_a": content_a,
-                "content_b": content_b,
-                "conflict_details_text": "\n".join(f"- {detail}" for detail in conflict_details),
-                "semantic_metrics": metrics.get('semantic', {}).get('embedding_similarity', 'N/A'),
-                "emotional_metrics": metrics.get('emotional', {}).get('vector_similarity', 'N/A'),
-                "state_metrics": metrics.get('state', {}).get('overall_consistency', 'N/A')
-            }
-        )
+        max_state_conflict_severity = 0.0
+        has_state_conflict = False
+
+        if not conflicts:
+            conflict_details.append("No specific conflict details identified, but divergence threshold met.")
+        else:
+            for divergence in conflicts:
+                subtype = divergence.get('subtype', 'Unknown divergence')
+                severity = divergence.get('severity', 0.0)
+                context = divergence.get('context', 'No specific context provided.')
+
+                # Format the string for the prompt
+                details_str = f"Type: {subtype}, Severity: {severity:.2f}"
+                if context != 'No specific context provided.':
+                     details_str += f", Context: {context}"
+                conflict_details.append(details_str)
+
+                # Track state conflicts for the state_metrics placeholder
+                if subtype.startswith('state_'):
+                    has_state_conflict = True
+                    max_state_conflict_severity = max(max_state_conflict_severity, severity)
+        conflict_details_text = "\\n".join(f"- {detail}" for detail in conflict_details)
+
+        # --- Extract metrics for placeholders ---
+        component_metrics = metrics.get('component_metrics', {})
+
+        # Semantic Metrics: Use embedding similarity
+        semantic_metrics_val = component_metrics.get('semantic', {}).get('embedding_similarity', None)
+        semantic_metrics_str = f"{semantic_metrics_val:.2f}" if isinstance(semantic_metrics_val, float) else "N/A"
+
+        # Emotional Metrics: Use vector similarity (lower means less aligned)
+        emotional_metrics_val = component_metrics.get('emotional', {}).get('vector_similarity', None)
+        emotional_metrics_str = f"{emotional_metrics_val:.2f}" if isinstance(emotional_metrics_val, float) else "N/A"
+
+        # State Metrics: Use info derived from state conflicts
+        if has_state_conflict:
+            # Represent consistency as inverse of max conflict severity
+            state_consistency_est = 1.0 - max_state_conflict_severity
+            state_metrics_str = f"~{state_consistency_est:.2f} (estimated based on max conflict)"
+        elif component_metrics.get('state'):
+             # If state metrics exist but no specific conflict listed, assume high consistency
+             state_metrics_str = "~0.90+ (no major state conflicts detected)"
+        else:
+             state_metrics_str = "N/A (State metrics unavailable)"
+
+        # --- Get prompt using extracted variables ---
+        try:
+            prompt_text = get_prompt(
+                "memory.conflict.user",
+                model=Config.get_cognitive_model(), # Or appropriate model for this task
+                vars={
+                    "content_a": content_a,
+                    "content_b": content_b,
+                    "conflict_details_text": conflict_details_text,
+                    "semantic_metrics": semantic_metrics_str,
+                    "emotional_metrics": emotional_metrics_str,
+                    "state_metrics": state_metrics_str
+                }
+            )
+            return prompt_text
+        except Exception as e:
+            BrainLogger.error(f"Failed to format conflict prompt using template: {e}")
+            return f"Memory A: {content_a}\\nMemory B: {content_b}\\nConflicts:\\n{conflict_details_text}\\nMetrics: Sem={semantic_metrics_str}, Emo={emotional_metrics_str}, State={state_metrics_str}\\nPlease synthesize."
 
     async def _get_conflict_content(self, prompt: str) -> Optional[str]:
         """

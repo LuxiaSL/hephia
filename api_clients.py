@@ -549,7 +549,7 @@ class UnixSocketClient(BaseAPIClient):
                     if self.advanced_logging:
                         SystemLogger.debug(f"API Request {request_id} Sending to URL: {url}")
                     
-                    timeout = aiohttp.ClientTimeout(total=30) if self.advanced_logging else None
+                    timeout = aiohttp.ClientTimeout(total=45) if self.advanced_logging else None
                     
                     # Make the actual request
                     async with session.request(
