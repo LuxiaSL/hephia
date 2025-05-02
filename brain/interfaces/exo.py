@@ -434,7 +434,9 @@ class ExoProcessorInterface(CognitiveInterface):
                 # Process command
                 brain_trace.interaction.command("Processing command")
                 command, error = await self.command_handler.preprocess_command(llm_response)
-                
+
+                log_path = "data/logs/exo_conversation.log"
+
                 if error:
                     # cleaning only for when hallucinated context is terribly long
                     cleaned_response = await self.clean_errored_response(llm_response)
@@ -445,6 +447,13 @@ class ExoProcessorInterface(CognitiveInterface):
                         user_metadata={"error_message": error}
                     )
                     brain_trace.interaction.error(error_msg=error)
+                    #log it anyways
+                    try:
+                        with open(log_path, "w", encoding="utf-8") as f:
+                            for message in self.conversation_state.to_message_list():
+                                f.write(f"<{message['role']}> {message['content']}\n")
+                    except Exception as e:
+                        BrainLogger.error(f"Failed to write conversation log: {e}")
                     return error
                 
                 # Execute command
@@ -469,7 +478,6 @@ class ExoProcessorInterface(CognitiveInterface):
                 self.last_successful_turn = datetime.now()
 
                 # Log conversation history to file
-                log_path = "data/logs/exo_conversation.log"
                 try:
                     with open(log_path, "w", encoding="utf-8") as f:
                         for message in self.conversation_state.to_message_list():
