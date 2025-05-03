@@ -724,7 +724,7 @@ class ExoProcessorInterface(CognitiveInterface):
                 'interfaces.exo.summary.user',
                 model=model_name,
                 vars={
-                    "conversation_text": chr(10).join(conversation_text),
+                    "conversation_history": chr(10).join(conversation_text),
                     "state_summary": state_summary
                 }
             )

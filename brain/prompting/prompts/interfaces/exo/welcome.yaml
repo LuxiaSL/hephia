@@ -1,7 +1,6 @@
 id: interfaces.exo.welcome
 
 defaults:
-  template:
+  template: |
     Welcome to Hephia OS
     Type 'help' to see available commands
-    ${state_summary}
