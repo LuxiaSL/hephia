@@ -4,4 +4,3 @@ defaults:
   template:
     Welcome to Hephia OS
     Type 'help' to see available commands
-    ${state_summary}
