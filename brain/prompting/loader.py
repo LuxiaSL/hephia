@@ -45,6 +45,7 @@ home_cfg = (
     if platform.system() != "Windows"
     else pathlib.Path(os.getenv("APPDATA", pathlib.Path.home())) / "hephia" / "prompts"
 )
+EXTRA_PATHS.append(str(home_cfg))
 
 PROMPT_ROOT = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "prompts")
