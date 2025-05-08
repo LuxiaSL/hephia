@@ -477,6 +477,8 @@ class ExoProcessorInterface(CognitiveInterface):
                 )
                 self.last_successful_turn = datetime.now()
 
+                self.conversation_state.trim_to_size(Config.EXO_MAX_MESSAGES)
+
                 # Log conversation history to file
                 try:
                     with open(log_path, "w", encoding="utf-8") as f:

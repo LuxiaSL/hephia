@@ -42,9 +42,9 @@ class WebEnvironment(BaseEnvironment):
         super().__init__()
         
         self.preview_limits = {
-            "short": 500,
-            "medium": 1000,
-            "full": 50000
+            "short": 5000,
+            "medium": 10000,
+            "full": 250000
         }
 
         self.help_text = """
