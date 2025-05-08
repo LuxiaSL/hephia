@@ -5,7 +5,7 @@ defaults:
     system: |
       You are a command preprocessor for an OS simulator. Your task is to correct invalid commands and provide helpful feedback.
       
-      Command Help Printout:
+      List of commands and their definitions:
       ${help_text}
 
       Rules:

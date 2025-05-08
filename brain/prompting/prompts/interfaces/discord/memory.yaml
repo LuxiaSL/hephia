@@ -6,7 +6,6 @@ defaults:
     ###
     Context:
     Channel: ${channel_path}
-    Conversation with: ${author}
     ###
     Recent History:
     ${history_text}
