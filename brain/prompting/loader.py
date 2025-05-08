@@ -55,17 +55,49 @@ SEARCH_PATHS = [p for p in EXTRA_PATHS if os.path.isdir(p)] + [PROMPT_ROOT]
 
 @lru_cache(maxsize=None)
 def _load_yaml(rel_path: str) -> dict:
-    """Load and parse a YAML file by searching multiple prompt directories."""
-    for root in SEARCH_PATHS:
-        full_path = os.path.join(root, rel_path)
-        if os.path.isfile(full_path):
+    """Load and parse a YAML file by searching multiple prompt directories, with proper inheritance."""
+    base_data = {}
+    found = False
+    
+    # First, load the base file from the project's prompts directory
+    base_path = os.path.join(PROMPT_ROOT, rel_path)
+    if os.path.isfile(base_path):
+        try:
+            with open(base_path, "r", encoding="utf-8") as f:
+                base_data = yaml.safe_load(f) or {}
+                found = True
+        except yaml.YAMLError as e:
+            raise RuntimeError(f"Error parsing base YAML {base_path}: {e}")
+    
+    # Then check for overrides in user config paths
+    for root in [p for p in SEARCH_PATHS if p != PROMPT_ROOT]:
+        override_path = os.path.join(root, rel_path)
+        if os.path.isfile(override_path):
             try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    return yaml.safe_load(f) or {}
+                with open(override_path, "r", encoding="utf-8") as f:
+                    override_data = yaml.safe_load(f) or {}
+                    found = True
+                    
+                    # Deep merge the override with base data
+                    if 'models' in override_data:
+                        # Ensure base_data has models dict
+                        if 'models' not in base_data:
+                            base_data['models'] = {}
+                        # Update with override models
+                        base_data['models'].update(override_data['models'])
+                    
+                    # Merge other top-level keys if present
+                    for key in override_data:
+                        if key != 'models':  # We already handled models specially
+                            base_data[key] = override_data[key]
+                            
             except yaml.YAMLError as e:
-                raise RuntimeError(f"Error parsing YAML {full_path}: {e}")
-
-    raise FileNotFoundError(f"Prompt file not found in any path: {rel_path}")
+                raise RuntimeError(f"Error parsing override YAML {override_path}: {e}")
+    
+    if not found:
+        raise FileNotFoundError(f"Prompt file not found in any path: {rel_path}")
+    
+    return base_data
 
 
 def get_prompt(key: str, *, model: str, vars: dict | None = None) -> str:
