@@ -467,6 +467,15 @@ class RealTimeDiscordBot(discord.Client):
         content = message.content.replace(bot_mention, f'@{self.user.name}')
         content = content.replace(bot_mention_bang, f'@{self.user.name}')
         
+        # Check for embeds with text content and append to content
+        if message.embeds:
+            embed_texts = []
+            for embed in message.embeds:
+                if embed.description:
+                    embed_texts.append(embed.description)
+            if embed_texts:
+                content = f"{content}\n[embedded info: {' '.join(embed_texts)}]"
+        
         # Get channel path if available
         channel_id = str(message.channel.id)
         channel_path = self.id_to_channel_name.get(channel_id, f"Unknown:{message.channel.name}")
