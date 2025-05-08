@@ -2,7 +2,7 @@ id: interfaces.exo.memory
 
 defaults:
   template: |
-    Review this significant interaction and form a clear first person memory:
+    Review this significant terminal interaction and form a clear first person memory:
 
     Context:
     - Command: ${command_input}

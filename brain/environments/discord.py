@@ -9,7 +9,9 @@ from brain.commands.model import (
     CommandResult,
     CommandValidationError
 )
+from brain.prompting.loader import get_prompt
 
+from config import Config
 from core.discord_service import DiscordService
 
 class DiscordEnvironment(BaseEnvironment):
@@ -29,12 +31,13 @@ The Discord environment provides a seamless interface to Discord chat functional
 Key Commands:
 • Discovery:
     - discord list_servers     | View all accessible servers and channels
+    - discord list_users "Server:channel"      | List users in a specific channel
 
 • Messages:
     - discord send "Server:channel" "message here"    | Send a message
     - discord history "Server:channel"                | Get channel history
-    - discord show "Server:channel" "#3"             | View specific message
-    - discord reply "Server:channel" "#2" "response" | Reply to a message
+    - discord show "Server:channel" "#3"              | View specific message
+    - discord reply "Server:channel" "#2" "response"  | Reply to a message
 
 Note that the numbers for replies may shift references due to the discrete nature of your interactions.
 ###"""
@@ -46,7 +49,7 @@ Note that the numbers for replies may shift references due to the discrete natur
         self.register_command(
             CommandDefinition(
                 name="list_servers",
-                description="List all Discord servers and channels the bot has access to",
+                description="List all Discord servers and channels",
                 parameters=[],
                 flags=[],
                 examples=[
@@ -56,6 +59,32 @@ Note that the numbers for replies may shift references due to the discrete natur
                 failure_hints={
                     "network": "Unable to reach Discord bot. Is it running?",
                     "auth": "Bot may not have proper permissions"
+                },
+                category="Discovery"
+            )
+        )
+
+        # LIST USERS - List users in a specific channel, autonomous interaction capability
+        self.register_command(
+            CommandDefinition(
+                name="list_users",
+                description="List all users in a specific Discord channel",
+                parameters=[
+                    Parameter(
+                        name="channel",
+                        description="Channel to list users from, in 'Server:channel' format",
+                        type=ParameterType.STRING,
+                        required=True
+                    )
+                ],
+                flags=[],
+                examples=[
+                    'discord list_users "ServerName:channel"',
+                ],
+                related_commands=["list_servers", "send", "history", "show"],
+                failure_hints={
+                    "invalid_channel": "Channel not found. Use list_servers to see available channels",
+                    "permissions": "Bot may not have permission to read this channel"
                 },
                 category="Discovery"
             )
@@ -217,6 +246,8 @@ Note that the numbers for replies may shift references due to the discrete natur
             # Process primary commands first
             if action == "list_servers":
                 return await self._list_servers()
+            elif action == "list_users":
+                return await self._list_users(params)
             elif action == "send":
                 return await self._send(params)
             elif action == "history":
@@ -313,6 +344,79 @@ Note that the numbers for replies may shift references due to the discrete natur
             message="\n".join(lines),
             data=data,
             suggested_commands=suggested_commands[:5]  # Limit to 5 suggestions
+        )
+    
+    async def _list_users(self, params: List[str]) -> CommandResult:
+        """List users in a specific channel."""
+        if len(params) < 1:
+            error = CommandValidationError(
+                message="Channel path required",
+                suggested_fixes=["Provide a channel path in 'Server:channel' format", 
+                                "Use list_servers to see available channels"],
+                related_commands=["discord list_servers"],
+                examples=['discord list_users "ServerName:channel"']
+            )
+            return CommandResult(
+                success=False,
+                message="Channel path is required",
+                suggested_commands=["discord list_servers"],
+                error=error
+            )
+
+        # Get and clean the path
+        raw_path = params[0]
+        path = raw_path.strip()
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
+        
+        data, status_code = await self.discord_service.get_user_list(path)
+        
+        if status_code != 200 or data is None:
+            error = CommandValidationError(
+                message=f"Failed to list users: HTTP {status_code}",
+                suggested_fixes=["Check channel path spelling", "Use list_servers to see available channels"],
+                related_commands=["discord list_servers"],
+                examples=['discord list_users "ServerName:channel"']
+            )
+            return CommandResult(
+                success=False,
+                message=f"Failed to list users in {path}: {status_code}",
+                suggested_commands=["discord list_servers"],
+                error=error,
+                data={"status_code": status_code, "path": path}
+            )
+
+        # Extract users from data
+        recent_users = [f"{user['display_name']}" for user in data.get('recently_active', [])]
+        other_users = [f"{user['display_name']}" for user in data.get('other_members', [])]
+
+        num_recent = len(recent_users)
+        num_other = len(other_users)
+        recent_list_str = ", ".join(recent_users) if recent_users else "None"
+        other_list_str = ", ".join(other_users) if other_users else "None"
+        example_user = recent_users[0] if recent_users else other_users[0] if other_users else "No users found"
+
+        response = get_prompt("interfaces.exo.environments.discord.commands.list_users",
+            model=Config.get_cognitive_model(),
+            vars={
+                "num_recent": num_recent,
+                "num_other": num_other,
+                "recent_list": recent_list_str,
+                "other_list": other_list_str,
+                "example_user": example_user,
+                "channel": path
+            }
+        )
+        
+        return CommandResult(
+            success=True,
+            message=response,
+            data=data,
+            suggested_commands=[
+                f'discord send "{path}" "Hello @{example_user}!"',
+                f'discord history "{path}"',
+                f'discord show "{path}" "latest-from:{example_user}"',
+            ]
         )
     
     async def _send(self, params: List[str]) -> CommandResult:

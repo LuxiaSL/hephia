@@ -777,6 +777,102 @@ async def handle_reply_to_message(request: web.Request) -> web.Response:
     except Exception as e:
         logger.exception(f"[Bot] Failed to send reply: {e}")
         return web.json_response({"error": f"Failed to send reply: {e}"}, status=500)
+    
+async def handle_get_user_list(request: web.Request) -> web.Response:
+    """
+    GET /user-list?path=Server:channel
+    
+    Returns a list of users in two categories:
+    1. Recently active (from message history)
+    2. Present but not recently active
+    Limited to 100 users total.
+    """
+    path = request.query.get("path", "").strip()
+    if not path:
+        return web.json_response({"error": "Path parameter is required"}, status=400)
+    
+    channel_id, found = bot.find_channel_id(path)
+    if not found:
+        return web.json_response(
+            {"error": f"Channel path '{path}' not found"}, 
+            status=404
+        )
+    
+    channel = bot.get_channel(int(channel_id))
+    if not channel or not isinstance(channel, discord.TextChannel):
+        return web.json_response(
+            {"error": "Channel not found or not a text channel"}, 
+            status=404
+        )
+    
+    try:
+        # First get recently active users from history
+        recent_users = set()
+        recent_user_data = []
+        
+        async with asyncio.timeout(30.0):
+            async for message in channel.history(limit=100):
+                if len(recent_users) >= 100:  # Safety limit
+                    break
+                    
+                # Skip if we've already recorded this user
+                author_id = str(message.author.id)
+                if author_id in recent_users:
+                    continue
+                    
+                recent_users.add(author_id)
+                recent_user_data.append({
+                    "id": author_id,
+                    "name": message.author.name,
+                    "display_name": message.author.display_name,
+                    "last_active": message.created_at.isoformat()
+                })
+        
+        # Sort recent users alphabetically by display name
+        recent_user_data.sort(key=lambda x: x["display_name"].lower())
+        
+        # Now get all current members of the channel
+        channel_users = []
+        for member in channel.members:
+            # Skip if user was in recent history
+            if str(member.id) in recent_users:
+                continue
+                
+            channel_users.append({
+                "id": str(member.id),
+                "name": member.name,
+                "display_name": member.display_name,
+                "status": str(member.status) if hasattr(member, "status") else "unknown"
+            })
+            
+            if len(recent_user_data) + len(channel_users) >= 100:
+                break
+        
+        # Sort channel users alphabetically
+        channel_users.sort(key=lambda x: x["display_name"].lower())
+        
+        result = {
+            "path": path,
+            "channel_id": channel_id,
+            "total_users": len(recent_user_data) + len(channel_users),
+            "recently_active": recent_user_data,
+            "other_members": channel_users
+        }
+        
+        return web.json_response(result)
+        
+    except asyncio.TimeoutError:
+        return web.json_response(
+            {"error": "Request timed out while fetching users"}, 
+            status=504
+        )
+    except Exception as e:
+        logger.exception(f"[Bot] Error in get_user_list: {e}")
+        return web.json_response(
+            {"error": f"Failed to fetch user list: {str(e)}"}, 
+            status=500
+        )
+
 
 ###############################################################################
 # SETTING UP THE AIOHTTP WEB SERVER
@@ -793,6 +889,7 @@ def create_app() -> web.Application:
     app.router.add_get("/find-message", handle_find_message)
     app.router.add_get("/enhanced-history", handle_enhanced_history)
     app.router.add_post("/reply-to-message", handle_reply_to_message)
+    app.router.add_get("/user-list", handle_get_user_list)
     app.router.add_get("/health", lambda _: web.Response(text="OK"))
 
     return app

@@ -1,0 +1,12 @@
+id: interfaces.exo.environments.discord.commands
+
+defaults:
+  sections:
+    list_users: |
+      Active Users Report for ${channel}:
+
+      Recently Active (${num_recent}):
+      ${recent_list}
+
+      Other Members (${num_other}):
+      ${other_list}

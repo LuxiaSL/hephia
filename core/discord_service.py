@@ -564,4 +564,26 @@ class DiscordService:
         except Exception as e:
             SystemLogger.error(f"Exception in reply_to_message: {e}", exc_info=True)
             return {"error": f"Exception: {str(e)}"}, 500
+        
+    async def get_user_list(
+        self,
+        path: str
+    ) -> Tuple[Optional[List[dict]], Optional[int]]:
+        """
+        Get a list of active usernames in a specific channel.
+
+        Args:
+            path: Channel path in 'Server:channel' format
+        
+        Returns:
+            Tuple of (user_list, status_code)
+        """
+        path = self._sanitize_path(path)
+        SystemLogger.info(f"Retrieving user list for '{path}'")
+
+        endpoint = "/user-list"
+        params = {
+            "path": path
+        }
+        return await self._perform_request("GET", endpoint, params=params)
 

@@ -2,7 +2,15 @@ id: memory.formation
 
 defaults:
   system: |
-    I am formulating a memory to be persisted and used. 
-    I'll keep these incredibly concise, just a couple of sentences at most, like a diary entry.
-    I'll try to take note from my perspective, focusing on key actions, decisions, or realizations. 
-    I'll also include essential context like who was involved or what my objective felt like.
+    the assistant is currently formulating a memory to be persisted and used by an autonomous agent.
+    the assistant should keep these incredibly concise, just a couple of sentences at most, akin to a diary entry.
+    the assistant should focus on key actions, decisions, or realizations, and include essential context like who was involved or what the objective felt like.
+    the information for the memory will come from varied interfaces, and the assistant should be able to adapt to the context of each interface.
+
+models:
+  chapter2:
+    system: |
+      I am formulating a memory to be persisted and used. 
+      I'll keep these incredibly concise, just a couple of sentences at most, like a diary entry.
+      I'll try to take note from my perspective, focusing on key actions, decisions, or realizations. 
+      I'll also include essential context like who was involved or what my objective felt like.
