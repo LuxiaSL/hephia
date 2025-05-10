@@ -4,7 +4,7 @@ import random
 import sys
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, Dict, List
 import aiohttp
 import discord
 from aiohttp import web
@@ -54,6 +54,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Your bot's token
 HEPHIA_SERVER_URL = "http://localhost:5517"     # Where Hephia server listens
 BOT_HTTP_PORT = 5518                            # Port where *this* bot listens
+MAX_MESSAGE_CACHE_SIZE = 1000
 
 # For convenience, define a global reference to the bot
 bot: "RealTimeDiscordBot" = None
@@ -70,7 +71,8 @@ class RealTimeDiscordBot(discord.Client):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.new_messages = {}
+        self.new_messages: Dict[str, int] = {}
+        self.message_cache: Dict[str, List[discord.Message]] = {}
         self.guild_name_to_id = {}  # Maps guild names to IDs
         self.channel_path_to_id = {}  # Maps "guild:channel" paths to channel IDs
         self.id_to_guild_name = {}  # Maps guild IDs to names
@@ -81,7 +83,7 @@ class RealTimeDiscordBot(discord.Client):
     async def on_ready(self):
         logger.info(f"[Bot] Logged in as {self.user} (id={self.user.id})")
         await self.update_name_mappings()
-        await initialize_message_cache(self)
+        await self.populate_full_message_cache()
 
     async def on_message(self, message: discord.Message):
         """
@@ -91,6 +93,15 @@ class RealTimeDiscordBot(discord.Client):
         """
         channel_id = str(message.channel.id)
         logger.debug(f"[Bot] New message in {message.channel.name} from {message.author.name}")
+
+        if channel_id not in self.message_cache:
+            self.message_cache[channel_id] = []
+            logger.info(f"[Bot] Initialized empty message cache for new/unseen channel {message.channel.name} (ID: {channel_id})")
+
+        self.message_cache[channel_id].insert(0, message)
+
+        if len(self.message_cache[channel_id]) > MAX_MESSAGE_CACHE_SIZE:
+            self.message_cache[channel_id] = self.message_cache[channel_id][:MAX_MESSAGE_CACHE_SIZE]
 
         # 0) Ignore messages that start with a period
         if message.content.startswith('.'):
@@ -108,8 +119,8 @@ class RealTimeDiscordBot(discord.Client):
         # 3) Increment message counter for this channel
         self.new_messages[channel_id] += 1
         
-        # 4) Check if we should notify about high message count (threshold = 100)
-        if self.new_messages[channel_id] >= 100:
+        # 4) Check if we should notify about high message count
+        if self.new_messages[channel_id] >= 50:
             await self.notify_high_message_count(message.channel, self.new_messages[channel_id])
             # Reset counter after notification
             self.new_messages[channel_id] = 0
@@ -138,6 +149,42 @@ class RealTimeDiscordBot(discord.Client):
             await self.forward_to_hephia(message)
             # Reset counter for this channel
             self.new_messages[channel_id] = 0
+
+    async def populate_full_message_cache(self, messages_per_channel: int = MAX_MESSAGE_CACHE_SIZE, concurrency_limit: int = 5):
+        """
+        Pre-fetches message history for all accessible text channels and populates self.message_cache.
+        Uses a semaphore to limit concurrency.
+        """
+        logger.info(f"[Bot] Populating message cache with at most {messages_per_channel} messages per channel")
+        tasks = []
+        sem = asyncio.Semaphore(concurrency_limit)
+
+        async def fetch_and_cache_channel_history(channel: discord.TextChannel):
+            async with sem:
+                try:
+                    logger.debug(f"[Bot] Caching history for {channel.guild.name}/{channel.name} (ID: {channel.id})")
+                    # Fetch newest messages first to easily cap the cache if needed,
+                    # and to align with how on_message will prepend messages.
+                    # messages_per_channel defaults to MAX_MESSAGE_CACHE_SIZE
+                    history_messages = [msg async for msg in channel.history(limit=messages_per_channel, oldest_first=False)]
+
+                    # Store the fetched discord.Message objects directly.
+                    # The list is already newest-first.
+                    self.message_cache[str(channel.id)] = history_messages 
+                    logger.debug(f"[Bot] Cached {len(history_messages)} message objects from {channel.guild.name}/{channel.name}")
+
+                except discord.Forbidden:
+                    logger.warning(f"[Bot] Permission denied: Cannot cache history for {channel.guild.name}/{channel.name} (ID: {channel.id}). Ensure the bot has 'View Channel' and 'Read Message History' permissions.")
+                except Exception as e:
+                    logger.warning(f"[Bot] Failed to cache history for {channel.guild.name}/{channel.name} (ID: {channel.id}): {e}")
+
+        for guild in self.guilds:
+            for channel in guild.channels:
+                tasks.append(asyncio.create_task(fetch_and_cache_channel_history(channel)))
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info(f"[Bot] Finished populating message cache. Total channels cached: {len(self.message_cache)}")
+
 
     async def notify_high_message_count(self, channel: discord.TextChannel, count: int):
         """
@@ -187,53 +234,85 @@ class RealTimeDiscordBot(discord.Client):
         content = content.replace(bot_mention, f'@{self.user.name}')
         content = content.replace(bot_mention_bang, f'@{self.user.name}')
 
-        # Get recent message history for context (last 100 messages)
-        try:
-            logger.debug(f"[Bot] Fetching message history for context before {message.id}")
-            history = []
-            message_count = 0
-            
-            async for hist_msg in message.channel.history(limit=100, before=message):
-                message_count += 1
+        history_message_objects = []
+        source = "cache"
+
+        channel_id_str = str(message.channel.id)
+        desired_history_limit = 1000
+
+        if channel_id_str in self.message_cache:
+            cached_messages = self.message_cache[channel_id_str]
+
+            try:
+                current_message_index_in_cache = -1
+                for i, cached_msg in enumerate(cached_messages):
+                    if cached_msg.id == message.id:
+                        current_message_index_in_cache = i
+                        break
+                
+                if current_message_index_in_cache != -1:
+                    history_message_objects = cached_messages[current_message_index_in_cache + 1 : current_message_index_in_cache + 1 + desired_history_limit]
+                else:
+                    history_message_objects = cached_messages[:desired_history_limit]
+
+                if history_message_objects:
+                    logger.debug(f"[Bot] Using {len(history_message_objects)} messages from cache for Hephia context (before message {message.id}).")
+            except Exception as e:
+                logger.warning(f"[Bot] Error processing cache for Hephia context: {e}. Will attempt live fetch.")
+                history_message_objects = []
+        
+        if not history_message_objects:
+            source = "live_api_fallback"
+            logger.info(f"[Bot] Cache did not provide sufficient context for Hephia for message {message.id}. Fetching live history.")
+            try:
+                live_fetched_list = [msg async for msg in message.channel.history(limit=desired_history_limit, before=message)]
+                history_message_objects = live_fetched_list
+                logger.debug(f"[Bot] Fetched {len(history_message_objects)} live context messages for Hephia.")
+            except discord.Forbidden:
+                logger.warning(f"[Bot] Permission denied fetching live history for Hephia context for channel {message.channel.name}.")
+                history_message_objects = [] # Ensure empty on permission error
+            except Exception as e:
+                logger.warning(f"[Bot] Could not fetch live message history for Hephia context: {e}")
+                history_message_objects = [] # Ensure empty on other errors
+
+        formatted_history_for_hephia = []
+        if history_message_objects:
+            message_objects_oldest_first = list(reversed(history_message_objects))
+
+            async for hist_msg in message_objects_oldest_first:
                 if hasattr(hist_msg.author, 'global_name'):
                     hist_author = hist_msg.author.name
                 else:
                     hist_author = f"{hist_msg.author.display_name}#{hist_msg.author.discriminator}"
-                
-                hist_content = hist_msg.content
+
+                hist_content = hist_msg.content 
                 hist_content = hist_content.replace(bot_mention, f'@{self.user.name}')
                 hist_content = hist_content.replace(bot_mention_bang, f'@{self.user.name}')
                 
-                history.append({
+                formatted_history_for_hephia.append({
                     "id": str(hist_msg.id),
                     "author": hist_author,
                     "author_id": str(hist_msg.author.id),
                     "content": hist_content,
                     "timestamp": str(hist_msg.created_at.isoformat())
                 })
-            
-            logger.debug(f"[Bot] Found {message_count} context messages")
-            history.reverse()  # Oldest first
-        except Exception as e:
-            logger.warning(f"[Bot] Could not fetch message history: {e}")
-            history = []
 
-        channel_id = str(message.channel.id)
-        current_count = self.new_messages.get(channel_id, 0)
-        logger.debug(f"[Bot] Channel {message.channel.name} has {current_count} new messages recorded")
+        current_count = self.new_messages.get(channel_id_str, 0) # Existing logic
+        logger.debug(f"[Bot] Channel {message.channel.name} has {current_count} new messages recorded by counter.")
 
         inbound_data = {
-            "channel_id": channel_id,
+            "channel_id": channel_id_str,
             "message_id": str(message.id),
             "author": author_ref,
             "author_id": str(message.author.id),
             "content": content,
             "timestamp": str(message.created_at.isoformat()),
             "context": {
-                "recent_history": history,
+                "recent_history": formatted_history_for_hephia, # Use the newly processed history
                 "channel_name": message.channel.name,
                 "guild_name": message.guild.name if message.guild else "DM",
-                "message_count": current_count
+                "message_count": current_count, # This is from self.new_messages counter
+                "history_source": source # Added for debugging
             }
         }
 
@@ -241,10 +320,10 @@ class RealTimeDiscordBot(discord.Client):
         try:
             async with self.session.post(url, json=inbound_data) as resp:
                 if resp.status != 200:
-                    err = await resp.text()
-                    logger.warning(f"[Bot] Error forwarding to Hephia: {resp.status} {err}")
+                    err_text = await resp.text()
+                    logger.warning(f"[Bot] Error forwarding to Hephia: {resp.status} {err_text}")
                 else:
-                    logger.info("[Bot] Successfully forwarded message to Hephia")
+                    logger.info(f"[Bot] Successfully forwarded message {message.id} to Hephia (history from {source}).")
         except Exception as e:
             logger.exception(f"[Bot] Failed to forward message to Hephia: {e}")
 
@@ -502,6 +581,7 @@ async def handle_list_guilds_with_channels(request: web.Request) -> web.Response
     """
     GET /guilds-with-channels
     Returns JSON with guild and channel information in hierarchical format.
+    Only includes channels where the bot has both VIEW_CHANNEL and SEND_MESSAGES permissions.
     Useful for displaying available destinations to users.
     """
     result = []
@@ -513,16 +593,25 @@ async def handle_list_guilds_with_channels(request: web.Request) -> web.Response
             "channels": []
         }
         
-        # Only include text channels
+        # Only include text channels where bot has required permissions
         for channel in guild.channels:
             if isinstance(channel, discord.TextChannel):
-                guild_data["channels"].append({
-                    "id": str(channel.id),
-                    "name": channel.name,
-                    "path": f"{guild.name}:{channel.name}"
-                })
+                # Get bot's permissions for this channel
+                bot_member = guild.get_member(bot.user.id)
+                if not bot_member:
+                    continue
+                    
+                channel_perms = channel.permissions_for(bot_member)
+                
+                # Check if bot has permission to both view and send messages
+                if channel_perms.view_channel and channel_perms.send_messages:
+                    guild_data["channels"].append({
+                        "id": str(channel.id),
+                        "name": channel.name,
+                        "path": f"{guild.name}:{channel.name}"
+                    })
         
-        # Only include guilds with at least one text channel
+        # Only include guilds with at least one accessible text channel
         if guild_data["channels"]:
             result.append(guild_data)
     
@@ -637,11 +726,13 @@ async def handle_enhanced_history(request: web.Request) -> web.Response:
     if not path:
         return web.json_response({"error": "Path parameter is required"}, status=400)
     
-    limit_str = request.query.get("limit", "50")
+    limit_str = request.query.get("limit", "100")
     try:
-        limit = min(int(limit_str), 100)  # Some safe cap
+        limit = min(int(limit_str), MAX_MESSAGE_CACHE_SIZE, 1000)  # Some safe cap
+        if limit <= 0:
+            limit = 100
     except ValueError:
-        limit = 50
+        limit = 100
     
     channel_id, found = bot.find_channel_id(path)
     if not found:
@@ -650,58 +741,74 @@ async def handle_enhanced_history(request: web.Request) -> web.Response:
             status=404
         )
     
-    channel = bot.get_channel(int(channel_id))
-    if not channel or not isinstance(channel, discord.TextChannel):
-        return web.json_response(
-            {"error": "Channel not found or not a text channel"}, 
-            status=404
-        )
+    messages_to_format = []
+    source = "cache"
+
+    cached_messages_for_channel = bot.message_cache.get(str(channel_id), [])
+
+    if cached_messages_for_channel:
+        messages_to_format = cached_messages_for_channel[:limit]
+        logger.debug(f"[API /enhanced-history] Served {len(messages_to_format)} messages for {path} from cache.")
+    else:
+        logger.warning(f"[API /enhanced-history] No cached messages for channel {path} (ID: {channel_id}): attempting fallback.")
+        source = "live_api_fallback"
+
+        channel = bot.get_channel(int(channel_id))
+        if not channel or not isinstance(channel, discord.TextChannel):
+            return web.json_response(
+                {"error": f"Channel not found or not a text channel for ID {channel_id} during fallback."},
+                status=404
+            )
+        try:
+            # Fetch messages with a timeout - getting NEWEST messages first
+            history_iter = channel.history(limit=limit, oldest_first=False)
+            async with asyncio.timeout(30.0):
+                messages_to_format = [msg async for msg in history_iter]
+            logger.info(f"[API /enhanced-history] Served {len(messages_to_format)} messages for {path} from live API fallback.")
+        except asyncio.TimeoutError:
+            logger.error(f"[API /enhanced-history] Request timed out during live API fallback for {path}.")
+            return web.json_response(
+                {"error": "Request timed out while fetching history via fallback"}, 
+                status=504 # Gateway Timeout
+            )
+        except discord.Forbidden:
+            logger.error(f"[API /enhanced-history] Permission denied during live API fallback for {path}.")
+            return web.json_response(
+                {"error": "Permission denied while fetching history via fallback"},
+                status=403 # Forbidden
+            )
+        except Exception as e:
+            logger.exception(f"[API /enhanced-history] Error during live API fallback for {path}: {e}")
+            return web.json_response(
+                {"error": f"Failed to fetch history via fallback: {str(e)}"}, 
+                status=500 # Internal Server Error
+            )
     
-    try:
-        # Fetch messages with a timeout - getting NEWEST messages first
-        history_iter = channel.history(limit=limit, oldest_first=False)
-        async with asyncio.timeout(30.0):
-            messages = [msg async for msg in history_iter]
+    # Format messages with indices for easy referencing
+    formatted_messages = []
+    
+    # Process in reverse order to ensure consistent numbering
+    # Message #1 should always be the newest message
+    for i, msg_obj in enumerate(messages_to_format):
+        formatted = bot.format_message_for_display(msg_obj, index=i) 
+        # The 'reference' key (e.g., "#1") is correctly set by format_message_for_display
+        formatted_messages.append(formatted)
         
-        # Format messages with indices for easy referencing
-        formatted_messages = []
+    # IMPORTANT: Now reverse the order for display so oldest are first
+    # This keeps the NUMBERING consistent (#1 = newest) but displays oldest first
+    formatted_messages.reverse()
         
-        # Process in reverse order to ensure consistent numbering
-        # Message #1 should always be the newest message
-        for i, msg in enumerate(messages):
-            # Note: we're numbering from 1, not 0
-            reference_number = i + 1
-            formatted = bot.format_message_for_display(msg, i)
-            
-            # Ensure the reference is set
-            formatted["reference"] = f"#{reference_number}"
-            formatted_messages.append(formatted)
-            
-        # IMPORTANT: Now reverse the order for display so oldest are first
-        # This keeps the NUMBERING consistent (#1 = newest) but displays oldest first
-        formatted_messages.reverse()
-        
-        result = {
-            "path": path,
-            "channel_id": channel_id,  # Keep for backward compatibility
-            "message_count": len(formatted_messages),
-            "messages": formatted_messages,
-            "display_order": "oldest_first",  # Document the display order
-            "numbering": "newest_first"       # Document the numbering scheme
-        }
-        
-        return web.json_response(result)
-    except asyncio.TimeoutError:
-        return web.json_response(
-            {"error": "Request timed out while fetching history"}, 
-            status=504
-        )
-    except Exception as e:
-        logger.exception(f"[Bot] Error in enhanced_history: {e}")
-        return web.json_response(
-            {"error": f"Failed to fetch history: {str(e)}"}, 
-            status=500
-        )
+    result = {
+        "path": path,
+        "channel_id": channel_id,  # Keep for backward compatibility
+        "message_count": len(formatted_messages),
+        "messages": formatted_messages,
+        "display_order": "oldest_first",  # Document the display order
+        "numbering": "newest_first",      # Document the numbering scheme
+        "source": source
+    }
+    
+    return web.json_response(result)
 
 async def handle_reply_to_message(request: web.Request) -> web.Response:
     """
@@ -903,47 +1010,6 @@ def create_app() -> web.Application:
 
     return app
 
-###############################################################################
-# MESSAGE CACHE INITIALIZATION
-###############################################################################
-
-async def initialize_message_cache(
-    bot: RealTimeDiscordBot, 
-    messages_per_channel: int = 100, 
-    concurrency_limit: int = 5
-):
-    """
-    Pre-fetches message history for all accessible text channels.
-    Uses a semaphore to limit concurrency.
-    
-    Args:
-        bot: The Discord bot instance
-        messages_per_channel: How many messages to fetch per channel
-        concurrency_limit: Max concurrent fetches to avoid rate limit issues
-    """
-    logger.info("[Bot] Starting message cache initialization...")
-
-    # Prepare tasks
-    tasks = []
-    sem = asyncio.Semaphore(concurrency_limit)
-
-    async def fetch_channel_history(channel):
-        async with sem:
-            try:
-                logger.debug(f"[Bot] Fetching history for {channel.guild.name}/{channel.name}")
-                messages = [msg async for msg in channel.history(limit=messages_per_channel)]
-                bot.new_messages[str(channel.id)] = len(messages)
-                logger.debug(f"[Bot] Cached {len(messages)} messages from {channel.name}")
-            except Exception as e:
-                logger.warning(f"[Bot] Failed to fetch history for {channel.name}: {e}")
-
-    for guild in bot.guilds:
-        for channel in guild.channels:
-            if isinstance(channel, discord.TextChannel):
-                tasks.append(asyncio.create_task(fetch_channel_history(channel)))
-
-    await asyncio.gather(*tasks)
-    logger.info("[Bot] Message cache initialization complete")
 
 ###############################################################################
 # MAIN ENTRY POINT
