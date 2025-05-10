@@ -15,6 +15,8 @@ from internal.modules.emotions.emotional_processor import EmotionalProcessor
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 from internal.modules.emotions.mood_synthesizer import MoodSynthesizer
 from internal.modules.memory.memory_system import MemorySystemOrchestrator
+
+from config import Config
 from event_dispatcher import global_event_dispatcher, Event
 from loggers import InternalLogger, MemoryLogger  
 
@@ -58,7 +60,7 @@ class Internal:
         instance = cls(api_manager)
 
         # Await async initialization for memory_system
-        instance.memory_system = await MemorySystemOrchestrator.create(api_manager, instance.context)
+        instance.memory_system = await MemorySystemOrchestrator.create(api_manager, instance.context, update_interval=Config.MEMORY_UPDATE_TIMER)
 
         # Now initialize the modules that depend on memory_system and context.
         instance.mood_synthesizer = MoodSynthesizer(instance.context)
