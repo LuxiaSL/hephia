@@ -133,8 +133,8 @@ class RealTimeDiscordBot(discord.Client):
             should_respond = True
         # Contains "hephia" but not a direct mention/reply
         elif "hephia" in message.content.lower():
-            # 85% chance to respond
-            if random.random() < 0.85:
+            # 75% chance to notify
+            if random.random() < 0.75:
                 should_respond = True
         else:
             # Calculate sigmoid-scaled probability based on message count
@@ -184,7 +184,6 @@ class RealTimeDiscordBot(discord.Client):
 
         await asyncio.gather(*tasks, return_exceptions=True)
         logger.info(f"[Bot] Finished populating message cache. Total channels cached: {len(self.message_cache)}")
-
 
     async def notify_high_message_count(self, channel: discord.TextChannel, count: int):
         """
@@ -442,6 +441,9 @@ class RealTimeDiscordBot(discord.Client):
                 logger.error(f"[Bot] Invalid channel type: {type(channel)}")
                 return None
             
+            channel_id_str = str(channel.id)
+            cached_messages = self.message_cache.get(channel_id_str, []) # Newest first
+
             # Sanitize the reference string first
             reference = reference.strip()
             
@@ -452,11 +454,16 @@ class RealTimeDiscordBot(discord.Client):
                 
             logger.debug(f"[Bot] Searching for message with sanitized reference: '{reference}'")
                 
-            # Handle "latest" reference - simplest case
+            # Handle "latest" reference
             if reference.lower() == "latest":
-                async for message in channel.history(limit=1):
-                    return message
-                return None
+                if cached_messages:
+                    logger.debug(f"[Bot find_message_by_reference] 'latest' found in cache for {channel.name}.")
+                    return cached_messages[0]
+                else:
+                    logger.debug(f"[Bot find_message_by_reference] 'latest' not in cache for {channel.name}, falling back to API.")
+                    async for message in channel.history(limit=1):
+                        return message
+                    return None
                 
             # Handle "#N" reference (message number)
             if reference.startswith("#"):
@@ -469,48 +476,69 @@ class RealTimeDiscordBot(discord.Client):
                         logger.warning(f"[Bot] Invalid negative index: {index}")
                         return None
                         
-                    # Fetch messages newest-first, so #1 is the newest message
-                    logger.debug(f"[Bot] Fetching messages newest-first for reference #{index + 1}")
-                    messages = []
-                    
-                    # Use oldest_first=False to get newest messages first
-                    # This ensures #1 is the newest message, #2 is the second newest, etc.
-                    async for msg in channel.history(limit=index + 1 + 5, oldest_first=False):
-                        messages.append(msg)
-                    
-                    logger.debug(f"[Bot] Fetched {len(messages)} messages, need index {index}")
-                    if index < len(messages):
-                        logger.debug(f"[Bot] Found message at index {index} from {messages[index].author.name}")
-                        return messages[index]
+                    if index < len(cached_messages):
+                        logger.debug(f"[Bot find_message_by_reference] '#{index+1}' found in cache for {channel.name}.")
+                        return cached_messages[index]
                     else:
-                        logger.warning(f"[Bot] Index {index} exceeds available message count {len(messages)}")
-                    return None
+                        logger.debug(f"[Bot find_message_by_reference] '#{index+1}' not in cache or index out of bounds ({len(cached_messages)} items) for {channel.name}, falling back to API.")
+                        # Fallback: Fetch enough messages to cover the index
+                        # The original logic fetched index + 1 + 5; we'll stick to that buffer.
+                        # Ensure oldest_first=False to align with cache structure (newest first).
+                        messages_from_api = []
+                        async for msg in channel.history(limit=index + 1 + 5, oldest_first=False):
+                            messages_from_api.append(msg)
+                        
+                        if index < len(messages_from_api):
+                            return messages_from_api[index]
+                        else:
+                            logger.warning(f"[Bot find_message_by_reference] Index {index} exceeds API fetched message count {len(messages_from_api)} for {channel.name}")
+                            return None
                 except ValueError:
                     logger.error(f"[Bot] Invalid message number reference: {reference}")
                     return None
                 
-            # Handle "latest-from:<username>" - already fetches newest first
+            # Handle "latest-from:<username>"
             if reference.lower().startswith("latest-from:"):
                 username = reference[12:].strip().lower()
                 if not username:
                     return None
-                    
+                
+                search_limit = min(len(cached_messages), 100)
+                for i in range(search_limit):
+                    msg = cached_messages[i]
+                    author_name = msg.author.name.lower()
+                    display_name_lower = msg.author.display_name.lower() if hasattr(msg.author, 'display_name') else ""
+                    if (username == author_name or 
+                        username in author_name or
+                        (display_name_lower and username in display_name_lower)):
+                        logger.debug(f"[Bot find_message_by_reference] 'latest-from' found in cache for {channel.name}.")
+                        return msg
+
+                logger.debug(f"[Bot find_message_by_reference] 'latest-from:{username}' not in cache for {channel.name}, falling back to API.")
                 async for message in channel.history(limit=100):
                     author_name = message.author.name.lower()
                     # Try multiple forms of the username
                     if (username == author_name or 
                         username in author_name or
-                        (hasattr(message.author, 'display_name') and 
-                        username in message.author.display_name.lower())):
+                        (display_name_lower and username in display_name_lower)):
+                        logger.debug(f"[Bot find_message_by_reference] 'latest-from:{username}' found in API for {channel.name}.")
                         return message
                 return None
                 
-            # Handle "contains:<text>" - already fetches newest first
+            # Handle "contains:<text>" 
             if reference.lower().startswith("contains:"):
                 search_text = reference[9:].strip().lower()
                 if not search_text:
                     return None
-                    
+                
+                search_limit = min(len(cached_messages), 100)
+                for i in range(search_limit):
+                    msg = cached_messages[i]
+                    if search_text in msg.content.lower():
+                        logger.debug(f"[Bot find_message_by_reference] 'contains:{search_text}' found in cache for {channel.name}.")
+                        return msg
+
+                logger.debug(f"[Bot find_message_by_reference] 'contains:{search_text}' not in cache for {channel.name}, falling back to API.")
                 async for message in channel.history(limit=100):
                     if search_text in message.content.lower():
                         return message
