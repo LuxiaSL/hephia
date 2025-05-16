@@ -11,6 +11,50 @@ from aiohttp import web
 from dotenv import load_dotenv
 from datetime import datetime
 
+################################################################################
+# CUSTOM EXCEPTIONS
+################################################################################
+class ContextWindowError(Exception):
+    """Base class for context window related errors."""
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+class NoContextWindowError(ContextWindowError):
+    """Raised when no context window exists for a channel."""
+    def __init__(self, message: str = "No context window available. Please fetch history first.", status_code: int = 404):
+        super().__init__(message, status_code)
+
+class ContextWindowExpiredError(ContextWindowError):
+    """Raised when a context window has expired."""
+    def __init__(self, message: str = "Context window has expired. Please refresh history.", status_code: int = 400): # 400 or 409 Conflict
+        super().__init__(message, status_code)
+
+class InvalidWindowTimestampError(ContextWindowError):
+    """Raised when a context window has an invalid timestamp."""
+    def __init__(self, message: str = "Corrupted context window timestamp. Window cleared. Please refresh history.", status_code: int = 500):
+        super().__init__(message, status_code)
+
+class ReferenceNotInWindowError(ContextWindowError):
+    """Raised when a #N reference is not found in an active window."""
+    def __init__(self, message: str = "Reference not found in the current context window. Please refresh history.", status_code: int = 404):
+        super().__init__(message, status_code)
+
+class ReferencedMessageNotFound(ContextWindowError):
+    """Raised when the message ID from window is not found in Discord (e.g., deleted)."""
+    def __init__(self, message: str = "Referenced message not found. It might have been deleted.", status_code: int = 404):
+        super().__init__(message, status_code)
+
+class ReferencedMessageForbidden(ContextWindowError):
+    """Raised when bot is forbidden to fetch the message ID from window."""
+    def __init__(self, message: str = "Bot lacks permissions to fetch the referenced message.", status_code: int = 403):
+        super().__init__(message, status_code)
+
+class InvalidMessageIdFormatInWindow(ContextWindowError):
+    """Raised if the message ID in the window is not a valid integer."""
+    def __init__(self, message: str = "Invalid message ID format in context window. Please refresh context.", status_code: int = 500):
+        super().__init__(message, status_code)
+
 ###############################################################################
 # LOGGING SETUP
 ###############################################################################
@@ -55,6 +99,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Your bot's token
 HEPHIA_SERVER_URL = "http://localhost:5517"     # Where Hephia server listens
 BOT_HTTP_PORT = 5518                            # Port where *this* bot listens
 MAX_MESSAGE_CACHE_SIZE = 1000
+CONTEXT_WINDOW_EXPIRY_MINUTES = 5
 
 # For convenience, define a global reference to the bot
 bot: "RealTimeDiscordBot" = None
@@ -79,6 +124,8 @@ class RealTimeDiscordBot(discord.Client):
         self.id_to_channel_name = {}  # Maps channel IDs to names (including guild context)
         # We'll store the persistent aiohttp session reference
         self.session = kwargs.get("session", None)
+
+        self.history_windows: Dict[str, Dict[str, any]] = {} #stores references for use
 
     async def on_ready(self):
         logger.info(f"[Bot] Logged in as {self.user} (id={self.user.id})")
@@ -600,6 +647,123 @@ class RealTimeDiscordBot(discord.Client):
             result["reference"] = f"#{index + 1}"  # 1-based for user display
             
         return result
+    
+    async def periodic_cleanup_history_windows(self):
+        """Periodically cleans up expired history windows."""
+        while True:
+            await asyncio.sleep(60) # Check every minute
+            try:
+                now = datetime.now()
+                expired_channels = []
+                for channel_id, window_data in self.history_windows.items():
+                    # Ensure timestamp is a datetime object
+                    if isinstance(window_data.get("timestamp"), datetime):
+                        age = now - window_data["timestamp"]
+                        if age.total_seconds() > CONTEXT_WINDOW_EXPIRY_MINUTES * 60:
+                            expired_channels.append(channel_id)
+                    else:
+                        # Log or handle cases where timestamp might not be set or is invalid
+                        logger.warning(f"[Bot] Invalid or missing timestamp for history window in channel {channel_id}. Marking for removal.")
+                        expired_channels.append(channel_id) # Mark for removal if timestamp is problematic
+
+                for channel_id in expired_channels:
+                    if channel_id in self.history_windows:
+                        del self.history_windows[channel_id]
+                        logger.info(f"[Bot] Expired history window for channel {channel_id} removed.")
+                
+                if expired_channels:
+                    logger.debug(f"[Bot] History window cleanup complete. Removed {len(expired_channels)} expired windows.")
+                else:
+                    logger.debug(f"[Bot] History window cleanup: No expired windows found.")
+
+            except asyncio.CancelledError:
+                logger.info("[Bot] History window cleanup task cancelled.")
+                break
+            except Exception as e:
+                logger.error(f"[Bot] Error during history window cleanup: {e}", exc_info=True)
+                await asyncio.sleep(120) 
+
+    async def get_message_from_window_reference(
+        self, 
+        channel_id_str: str, 
+        reference_param: str, 
+        channel_obj: discord.TextChannel
+    ) -> discord.Message:
+        """
+        Retrieves a discord.Message object using a "#N" reference from the history window.
+
+        Args:
+            channel_id_str: The ID of the channel.
+            reference_param: The "#N" reference string (e.g., "#1").
+            channel_obj: The discord.TextChannel object.
+
+        Returns:
+            A discord.Message object.
+
+        Raises:
+            NoContextWindowError: If no window exists for the channel.
+            InvalidWindowTimestampError: If the window timestamp is malformed.
+            ContextWindowExpiredError: If the window has expired.
+            ReferenceNotInWindowError: If the reference is not in the (valid) window.
+            InvalidMessageIdFormatInWindow: If the message ID in window is malformed.
+            ReferencedMessageNotFound: If Discord API reports message not found.
+            ReferencedMessageForbidden: If Discord API reports access forbidden.
+            discord.HTTPException: For other Discord API errors during fetch.
+        """
+        if not (reference_param.startswith("#") and reference_param[1:].isdigit()):
+            # This method is specifically for #N references, caller should ensure this.
+            # However, an internal check or different error type could be used.
+            # For now, assume caller validates the format or let it proceed and fail at lookup.
+            logger.warning(f"[get_message_from_window_reference] Called with non-#N reference: {reference_param}")
+            # Or raise ValueError("Reference must be in '#N' format.")
+
+        window_data = self.history_windows.get(channel_id_str)
+        if not window_data:
+            logger.info(f"[Bot] No active context window for channel {channel_id_str} for reference {reference_param}.")
+            raise NoContextWindowError(f"No context window available for channel '{channel_obj.name}'. Please fetch history via /enhanced-history first.")
+
+        window_timestamp = window_data.get("timestamp")
+        if not isinstance(window_timestamp, datetime):
+            logger.warning(f"[Bot] Invalid timestamp in context window for channel {channel_id_str}.")
+            if channel_id_str in self.history_windows: # Check before deleting
+                 del self.history_windows[channel_id_str]
+            raise InvalidWindowTimestampError(f"Corrupted context window timestamp for channel '{channel_obj.name}'. Window cleared. Please refresh history.")
+
+        age = datetime.now() - window_timestamp
+        if age.total_seconds() > CONTEXT_WINDOW_EXPIRY_MINUTES * 60:
+            logger.info(f"[Bot] Context window for channel {channel_id_str} expired for reference {reference_param}.")
+            raise ContextWindowExpiredError(f"Context window for channel '{channel_obj.name}' has expired. Please refresh history.")
+
+        message_id_str = window_data.get("messages", {}).get(reference_param)
+        if not message_id_str:
+            logger.warning(f"[Bot] Reference {reference_param} not found in active window for channel {channel_id_str}.")
+            raise ReferenceNotInWindowError(f"Reference '{reference_param}' not found in the current context window for channel '{channel_obj.name}'. Please refresh history.")
+
+        try:
+            message_id_int = int(message_id_str)
+        except ValueError:
+            logger.error(f"[Bot] Invalid message ID format '{message_id_str}' for reference {reference_param} in window for channel {channel_id_str}.")
+            raise InvalidMessageIdFormatInWindow(f"Invalid message ID format in context window for reference '{reference_param}' in channel '{channel_obj.name}'.")
+
+        # Try to get from local message_cache first
+        if channel_id_str in self.message_cache:
+            for msg_in_cache in self.message_cache[channel_id_str]:
+                if msg_in_cache.id == message_id_int:
+                    logger.info(f"[Bot] Found message {message_id_str} for reference {reference_param} in local message cache.")
+                    return msg_in_cache
+        
+        # If not in local cache, fetch from Discord
+        logger.info(f"[Bot] Message {message_id_str} for reference {reference_param} not in local cache, fetching from API.")
+        try:
+            message_obj = await channel_obj.fetch_message(message_id_int)
+            logger.info(f"[Bot] Successfully fetched message {message_id_str} (ref: {reference_param}) from API.")
+            return message_obj
+        except discord.NotFound:
+            logger.warning(f"[Bot] Message with ID {message_id_str} (from window reference {reference_param}) not found in channel {channel_obj.name}.")
+            raise ReferencedMessageNotFound(f"Message for reference '{reference_param}' (ID: {message_id_str}) not found in channel '{channel_obj.name}'. It might have been deleted.")
+        except discord.Forbidden:
+            logger.warning(f"[Bot] Forbidden to fetch message ID {message_id_str} for reference {reference_param} from channel {channel_obj.name}.")
+            raise ReferencedMessageForbidden(f"Bot lacks permissions to fetch the referenced message (ref: '{reference_param}', ID: {message_id_str}) in channel '{channel_obj.name}'.")
 
 
 ###############################################################################
@@ -701,46 +865,81 @@ async def handle_find_message(request: web.Request) -> web.Response:
     - "latest-from:<username>" - Latest message from a specific user
     - "contains:<text>" - Latest message containing specific text
     - "#<number>" - The Nth message from the recent history
+
+    For "#N" references, uses the context window. Other references use live/cached data.
     
     Returns the message if found.
     """
     path = request.query.get("path", "").strip()
-    reference = request.query.get("reference", "").strip()
+    reference_param = request.query.get("reference", "").strip()
     
-    if not path or not reference:
+    if not path or not reference_param:
         return web.json_response(
             {"error": "Both path and reference parameters are required"}, 
             status=400
         )
     
-    channel_id, found = bot.find_channel_id(path)
+    channel_id_str, found = bot.find_channel_id(path)
     if not found:
         return web.json_response(
             {"error": f"Channel path '{path}' not found"}, 
             status=404
         )
     
-    channel = bot.get_channel(int(channel_id))
-    if not channel or not isinstance(channel, discord.TextChannel):
+    channel_obj = bot.get_channel(int(channel_id_str))
+    if not channel_obj or not isinstance(channel_obj, discord.TextChannel):
         return web.json_response(
             {"error": "Channel not found or not a text channel"}, 
             status=404
         )
     
-    try:
-        message = await bot.find_message_by_reference(channel, reference)
-        if not message:
-            return web.json_response(
-                {"error": f"No message found matching reference '{reference}'"}, 
-                status=404
+    message_to_format: Optional[discord.Message] = None # Type hint
+
+    # Check if it's a #N reference to use the history window
+    if reference_param.startswith("#") and reference_param[1:].isdigit():
+        logger.info(f"[API /find-message] Using window reference: {reference_param} for path {path}")
+        try:
+            message_to_format = await bot.get_message_from_window_reference(
+                channel_id_str, reference_param, channel_obj
             )
-        
-        result = bot.format_message_for_display(message)
-        return web.json_response(result)
-    except Exception as e:
-        logger.exception(f"[Bot] Error in find_message: {e}")
+        except ContextWindowError as e:
+            logger.warning(f"[API /find-message] Context window error for '{reference_param}' in '{path}': {e}")
+            return web.json_response({"error": str(e)}, status=e.status_code)
+        except discord.HTTPException as e: # Catch other potential Discord errors like rate limits
+            logger.exception(f"[API /find-message] Discord HTTP error resolving window reference '{reference_param}' in '{path}': {e}")
+            return web.json_response({"error": f"Discord API error: {e.text if hasattr(e, 'text') else str(e)}"}, status=e.status if hasattr(e, 'status') else 500)
+        except Exception as e: # Catch-all for unexpected errors from the helper
+            logger.exception(f"[API /find-message] Unexpected error resolving window reference '{reference_param}' in '{path}': {e}")
+            return web.json_response({"error": f"Unexpected error: {str(e)}"}, status=500)
+    else:
+        # For other reference types, use the existing find_message_by_reference method
+        logger.info(f"[API /find-message] Using find_message_by_reference for non-#N reference: '{reference_param}' in path {path}")
+        try:
+            message_to_format = await bot.find_message_by_reference(channel_obj, reference_param)
+        except Exception as e: # Catch potential errors from find_message_by_reference
+            logger.exception(f"[API /find-message] Error in bot.find_message_by_reference for '{reference_param}': {e}")
+            return web.json_response(
+                {"error": f"Error processing reference '{reference_param}': {str(e)}"},
+                status=500
+            )
+
+    # Common response part
+    if not message_to_format:
+        # This path should ideally be hit less for #N if errors are returned above,
+        # but could be hit if find_message_by_reference returns None for other types.
+        logger.warning(f"[API /find-message] No message found matching reference '{reference_param}' in channel {path} after all checks.")
         return web.json_response(
-            {"error": f"Error finding message: {str(e)}"}, 
+            {"error": f"No message found matching reference '{reference_param}'"}, 
+            status=404
+        )
+    
+    try:
+        result = bot.format_message_for_display(message_to_format)
+        return web.json_response(result)
+    except Exception as e: # Should not happen if message_to_format is a valid Message object
+        logger.exception(f"[API /find-message] Error formatting message for display: {e}")
+        return web.json_response(
+            {"error": f"Error formatting found message: {str(e)}"}, 
             status=500
         )
 
@@ -814,6 +1013,7 @@ async def handle_enhanced_history(request: web.Request) -> web.Response:
     
     # Format messages with indices for easy referencing
     formatted_messages = []
+    message_references_for_window: Dict[str, str] = {}
     
     # Process in reverse order to ensure consistent numbering
     # Message #1 should always be the newest message
@@ -821,7 +1021,22 @@ async def handle_enhanced_history(request: web.Request) -> web.Response:
         formatted = bot.format_message_for_display(msg_obj, index=i) 
         # The 'reference' key (e.g., "#1") is correctly set by format_message_for_display
         formatted_messages.append(formatted)
-        
+
+        if "reference" in formatted and "id" in formatted:
+            message_references_for_window[formatted["reference"]] = formatted["id"]
+    
+    if message_references_for_window:
+        bot.history_windows[channel_id] = {
+            "timestamp": datetime.now(),
+            "message_references": message_references_for_window
+        }
+    elif not messages_to_format:
+        bot.history_windows[channel_id] = {
+            "timestamp": datetime.now(),
+            "messages": {} # Empty messages
+        }
+        logger.info(f"[API /enhanced-history] History window for channel {channel_id} ({path}) set to empty as no messages were returned.")
+
     # IMPORTANT: Now reverse the order for display so oldest are first
     # This keeps the NUMBERING consistent (#1 = newest) but displays oldest first
     formatted_messages.reverse()
@@ -847,80 +1062,113 @@ async def handle_reply_to_message(request: web.Request) -> web.Response:
         "content": "Reply message"
     }
     
-    Reply to a specific message identified by a user-friendly reference.
+    Reply to a specific message. For "#N" references, uses the context window 
+    via a helper method.
     """
     try:
         data = await request.json()
-        logger.info(f"[Bot] Received reply-to-message request")
+        logger.info(f"[API /reply-to-message] Received reply request.")
+        logger.debug(f"[API /reply-to-message] Reply data: {data}")
     except Exception as e:
         error_msg = f"Invalid JSON payload: {e}"
-        logger.error(f"[Bot] {error_msg}")
+        logger.error(f"[API /reply-to-message] {error_msg}")
         return web.json_response({"error": error_msg}, status=400)
     
     path = data.get("path", "").strip()
-    reference = data.get("reference", "").strip()
+    payload_reference = data.get("reference", "").strip()
     content = data.get("content", "").strip()
     
-    logger.info(f"[Bot] Attempting to reply to message: path='{path}', reference='{reference}'")
-    logger.debug(f"[Bot] Reply content length: {len(content)}")
+    logger.info(f"[API /reply-to-message] Attempting to reply: path='{path}', reference='{payload_reference}'")
+    logger.debug(f"[API /reply-to-message] Reply content length: {len(content)}")
     
-    if not path or not reference or not content:
+    if not path or not payload_reference or not content:
         error_msg = "Path, reference, and content are all required"
-        logger.error(f"[Bot] {error_msg}")
+        logger.error(f"[API /reply-to-message] {error_msg}")
         return web.json_response({"error": error_msg}, status=400)
     
-    # Find the channel
-    channel_id, found = bot.find_channel_id(path)
+    channel_id_str, found = bot.find_channel_id(path)
     if not found:
         error_msg = f"Channel path '{path}' not found"
-        logger.error(f"[Bot] {error_msg}")
+        logger.error(f"[API /reply-to-message] {error_msg}")
         return web.json_response({"error": error_msg}, status=404)
     
-    # Log the resolved channel
-    channel = bot.get_channel(int(channel_id))
-    if not channel:
-        error_msg = f"Channel with ID {channel_id} not found in bot's cache"
-        logger.error(f"[Bot] {error_msg}")
+    channel_obj = bot.get_channel(int(channel_id_str))
+    if not channel_obj:
+        error_msg = f"Channel with ID {channel_id_str} (from path '{path}') not found in bot's cache"
+        logger.error(f"[API /reply-to-message] {error_msg}")
         return web.json_response({"error": error_msg}, status=404)
         
-    logger.info(f"[Bot] Resolved path '{path}' to channel '{channel.name}' in guild '{channel.guild.name if channel.guild else 'DM'}' with ID {channel_id}")
+    logger.info(f"[API /reply-to-message] Resolved path '{path}' to channel '{channel_obj.name}' in guild '{channel_obj.guild.name if channel_obj.guild else 'DM'}' with ID {channel_id_str}")
     
-    if not isinstance(channel, discord.TextChannel):
+    if not isinstance(channel_obj, discord.TextChannel):
         error_msg = "Channel is not a text channel"
-        logger.error(f"[Bot] {error_msg}")
+        logger.error(f"[API /reply-to-message] {error_msg}")
         return web.json_response({"error": error_msg}, status=404)
+
+    referenced_message: Optional[discord.Message] = None
+
+    if payload_reference.startswith("#") and payload_reference[1:].isdigit():
+        logger.info(f"[API /reply-to-message] Using window reference: {payload_reference} for path {path}")
+        try:
+            referenced_message = await bot.get_message_from_window_reference(
+                channel_id_str, payload_reference, channel_obj
+            )
+        except ContextWindowError as e:
+            logger.warning(f"[API /reply-to-message] Context window error for reply reference '{payload_reference}' in '{path}': {e}")
+            return web.json_response({"error": str(e)}, status=e.status_code)
+        except discord.HTTPException as e: 
+            logger.exception(f"[API /reply-to-message] Discord HTTP error resolving window reference for reply '{payload_reference}' in '{path}': {e}")
+            return web.json_response({"error": f"Discord API error: {e.text if hasattr(e, 'text') else str(e)}"}, status=e.status if hasattr(e, 'status') else 500)
+        except Exception as e:
+            logger.exception(f"[API /reply-to-message] Unexpected error resolving window reference for reply '{payload_reference}' in '{path}': {e}")
+            return web.json_response({"error": f"Unexpected error: {str(e)}"}, status=500)
+    else:
+        logger.info(f"[API /reply-to-message] Using legacy find_message_by_reference for non-#N reply reference: '{payload_reference}' in path {path}")
+        try:
+            referenced_message = await bot.find_message_by_reference(channel_obj, payload_reference)
+        except Exception as e:
+            logger.exception(f"[API /reply-to-message] Error in bot.find_message_by_reference for reply reference '{payload_reference}': {e}")
+            return web.json_response(
+                {"error": f"Error processing reply reference '{payload_reference}': {str(e)}"},
+                status=500
+            )
+
+    if not referenced_message:
+        logger.error(f"[API /reply-to-message] No message found matching reference '{payload_reference}' in channel {path} to reply to, after all checks.")
+        return web.json_response(
+            {"error": f"No message found matching reference '{payload_reference}' to reply to."}, 
+            status=404
+        )
     
     try:
-        # Find the message to reply to
-        logger.info(f"[Bot] Finding message with reference: '{reference}'")
-        referenced_message = await bot.find_message_by_reference(channel, reference)
-        if not referenced_message:
-            error_msg = f"No message found matching reference '{reference}'"
-            logger.error(f"[Bot] {error_msg}")
-            return web.json_response({"error": error_msg}, status=404)
+        logger.info(f"[API /reply-to-message] Found message ID {referenced_message.id} from {referenced_message.author.name} to reply to.")
         
-        logger.info(f"[Bot] Found message from {referenced_message.author.name} to reply to")
-        
-        # Discord's message length limit (2000 chars)
         MAX_LENGTH = 2000
         if len(content) > MAX_LENGTH:
-            logger.warning(f"[Bot] Message too long ({len(content)} chars), truncating to {MAX_LENGTH}")
+            logger.warning(f"[API /reply-to-message] Message too long ({len(content)} chars), truncating to {MAX_LENGTH}")
             content = content[:MAX_LENGTH]
         
-        # Send the reply
-        logger.info(f"[Bot] Sending reply to message in {channel.name}")
-        sent_msg = await channel.send(content, reference=referenced_message)
-        logger.info(f"[Bot] Reply sent with ID {sent_msg.id}")
+        logger.info(f"[API /reply-to-message] Sending reply to message in {channel_obj.name}")
+        sent_msg = await channel_obj.send(content, reference=referenced_message)
+        logger.info(f"[API /reply-to-message] Reply sent with ID {sent_msg.id}")
         
-        # Format the reply for response
         result = bot.format_message_for_display(sent_msg)
-        result["replied_to"] = bot.format_message_for_display(referenced_message)
+        replied_to_info = bot.format_message_for_display(referenced_message)
+        replied_to_info.pop("reference", None) 
+        result["replied_to"] = replied_to_info
         result["status"] = "ok"
         
         return web.json_response(result)
+        
+    except discord.Forbidden as e:
+        logger.exception(f"[API /reply-to-message] Permission error when trying to send reply: {e}")
+        return web.json_response({"error": f"Permission error sending reply: {e.text}"}, status=403)
+    except discord.HTTPException as e:
+        logger.exception(f"[API /reply-to-message] HTTP error when trying to send reply: {e}")
+        return web.json_response({"error": f"Network or API error sending reply: {e.text if hasattr(e, 'text') else str(e)}"}, status=e.status if hasattr(e, 'status') else 500)
     except Exception as e:
-        logger.exception(f"[Bot] Failed to send reply: {e}")
-        return web.json_response({"error": f"Failed to send reply: {e}"}, status=500)
+        logger.exception(f"[API /reply-to-message] Failed to send reply: {e}")
+        return web.json_response({"error": f"Failed to send reply: {str(e)}"}, status=500)
     
 async def handle_get_user_list(request: web.Request) -> web.Response:
     """
@@ -1066,7 +1314,8 @@ async def main():
         while True:
             try:
                 await asyncio.sleep(300)  # Update every 5 minutes
-                await bot.update_name_mappings()
+                if bot.is_ready():
+                    await bot.update_name_mappings()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -1075,9 +1324,20 @@ async def main():
 
     mapping_update_task = asyncio.create_task(periodic_mapping_updates())
 
+    history_window_cleanup_task = asyncio.create_task(bot.periodic_cleanup_history_windows())
+
     # 2) Start the Discord bot
     if not DISCORD_TOKEN:
         logger.error("[Bot] DISCORD_BOT_TOKEN is not set. Exiting.")
+        mapping_update_task.cancel()
+        history_window_cleanup_task.cancel()
+        try:
+            await asyncio.gather(mapping_update_task, history_window_cleanup_task, return_exceptions=True)
+        except asyncio.CancelledError:
+            pass
+        await runner.cleanup()
+        if persistent_session and not persistent_session.closed:
+            await persistent_session.close()
         return
 
     try:
@@ -1086,12 +1346,17 @@ async def main():
         logger.info("[Bot] Received KeyboardInterrupt, shutting down...")
     finally:
         logger.info("[Bot] Closing Discord bot connection...")
-        await bot.close()
+        if bot and not bot.is_closed():
+            await bot.close()
 
         logger.info("[Bot] Stopping periodic mapping updates...")
         mapping_update_task.cancel()
+        
+        logger.info("[Bot] Stopping history window cleanup task...")
+        history_window_cleanup_task.cancel()
+
         try:
-            await mapping_update_task
+            await asyncio.gather(mapping_update_task, history_window_cleanup_task, return_exceptions=True)
         except asyncio.CancelledError:
             pass
 

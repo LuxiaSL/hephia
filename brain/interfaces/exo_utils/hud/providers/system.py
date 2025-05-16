@@ -111,7 +111,7 @@ class SystemHudProvider(BaseHudProvider):
 
 
         # 3. Turn Pacing
-        last_turn_time = hud_metadata.get("last_interaction_timestamp")
+        last_turn_time = hud_metadata.get("last_interaction_time")
         expected_interval_seconds = Config.get_exo_min_interval()
         system_vars["system_turn_pacing_expected_seconds_str"] = f"{expected_interval_seconds:.2f}s"
 

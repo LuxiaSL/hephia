@@ -368,7 +368,7 @@ class OpenRouterClient(BaseAPIClient):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://localhost:5517",
+            "HTTP-Referer": "https://github.com/LuxiaSL/hephia",
             "X-Title": "Hephia"
         }
         if extra_headers:

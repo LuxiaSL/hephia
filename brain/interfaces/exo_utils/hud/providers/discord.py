@@ -46,7 +46,7 @@ class DiscordHudProvider(BaseHudProvider):
 
         last_channel_path = hud_metadata.get("last_discord_channel_path")
         if not last_channel_path:
-            discord_vars["discord_error_message"] = "No active channel."
+            discord_vars["discord_error_str"] = "No active channel."
             return discord_vars
 
         discord_vars["discord_channel_path"] = last_channel_path

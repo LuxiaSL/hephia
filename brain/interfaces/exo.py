@@ -73,6 +73,7 @@ class ExoProcessorInterface(CognitiveInterface):
 
                 # reconstruct minimal post-action hud metadata
                 self.hud_metadata["conversation_state_size"] = len(self.conversation_state.pairs) * 2
+                self.hud_metadata["current_interaction_time"] = datetime.now()
                 self.hud_metadata["last_interaction_time"] = datetime.now()
                 BrainLogger.info("Restored conversation state from brain state")
                 return
@@ -98,6 +99,7 @@ class ExoProcessorInterface(CognitiveInterface):
             )
         )
         self.hud_metadata["conversation_state_size"] = len(self.conversation_state.pairs) * 2
+        self.hud_metadata["current_interaction_time"] = datetime.now()
         self.hud_metadata["last_interaction_time"] = datetime.now()
         # Reset timing trackers
         self.last_successful_turn = None
@@ -193,8 +195,7 @@ class ExoProcessorInterface(CognitiveInterface):
                     if command.environment == "discord" and result.data and "discord_channel_path" in result.data:
                         new_path = result.data["discord_channel_path"]
                         if self.hud_metadata.get("last_discord_channel_path") != new_path:
-                            if self.hud_metadata.get("last_discord_channel_path") != new_path:
-                                BrainLogger.info(f"HUD: Discord channel changed to: {new_path}")
+                            BrainLogger.info(f"HUD: Discord channel changed to: {new_path}")
                             self.hud_metadata["last_discord_channel_path"] = new_path
                 
                 self.hud_metadata["conversation_state_size"] = len(self.conversation_state.pairs)
