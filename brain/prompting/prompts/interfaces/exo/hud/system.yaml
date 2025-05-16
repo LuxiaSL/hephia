@@ -5,5 +5,5 @@ defaults:
     ${hud_header_str}
     [${system_day_of_week_str}, ${system_current_date_str} at ${system_current_time_str} (${system_timezone_str})]
     Load: CPU ${system_cpu_load_percent_str} | Mem ${system_memory_usage_percent_str} | Temp ${system_cpu_temp_celsius_str}
-    Turn Pacing: ${system_turn_pacing_status_str} (${system_turn_pacing_actual_seconds_str}} / Expected ${system_turn_pacing_expected_seconds_str})
+    Turn Pacing: ${system_turn_pacing_status_str} (${system_turn_pacing_actual_seconds_str} / Expected ${system_turn_pacing_expected_seconds_str})
     Context Limits: ${system_conversation_fill_percent_str}
