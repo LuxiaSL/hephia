@@ -9,6 +9,8 @@ defaults:
 
     My Response: ${content}
 
+    Extra self data: ${context}
+
     Create a concise first-person memory that captures:
     1. The key points of our discussion
     2. Any insights or realizations

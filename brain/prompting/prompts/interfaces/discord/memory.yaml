@@ -3,15 +3,15 @@ id: interfaces.discord.memory
 defaults:
   template: |
     Form a memory of this Discord interaction:
-    ###
-    Context:
     Channel: ${channel_path}
-    ###
+
     Recent History:
     ${history_text}
-    ###
+
     My Response: ${content}
-    ###
+
+    Extra self data: ${context}
+
     Create a concise first-person memory snippet that captures:
     1. The social dynamics and emotional context
     2. Any relationship developments or insights

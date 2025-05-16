@@ -1,4 +1,4 @@
-# brain/interfaces/exo_utils/hud/providers/base.py
+# brain/interfaces/exo_utils/hud/sections/base.py
 
 from abc import ABC, abstractmethod
 import asyncio
@@ -7,29 +7,29 @@ from typing import Dict, Any
 from brain.prompting.loader import get_prompt # Assuming direct import is fine
 from loggers import BrainLogger # For consistent logging
 
-class BaseHudProvider(ABC):
+class BaseHudSection(ABC):
     """
-    Abstract base class for all HUD data providers.
-    Each provider is responsible for fetching data for its section of the HUD,
+    Abstract base class for all HUD data sections.
+    Each section is responsible for fetching data for its section of the HUD,
     preparing variables for its prompt template, and rendering the template.
     """
 
-    # Cooldown or update interval for this provider (in seconds)
+    # Cooldown or update interval for this section (in seconds)
     # 0 means update every time. Can be overridden by subclasses.
     # This is a placeholder for a more sophisticated update mechanism if needed.
     # For now, we'll assume most update every cycle unless they implement their own check.
     DEFAULT_UPDATE_INTERVAL: float = 0.0 
-    # Timeout for this specific provider's data fetching/rendering.
-    PROVIDER_TIMEOUT_SECONDS: float = 1.0 
+    # Timeout for this specific section's data fetching/rendering.
+    SECTION_TIMEOUT_SECONDS: float = 1.0 
 
     def __init__(self, prompt_key: str, section_name: str = "DefaultSection"):
         """
         Args:
             prompt_key: The key used to retrieve the prompt template (e.g., 'hud.datetime').
-            section_name: A human-readable name for this provider's section (for logging/errors).
+            section_name: A human-readable name for this section's section (for logging/errors).
         """
         if not prompt_key:
-            raise ValueError("Prompt key cannot be empty for a HUD provider.")
+            raise ValueError("Prompt key cannot be empty for a HUD section.")
         self.prompt_key = prompt_key
         self.section_name = section_name
         self._last_update_time: float = 0.0 # For future use with update intervals
@@ -37,7 +37,7 @@ class BaseHudProvider(ABC):
     @abstractmethod
     async def _prepare_prompt_vars(self, hud_metadata: Dict[str, Any]) -> Dict[str, str]:
         """
-        Fetches and prepares the necessary data for this provider's HUD section.
+        Fetches and prepares the necessary data for this section's HUD section.
         This method must be implemented by subclasses.
 
         Args:
@@ -75,14 +75,14 @@ class BaseHudProvider(ABC):
 
         try:
             # Applying timeout to the critical data preparation step
-            async with asyncio.timeout(self.PROVIDER_TIMEOUT_SECONDS):
+            async with asyncio.timeout(self.SECTION_TIMEOUT_SECONDS):
                 prompt_vars = await self._prepare_prompt_vars(hud_metadata)
 
             # Only proceed to render if prompt_vars suggest rendering is needed.
-            # Providers can return a specific key like 'is_active_for_hud': False
+            # sections can return a specific key like 'is_active_for_hud': False
             # or ensure prompt_vars is empty if nothing should be rendered.
             # For now, we assume if prompt_vars is not None/empty, we try to render.
-            if prompt_vars is None: # Provider explicitly decided not to render
+            if prompt_vars is None: # section explicitly decided not to render
                 return ""
 
             # Render the prompt using the prepared variables
@@ -96,7 +96,7 @@ class BaseHudProvider(ABC):
             return rendered_string if rendered_string and rendered_string.strip() else ""
 
         except asyncio.TimeoutError:
-            BrainLogger.warning(f"HUD: Timeout in {self.section_name} provider after {self.PROVIDER_TIMEOUT_SECONDS}s.")
+            BrainLogger.warning(f"HUD: Timeout in {self.section_name} section after {self.SECTION_TIMEOUT_SECONDS}s.")
             return f"[HUD: {self.section_name} - Timeout]"
         except FileNotFoundError as e: # Specifically for prompt file issues
             BrainLogger.error(f"HUD: Prompt file not found for {self.section_name} ({self.prompt_key}): {e}", exc_info=True)
@@ -105,5 +105,5 @@ class BaseHudProvider(ABC):
             BrainLogger.error(f"HUD: Key error rendering prompt for {self.section_name} ({self.prompt_key}): {e}", exc_info=True)
             return fallback_error_string
         except Exception as e:
-            BrainLogger.error(f"HUD: Error in {self.section_name} provider: {e}", exc_info=True)
+            BrainLogger.error(f"HUD: Error in {self.section_name} section: {e}", exc_info=True)
             return fallback_error_string # Generic fallback for other errors

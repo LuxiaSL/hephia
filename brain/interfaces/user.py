@@ -71,7 +71,7 @@ class UserInterface(CognitiveInterface):
 
             await self.announce_cognitive_context([result, content.get('messages', [])], notification)
             
-            await self._dispatch_memory_check(result, content.get('messages', []))
+            await self._dispatch_memory_check(result, content.get('messages', []), context)
 
             return result
             
@@ -82,7 +82,8 @@ class UserInterface(CognitiveInterface):
     async def _dispatch_memory_check(
         self,
         response: str,
-        conversation: List[Dict[str, str]]
+        conversation: List[Dict[str, str]],
+        cognitive_updates: str
     ) -> None:
         """Dispatch memory check for direct user interaction."""
         recent_messages = conversation[-3:] if len(conversation) > 3 else conversation
@@ -104,7 +105,8 @@ class UserInterface(CognitiveInterface):
                         )
                     },
                     'interaction_depth': len(conversation),
-                    'has_multi_turn': len(conversation) > 2
+                    'has_multi_turn': len(conversation) > 2,
+                    'cognitive_updates': cognitive_updates,
                 }
             )
         except Exception as e:
@@ -153,7 +155,8 @@ class UserInterface(CognitiveInterface):
             model=Config.get_cognitive_model(),
             vars={
                 "conversation_context": conversation_context,
-                "content": content
+                "content": content,
+                'context': metadata.get('cognitive_updates', ''),
             }
         )
     

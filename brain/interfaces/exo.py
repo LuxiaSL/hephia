@@ -56,7 +56,7 @@ class ExoProcessorInterface(CognitiveInterface):
             "memories_block": None,
             "state_block": None,
         }
-        
+
         # Timing configuration
         self.min_interval = Config.get_exo_min_interval()
         self.llm_timeout = Config.LLM_TIMEOUT
@@ -152,9 +152,10 @@ class ExoProcessorInterface(CognitiveInterface):
                 if error:
                     # cleaning only for when hallucinated context is terribly long
                     cleaned_response = await self.clean_errored_response(llm_response)
+                    formatted_error = TerminalFormatter.format_notifications(other_updates, error)
                     self.conversation_state.add_exchange(
                         assistant_content=cleaned_response,
-                        user_content=error,
+                        user_content=formatted_error,
                         assistant_metadata={"error": True},
                         user_metadata={"error_message": error}
                     )
@@ -224,7 +225,7 @@ class ExoProcessorInterface(CognitiveInterface):
                 })
 
                 await self.announce_cognitive_context(self.conversation_state.to_message_list(), notification)
-                await self._dispatch_memory_check(formatted_response, command, result)
+                await self._dispatch_memory_check(formatted_response, command, result, other_updates)
                 
                 return formatted_response
                 
@@ -244,7 +245,7 @@ class ExoProcessorInterface(CognitiveInterface):
             )
             return None
         
-    async def _dispatch_memory_check(self, response: str, command: ParsedCommand, result: CommandResult) -> None:
+    async def _dispatch_memory_check(self, response: str, command: ParsedCommand, result: CommandResult, cognitive_updates: str) -> None:
         BrainLogger.info("Starting memory check dispatch")
         context = await self.state_bridge.get_api_context()
         BrainLogger.info(f"Context for memory check: {context}")
@@ -260,7 +261,8 @@ class ExoProcessorInterface(CognitiveInterface):
                     'command': command,
                     'response': response,
                     'result': result,
-                    'success': result.success
+                    'success': result.success,
+                    'cognitive_updates': cognitive_updates,
                 }
             )
         except Exception as e:
@@ -335,7 +337,8 @@ class ExoProcessorInterface(CognitiveInterface):
             vars={
                 "command_input": command_input,
                 "content": content,
-                "result_message": result_message
+                "result_message": result_message,
+                'context': metadata.get('cognitive_updates', ''),
             }
         )
         

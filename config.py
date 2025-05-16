@@ -142,6 +142,10 @@ class Config:
     @classmethod
     def get_discord_enabled(cls) -> bool:
         return os.getenv("ENABLE_DISCORD", "False").lower() in ("true", "1", "yes")
+
+    @classmethod
+    def get_discord_reply_on_tag(cls) -> bool:
+        return os.getenv("REPLY_ON_TAG", "True").lower() in ("true", "1", "yes")
     
     @classmethod
     def get_exo_min_interval(cls) -> float:

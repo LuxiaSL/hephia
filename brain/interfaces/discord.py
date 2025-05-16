@@ -74,20 +74,20 @@ class DiscordInterface(CognitiveInterface):
                 context
             )
 
-            # Try up to 3 times with exponential backoff
             max_retries = 3
             response = None
-            for attempt in range(max_retries):
-                response = await self._get_social_response(prompt)
-                if response is not None:
-                    break
-                # Wait 2^attempt seconds before retrying (1s, 2s, 4s)
-                await asyncio.sleep(2 ** attempt)
-            
-            # If all retries failed, return empty string
-            if response is None:
-                BrainLogger.error("Failed to get social response after 3 attempts")
-                return ""
+
+            if Config.get_discord_reply_on_tag():
+                for attempt in range(max_retries):
+                    response = await self._get_social_response(prompt)
+                    if response is not None:
+                        break
+                    # Wait 2^attempt seconds before retrying (1s, 2s, 4s)
+                    await asyncio.sleep(2 ** attempt)
+                
+                # If all retries failed, return empty string
+                if response is None:
+                    BrainLogger.error("Failed to get social response after 3 attempts")
             
             # Create notification for other interfaces
             notification = await self.create_notification({
@@ -99,14 +99,15 @@ class DiscordInterface(CognitiveInterface):
                 "guild": channel_data.get('guild_name'),
                 "path": f"{channel_data.get('guild_name', 'Unknown')}:{channel}" if channel_data.get('guild_name') else channel,
                 "channel_type": "server" if channel_data.get('guild_name') else "DM",
-                "timestamp": message.get('timestamp')
+                "timestamp": message.get('timestamp'),
+                "metadata": content.get('metadata', {}),
             })
 
             # Tell everyone about the update
             await self.announce_cognitive_context([response, content], notification)
 
             # Memory processing
-            await self._dispatch_memory_check(response, content)
+            await self._dispatch_memory_check(response, content, context)
             
             return response
             
@@ -155,7 +156,7 @@ class DiscordInterface(CognitiveInterface):
                 summary_text = (
                     f"Discord update: Replied to {author} in {path}\n"
                     f"{author}: {content.get('message', '')}\n"
-                    f"I responded: {content.get('response', '')[:150]}{'...' if len(content.get('response', '')) > 150 else ''}"
+                    f"I responded: {content.get('response', '')[:150]}{'...' if len(content.get('response', '')) > 150 else ''}" if content.get("response") != None else None
                 )
                 formatted.append(summary_text)
         
@@ -170,7 +171,8 @@ class DiscordInterface(CognitiveInterface):
     async def _dispatch_memory_check(
         self,
         response: str,
-        message_context: Dict[str, Any]
+        message_context: Dict[str, Any],
+        cognitive_updates: str
     ) -> None:
         """Dispatch memory check for Discord interaction."""
         try:
@@ -201,7 +203,8 @@ class DiscordInterface(CognitiveInterface):
                     'history': message_context.get('conversation_history', [])[-3:],
                     'mentions_bot': '@hephia' in (
                         message_context.get('current_message', {}).get('content', '').lower()
-                    )
+                    ),
+                    'cognitive_updates': cognitive_updates
                 }
             )
         except Exception as e:
@@ -276,7 +279,8 @@ class DiscordInterface(CognitiveInterface):
                 "channel_path": channel_path,
                 "author": author,
                 "history_text": history_text,
-                "content": content
+                "content": content,
+                'context': metadata.get('cognitive_updates', ''),
             }
         )
     

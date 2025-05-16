@@ -1,14 +1,14 @@
-# brain/interfaces/exo_utils/hud/providers/internals.py
+# brain/interfaces/exo_utils/hud/sections/internals.py
 
 import time
 from typing import Dict, Any
 
-from .base import BaseHudProvider
+from .base import BaseHudSection
 from loggers import BrainLogger
 
-class InternalStateHudProvider(BaseHudProvider):
+class InternalStateHudSection(BaseHudSection):
     """
-    HUD Provider for the agent's internal cognitive and emotional state,
+    HUD Section for the agent's internal cognitive and emotional state,
     and relevant memories.
     """
 

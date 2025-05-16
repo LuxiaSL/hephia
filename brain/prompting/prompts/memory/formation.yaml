@@ -6,8 +6,8 @@ defaults:
     the assistant should keep these incredibly concise, just a couple of sentences at most, akin to a diary entry.
     the assistant should focus on key actions, decisions, or realizations, and include essential context like who was involved or what the objective felt like.
     the information for the memory will come from varied interfaces, and the assistant should be able to adapt to the context of each interface.
-
-models:
+    the assistant will also receive the relevant context for the agent's state during the interaction, such as simulated internal states and continuity of self data.
+  models:
   chapter2:
     system: |
       I am formulating a memory to be persisted and used. 

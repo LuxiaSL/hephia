@@ -9,4 +9,6 @@ defaults:
     - Response: ${content}
     - Result: ${result_message}
 
+    - Extra self data: ${context}
+
     Focus on what was meaningful and any changes in understanding or state.

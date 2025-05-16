@@ -1,26 +1,26 @@
-# brain/interfaces/exo_utils/hud/providers/discord.py
+# brain/interfaces/exo_utils/hud/sections/discord.py
 
 from typing import Dict, Any, List, Optional
 
-from .base import BaseHudProvider
+from .base import BaseHudSection
 from brain.prompting.loader import get_prompt
 from core.discord_service import DiscordService
 from config import Config
 from loggers import BrainLogger
 
-class DiscordHudProvider(BaseHudProvider):
+class DiscordHudSection(BaseHudSection):
     """
-    HUD Provider for Discord-related information.
+    HUD Section for Discord-related information.
     Displays active channel, recent messages, and user summary.
     """
     
     # extra timeout given that it has to actually fetch data from Discord
-    PROVIDER_TIMEOUT_SECONDS: float = 2.0
+    SECTION_TIMEOUT_SECONDS: float = 2.0
 
     def __init__(self, discord_service: DiscordService, prompt_key: str = 'interface.exo.hud.discord', section_name: str = "Discord"):
         super().__init__(prompt_key=prompt_key, section_name=section_name)
         if not discord_service:
-            raise ValueError("DiscordService instance is required for DiscordHudProvider.")
+            raise ValueError("DiscordService instance is required for DiscordHudSection.")
         self.discord_service = discord_service
 
     async def _prepare_prompt_vars(self, hud_metadata: Dict[str, Any]) -> Dict[str, str]:

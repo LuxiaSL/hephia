@@ -1,9 +1,9 @@
-# brain/interfaces/exo_utils/hud/providers/system.py
+# brain/interfaces/exo_utils/hud/sections/system.py
 
 from datetime import datetime
 from typing import Dict, Any
 
-from .base import BaseHudProvider
+from .base import BaseHudSection
 from config import Config
 from loggers import BrainLogger
 
@@ -16,9 +16,9 @@ except ImportError:
     BrainLogger.info("HUD: psutil library not found. System resource monitoring (CPU/Mem) will be disabled.")
 
 
-class SystemHudProvider(BaseHudProvider):
+class SystemHudSection(BaseHudSection):
     """
-    HUD Provider for system-level information like time, date,
+    HUD Section for system-level information like time, date,
     simulated system "weather" (CPU/memory), and turn pacing.
     """
 
