@@ -17,9 +17,8 @@ from brain.environments.terminal_formatter import TerminalFormatter
 from brain.interfaces.base import CognitiveInterface
 from brain.utils.tracer import brain_trace
 from brain.prompting.loader import get_prompt
-
-from exo_utils.conversation_state import ConversationState
-from exo_utils.hud.construct import HudConstructor
+from brain.interfaces.exo_utils.conversation_state import ConversationState
+from brain.interfaces.exo_utils.hud.construct import HudConstructor
 
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
