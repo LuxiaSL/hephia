@@ -26,6 +26,7 @@ dependencies = [
     "sentence-transformers",
     "discord.py",
     "aiosqlite",
+    "psutil",
     "windows-curses; sys_platform == 'win32'",
 ]
 

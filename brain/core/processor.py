@@ -20,7 +20,9 @@ from brain.core.command_handler import CommandHandler
 from brain.cognition.notification import Notification, NotificationManager
 from brain.cognition.memory.manager import MemoryManager
 from brain.environments.environment_registry import EnvironmentRegistry
+from brain.interfaces.exo_utils.hud.construct import HudConstructor
 from core.state_bridge import StateBridge
+from core.discord_service import DiscordService
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
 from api_clients import APIManager
 from loggers import BrainLogger
@@ -33,17 +35,20 @@ class CoreProcessor:
         api_manager: APIManager,
         state_bridge: StateBridge,
         cognitive_bridge: CognitiveBridge,
-        environment_registry: EnvironmentRegistry
+        environment_registry: EnvironmentRegistry,
+        discord_service: DiscordService
     ):
         self.api = api_manager
         self.state_bridge = state_bridge
         self.cognitive_bridge = cognitive_bridge
         self.environment_registry = environment_registry
+        self.discord_service = discord_service
         
         # Core components (initialized in setup)
         self.command_handler: Optional[CommandHandler] = None
         self.memory_manager: Optional[MemoryManager] = None
         self.notification_manager: Optional[NotificationManager] = None
+        self.hud_constructor: Optional[HudConstructor] = None
         
         # Interfaces
         self.interfaces: Dict[str, CognitiveInterface] = {}
@@ -92,24 +97,23 @@ class CoreProcessor:
     async def _initialize_core_components(self) -> None:
         """Initialize core system components in dependency order."""
         try:
-           # 1. Notification Manager
             self.notification_manager = NotificationManager()
             
-            # 2. Command Handler
             self.command_handler = CommandHandler(
                 self.api,
                 self.environment_registry,
                 self.state_bridge
             )
             
-            # 3. Memory Manager - will be updated with interfaces after init
             self.memory_manager = MemoryManager(
                 self.state_bridge,
                 self.cognitive_bridge,
                 self.api,
                 {}
             )
-            
+
+            self.hud_constructor = HudConstructor(self.discord_service)
+
         except Exception as e:
             BrainLogger.error(f"Core component initialization failed: {e}")
             raise
@@ -123,7 +127,8 @@ class CoreProcessor:
                 self.cognitive_bridge,
                 self.state_bridge,
                 self.command_handler,
-                self.notification_manager
+                self.notification_manager,
+                self.hud_constructor
             )
             
             self.interfaces['discord'] = DiscordInterface(

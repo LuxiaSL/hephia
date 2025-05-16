@@ -411,7 +411,10 @@ Note that the numbers for replies may shift references due to the discrete natur
         return CommandResult(
             success=True,
             message=response,
-            data=data,
+            data={
+                "response_data": data,
+                "discord_channel_path": path,
+            },
             suggested_commands=[
                 f'discord send "{path}" "Hello @{example_user}!"',
                 f'discord history "{path}"',
@@ -484,7 +487,10 @@ Note that the numbers for replies may shift references due to the discrete natur
         return CommandResult(
             success=True,
             message="\n".join(lines),
-            data=data,
+            data={
+                "response_data": data,
+                "discord_channel_path": path,
+            },
             suggested_commands=[
                 f'discord history "{path}"',
                 f'discord send "{path}" "Another message..."'
@@ -577,7 +583,10 @@ Note that the numbers for replies may shift references due to the discrete natur
         return CommandResult(
             success=True,
             message="\n".join(lines),
-            data=data,
+            data={
+                "response_data": data,
+                "discord_channel_path": path,
+            },
             suggested_commands=[
                 f'discord send "{path}" "New message..."',
                 f'discord reply "{path}" "#1" "Reply to the first message..."',
@@ -663,7 +672,10 @@ Note that the numbers for replies may shift references due to the discrete natur
         return CommandResult(
             success=True,
             message="\n".join(lines),
-            data=data,
+            data={
+                "response_data": data,
+                "discord_channel_path": path,
+            },
             suggested_commands=[
                 f'discord reply "{path}" "{reference}" "Your reply here"',
                 f'discord history "{path}"'
@@ -749,7 +761,10 @@ Note that the numbers for replies may shift references due to the discrete natur
         return CommandResult(
             success=True,
             message="\n".join(lines),
-            data=data,
+            data={
+                "response_data": data,
+                "discord_channel_path": path,
+            },
             suggested_commands=[
                 f'discord history "{path}"',
                 f'discord show "{path}" "latest"'

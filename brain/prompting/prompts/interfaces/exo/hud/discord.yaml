@@ -1,0 +1,13 @@
+id: interfaces.exo.hud.discord
+
+defaults:
+  combined: |
+    ${hud_header_str}
+    ${discord_error_str}
+    active channel: [${discord_channel_path}]
+    ${discord_users_summary_str}
+    recent history:
+    ${discord_messages_block_str}
+  users: |
+    recent users (${num_recent}): [${recent_list}]
+    others online (${num_other}): [${other_list}]

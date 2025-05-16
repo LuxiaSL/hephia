@@ -1,0 +1,11 @@
+id: interfaces.exo.hud.internals
+
+defaults:
+  combined: |
+    ${hud_header_str}
+    ${internal_state_error_str}
+      ${internal_state_mood_str}
+      ${internal_state_behavior_str}
+      ${internal_state_needs_summary_str}
+      ${internal_state_emotions_summary_str}
+    ${internal_state_memories_block_str}

@@ -49,7 +49,7 @@ class TerminalFormatter:
         
         # Format behavior as active state
         behavior_str = (
-            f"{behavior.get('name', 'balanced')} behavior"
+            f"{behavior.get('name', 'idle')} behavior"
         )
         
         # Format needs as motivational state  
@@ -73,17 +73,16 @@ class TerminalFormatter:
 
         # Build core state string
         state_str = (
-            "###\nMy Internal State\n"
+            "\nMy Internal State\n"
             f"{mood_str}\n"
             f"{behavior_str}\n"
             f"{needs_str}\n"
             f"{emotions_str}\n"
-            "###"
         )
 
         # Add memories if provided
         if memories:
-            memory_lines = ["\nRelevant Memories:", "###"]
+            memory_lines = ["\nRelevant Memories:"]
             current_time = time.time()
             
             for memory in memories:
@@ -166,7 +165,6 @@ class TerminalFormatter:
         lines.append(f"Time: {timestamp}")
 
         lines.append(result.message.strip())
-        lines.append("###")
 
         if not result.success and result.error:
             lines.append("Error Details:")
@@ -175,7 +173,6 @@ class TerminalFormatter:
                 lines.append("Suggested Fixes:")
                 for fix in result.error.suggested_fixes:
                     lines.append(f"  • {fix}")
-            lines.append("###")
 
         if result.suggested_commands:
             lines.append("Available Actions:")
@@ -259,11 +256,3 @@ class TerminalFormatter:
         lines.append("Use 'help' for available commands")
         lines.append("###")
         return "\n".join(lines)
-
-    @staticmethod
-    def format_welcome() -> str:
-        return (
-            "Welcome to Hephia OS\n"
-            "Type 'help' to see available commands\n"
-            "###"
-        )

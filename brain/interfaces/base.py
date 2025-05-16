@@ -57,10 +57,12 @@ class CognitiveInterface(NotificationInterface, ABC):
         """Get formatted cognitive context including state and notifications, yielding each piece."""
         brain_trace.context.memory("Getting relevant memories")
         memories = await self.get_relevant_memories(metadata=metadata) or []
+        yield ("memories", memories)
         BrainLogger.debug(f"[{self.interface_id}] Got memories: {memories}")
 
         brain_trace.context.state("Retrieving API context")
         state = await self.state_bridge.get_api_context() or {}
+        yield ("state", state)
         BrainLogger.debug(f"[{self.interface_id}] Got API context: {state}")
 
         brain_trace.context.format("Formatting cognitive context")

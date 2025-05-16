@@ -281,7 +281,7 @@ class Config:
     # Processor settings
     EXO_TIMEOUT = 100.0
     LLM_TIMEOUT = 90.0     
-    EXO_MAX_MESSAGES = 50
+    EXO_MAX_PAIRS = 50
     INITIALIZATION_TIMEOUT = 30
     SHUTDOWN_TIMEOUT = 15
 

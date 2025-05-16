@@ -139,6 +139,7 @@ class HephiaServer:
             state_bridge=instance.state_bridge,
             cognitive_bridge=instance.internal.cognitive_bridge,
             environment_registry=instance.environment_registry,
+            discord_service=instance.discord_service,
         )
         # Now that all components are in place, setup routes and event handlers.
         instance.setup_routes()
