@@ -132,7 +132,7 @@ class ExoProcessorInterface(CognitiveInterface):
                 self.hud_metadata["memories_block"] = context_data.get("memories", [])
                 self.hud_metadata["state_block"] = context_data.get("state", {})
 
-                context = self.hud_constructor.build_hud_string(self.hud_metadata, Config.get_cognitive_model())
+                context = await self.hud_constructor.build_hud_string(self.hud_metadata, Config.get_cognitive_model())
 
                 BrainLogger.info(f"[{self.interface_id}] Received HUD context: {context}")
                 brain_trace.interaction.context.complete(context=context)
