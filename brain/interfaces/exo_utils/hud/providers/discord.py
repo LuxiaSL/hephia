@@ -76,6 +76,8 @@ class DiscordHudProvider(BaseHudProvider):
                         message_lines.append(f"[{timestamp}] {ref} {author}: {content}")
                     except Exception as e:
                         BrainLogger.error(f"HUD: Error processing message: {e}", exc_info=True)
+
+                discord_vars["discord_messages_block_str"] = "\n".join(message_lines)
             elif hist_status is not None and hist_status >= 400:
                 err_msg_part = f"History (Status {hist_status})"
                 if isinstance(history_data, dict) and history_data.get("error"): err_msg_part += f": {history_data['error']}"
