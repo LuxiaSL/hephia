@@ -62,7 +62,7 @@ class DiscordHudProvider(BaseHudProvider):
             )
 
             if hist_status == 200 and history_data and history_data.get("messages"):
-                message_lines = ["  Recent Messages:"]
+                message_lines = []
                 for msg in history_data.get("messages"):
                     try:
                         ref = msg.get('reference', '')
@@ -82,13 +82,13 @@ class DiscordHudProvider(BaseHudProvider):
                 err_msg_part = f"History (Status {hist_status})"
                 if isinstance(history_data, dict) and history_data.get("error"): err_msg_part += f": {history_data['error']}"
                 error_messages_for_hud_list.append(err_msg_part)
-                discord_vars["discord_messages_block_str"] = f"  Recent Messages: Unavailable ({err_msg_part.split(':')[0].strip()})"
+                discord_vars["discord_messages_block_str"] = f"Unavailable ({err_msg_part.split(':')[0].strip()})"
             else: # Success but empty message list or other non-error case
-                 discord_vars["discord_messages_block_str"] = "  Recent Messages: None found."
+                 discord_vars["discord_messages_block_str"] = "None found."
         except Exception as e:
             BrainLogger.error(f"HUD ({self.section_name}): Exc. in history for {last_channel_path}: {e}", exc_info=True)
             error_messages_for_hud_list.append("History (Processing Error)")
-            discord_vars["discord_messages_block_str"] = "  Recent Messages: Error retrieving."
+            discord_vars["discord_messages_block_str"] = "Error retrieving."
 
         # --- Fetch and Format Active Users ---
         try:

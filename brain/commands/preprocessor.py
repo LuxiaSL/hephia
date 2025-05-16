@@ -108,7 +108,7 @@ class CommandPreprocessor:
                     parsed, available_commands
                 )
                 if corrected:
-                    # again, make sure that for here we send back the correction + reason for correction 
+                    # again, make sure that for here we send back =the correction + reason for correction 
                     BrainLogger.log_command_processing(command, corrected, None)
                     return corrected, None
                     
@@ -577,7 +577,7 @@ class CommandPreprocessor:
                 ],
                 provider=model_config.provider.value,
                 model=model_config.model_id,
-                temperature=0.2,
+                temperature=model_config.temperature,
                 return_content_only=True
             )
 

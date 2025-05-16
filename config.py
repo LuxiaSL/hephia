@@ -93,7 +93,7 @@ class Config:
                         model_id=model_data["model_id"],
                         env_var=model_data.get("env_var"),
                         max_tokens=model_data.get("max_tokens", 250),
-                        temperature=model_data.get("temperature", 0.7),
+                        temperature=model_data.get("temperature", 1.0),
                         description=model_data.get("description", f"User-defined {name} model")
                     )
                     print(f"Loaded user model: {name}")
@@ -194,7 +194,7 @@ class Config:
         "opus": ModelConfig(
             provider=ProviderType.ANTHROPIC,
             model_id="claude-3-opus-20240229",
-            max_tokens=400,
+            max_tokens=550,
             description="Claude 3 Opus via Anthropic"
         ),
         "haiku": ModelConfig(
@@ -257,6 +257,12 @@ class Config:
             model_id="deepseek/deepseek-r1-zero:free",
             max_tokens=550,
             description="DeepSeek R1 Zero via OpenRouter"
+        ),
+        "arliai-32b-free": ModelConfig(
+            provider=ProviderType.OPENROUTER,
+            model_id="arliai/qwq-32b-arliai-rpr-v1:free",
+            max_tokens=550,
+            description="QwQ 32B ArliAI RPR via OpenRouter"
         ),
         "chapter2": ModelConfig(
             provider=ProviderType.CHAPTER2,
