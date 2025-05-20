@@ -7,7 +7,7 @@ It manages both HTTP endpoints for commands and WebSocket connections
 for real-time state updates.
 """
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -27,6 +27,17 @@ from brain.core.processor import CoreProcessor
 from brain.environments.environment_registry import EnvironmentRegistry
 from api_clients import APIManager
 from loggers import SystemLogger
+
+from shared_models.tui_events import (
+    TUIMessage,
+    TUISystemContext,
+    TUIDataPayload, 
+    TUIWebSocketMessage,
+    TUIMood,
+    TUINeed,
+    TUIBehavior,
+    TUIEmotionalStateItem
+)
 
 class CommandRequest(BaseModel):
     """Model for incoming commands."""
@@ -118,6 +129,11 @@ class HephiaServer:
 
         self.logger = SystemLogger
 
+        self.latest_recent_messages_for_tui: List[TUIMessage] = []
+        self.latest_system_context_for_tui: Optional[TUISystemContext] = None
+        self.latest_cognitive_summary_for_tui: str = ""
+        self.tui_data_lock = asyncio.Lock()
+
     @classmethod
     async def create(cls) -> HephiaServer:
         """
@@ -150,7 +166,7 @@ class HephiaServer:
         """Configure server middleware."""
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],  # Adjust for production
+            allow_origins=["*"],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -496,34 +512,37 @@ class HephiaServer:
             raise
 
     async def handle_websocket_connection(self, websocket: WebSocket):
-        """
-        Handle individual WebSocket connections.
-        
-        Args:
-            websocket: The WebSocket connection to handle
-        """
+        """Handle individual WebSocket connections."""
         await websocket.accept()
         self.active_connections.append(websocket)
+        self.logger.info(f"WebSocket connection accepted. Total active: {len(self.active_connections)}")
         
         try:
-            # Send initial state
-            initial_state = await self.state_bridge.get_api_context(use_memory_emotions=False)
-            await websocket.send_json({
-                "type": "initial_state",
-                "data": initial_state
-            })
+            self.logger.info("Preparing initial TUI data for new WebSocket client.")
+            initial_payload = await self._prepare_tui_data_payload()
             
-            # Handle incoming messages
+            initial_tui_message = TUIWebSocketMessage(
+                event_type="TUI_INITIAL_STATE",
+                payload=initial_payload,
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
+
+            await websocket.send_json(initial_tui_message.model_dump())
+            self.logger.info("Initial TUI data sent to new WebSocket client.")
+
             while True:
                 data = await websocket.receive_json()
-                await self.handle_websocket_message(websocket, data)
+                await self.handle_websocket_message(websocket, data) 
                 
         except WebSocketDisconnect:
-            self.active_connections.remove(websocket)
+            self.logger.info(f"WebSocket client disconnected. Total active: {len(self.active_connections) -1}")
         except Exception as e:
-            print(f"WebSocket error: {e}")
+            self.logger.error(f"WebSocket error: {e}", exc_info=True)
+        finally: # Ensure removal on any exit from the try block
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
+            self.logger.info(f"WebSocket connection closed. Total active: {len(self.active_connections)}")
+
     
     async def handle_websocket_message(self, websocket: WebSocket, message: Dict):
         """
@@ -550,25 +569,117 @@ class HephiaServer:
     
     async def broadcast_state_update(self, event: Event):
         """
-        Broadcast state updates to all connected clients.
-        
-        Args:
-            event: The event that triggered the update
+        Prepares and broadcasts a comprehensive TUI state update to all connected WebSocket clients.
+        This is typically triggered when a significant state change (like 'state:changed') has occurred.
         """
         if not self.active_connections:
             return
-            
-        update = StateUpdateResponse(
-            event_type=event.event_type,
-            data=event.data
-        )
+
+        self.logger.debug(f"Preparing TUI broadcast due to server event: {event.event_type}")
         
-        for connection in self.active_connections:
+        try:
+            # Prepare the full TUI data payload using the latest data.
+            tui_payload = await self._prepare_tui_data_payload()
+            
+            tui_websocket_message = TUIWebSocketMessage(
+                event_type="TUI_REFRESH_DATA",
+                payload=tui_payload,
+                timestamp=datetime.now(timezone.utc).isoformat()
+            )
+            
+            message_to_send = tui_websocket_message.model_dump()
+            
+            # Iterate over a copy of the list because removal can happen during iteration
+            for connection in list(self.active_connections):
+                try:
+                    await connection.send_json(message_to_send)
+                except Exception as e:
+                    self.logger.warning(f"Error broadcasting TUI data to client: {e}. Removing connection.")
+                    if connection in self.active_connections: # Check again, could be removed by another task
+                        self.active_connections.remove(connection)
+            
+            self.logger.debug(f"TUI data broadcast to {len(self.active_connections)} WebSocket clients.")
+
+        except Exception as e:
+            self.logger.error(f"Failed to prepare or broadcast TUI data: {e}", exc_info=True)
+
+    async def _prepare_tui_data_payload(self) -> TUIDataPayload:
+        """
+        Fetches the latest data components from StateBridge,
+        updates the server's TUI cache, and constructs the TUIDataPayload.
+        """
+
+        # 1. Get and process System Context
+        raw_context_data = await self.state_bridge.get_api_context(use_memory_emotions=False)
+        
+        tui_mood: Optional[TUIMood] = None
+        if mood_d := raw_context_data.get('mood'):
+            tui_mood = TUIMood(**mood_d)
+
+        tui_needs: Dict[str, TUINeed] = {}
+        if needs_d_raw := raw_context_data.get('needs'):
+            if isinstance(needs_d_raw, dict):
+                for need_name, need_details in needs_d_raw.items():
+                    if isinstance(need_details, dict) and 'satisfaction' in need_details:
+                        tui_needs[need_name] = TUINeed(satisfaction=float(need_details['satisfaction']))
+
+        tui_behavior: Optional[TUIBehavior] = None
+        if behavior_d := raw_context_data.get('behavior'):
+            tui_behavior = TUIBehavior(**behavior_d)
+
+        tui_emotional_state: List[TUIEmotionalStateItem] = []
+        if emo_state_d := raw_context_data.get('emotional_state'):
+            if isinstance(emo_state_d, list):
+                for item in emo_state_d:
+                    if isinstance(item, dict):
+                        tui_emotional_state.append(TUIEmotionalStateItem(**item))
+        
+        current_system_context = TUISystemContext(
+            mood=tui_mood,
+            needs=tui_needs if tui_needs else None, # Ensure None if empty
+            behavior=tui_behavior,
+            emotional_state=tui_emotional_state if tui_emotional_state else None # Ensure None if empty
+        )
+
+        # 2. Get and process Recent Messages (from raw_state)
+        raw_conversation_data = self.state_bridge.get_latest_raw_conversation_state()
+        
+        num_recent_messages_to_send = 6
+        
+        # Ensure raw_conversation_data is a list before slicing
+        if not isinstance(raw_conversation_data, list):
+            actual_recent_raw = []
+            self.logger.warning("raw_conversation_data from StateBridge was not a list.")
+        else:
+            actual_recent_raw = raw_conversation_data[-num_recent_messages_to_send:]
+        
+        current_recent_messages = [TUIMessage(**msg) for msg in actual_recent_raw]
+
+        # 3. Get Cognitive Summary
+        current_cognitive_summary = self.state_bridge.get_latest_cognitive_summary()
+
+        model_name_from_config = "N/A" # Default
+        if hasattr(Config, 'get_cognitive_model'): # Check if method exists
             try:
-                await connection.send_json(update.dict())
+                model_name_from_config = Config.get_cognitive_model()
+                if not model_name_from_config: # Handle empty return
+                    model_name_from_config = "N/A"
             except Exception as e:
-                print(f"Error broadcasting to client: {e}")
-                self.active_connections.remove(connection)
+                self.logger.warning(f"Could not retrieve model name from Config: {e}")
+                model_name_from_config = "N/A" # Fallback
+
+        async with self.tui_data_lock:
+            self.latest_system_context_for_tui = current_system_context
+            self.latest_recent_messages_for_tui = current_recent_messages
+            self.latest_cognitive_summary_for_tui = current_cognitive_summary
+
+        return TUIDataPayload(
+            recent_messages=current_recent_messages,
+            system_context=current_system_context,
+            cognitive_summary=current_cognitive_summary,
+            current_model_name=model_name_from_config
+        )
+
     
     def run(self, host: str = "0.0.0.0", port: int = 5517):
         """

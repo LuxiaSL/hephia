@@ -1,0 +1,99 @@
+/* client/tui/app.tcss */
+
+/* Define our color palette */
+$bg: #0C0C0C; /* Near black for main background */
+$panel-bg: #121212; /* Slightly lighter for panel backgrounds */
+$primary-purple: #6A0DAD; /* Main deep purple (can be textual 'indigo' or 'purple') */
+$secondary-purple: #4B0082; /* Darker purple for accents/titles */
+$text-primary: #E0E0E0; /* Off-white for main text */
+$text-muted: #A0A0A0; /* Grey for less important text or subtitles */
+$text-title: #F0F0F0; /* Brighter white for titles if needed */
+
+$success-text: #66FF66; /* Bright green for "Connected" */
+$warning-text: #FFD700; /* Yellow for "Connecting" */
+$error-text: #FF6666; /* Light red for "Disconnected" */
+
+
+/* App level styling */
+App {
+    background: $bg;
+    color: $text-primary;
+}
+
+Header {
+    background: $primary-purple;
+    color: $text-title;
+    text-style: bold;
+}
+
+Footer {
+    background: $primary-purple;
+    color: $text-muted; /* Muted for footer text, status will override */
+}
+
+/* Main layout container */
+#main_layout {
+    layout: horizontal;
+    height: 1fr; /* Use 1fr to take up remaining space after header/footer */
+}
+
+/* Left panel for cognitive processing */
+#cognitive_panel_container {
+    width: 1fr; /* Takes 1 fraction (can adjust ratios like 2fr and 1fr) */
+    height: 100%;
+    background: $panel-bg;
+    border: round $primary-purple;
+    padding: 1;
+    /* overflow: auto; -- Handled by RichLog's own scrollbars now */
+}
+
+/* Right column containing state and summary panels */
+#right_column {
+    layout: vertical;
+    width: 1fr;
+    height: 100%;
+}
+
+/* System State panel (top-right) */
+#state_panel_container {
+    height: 1fr; /* Takes 1 fraction of right_column's height */
+    background: $panel-bg;
+    border: round $primary-purple;
+    padding: 1;
+    /* overflow: auto; -- Handled by Static's potential scroll with content */
+}
+
+/* Cognitive Summary panel (bottom-right) */
+#summary_panel_container {
+    height: 1fr; /* Takes 1 fraction of right_column's height */
+    background: $panel-bg;
+    border: round $primary-purple;
+    padding: 1;
+    /* overflow: auto; -- Handled by RichLog's own scrollbars */
+}
+
+/* Class for panel titles */
+.panel_title {
+    dock: top;
+    padding: 0 1;
+    text-style: bold;
+    background: $secondary-purple;
+    color: $text-title;
+    margin-bottom: 1; /* Space between title and content */
+}
+
+/* Class for panel content areas (RichLog, Static) */
+.panel_content {
+    width: 100%;
+    height: 100%; 
+    /* overflow: auto; -- Let the widget itself handle scrolling */
+}
+
+/* Connection Status in Footer */
+#connection_status {
+    dock: right;
+    padding: 0 1;
+    width: auto;
+    height: 100%;
+    content-align: right middle;
+}

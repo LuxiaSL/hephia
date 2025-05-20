@@ -346,5 +346,5 @@ class Config:
         'loneliness': 0.0002
     }
 
-    VERSION = "0.25"
+    VERSION = "0.2.5"
 

@@ -1,7 +1,7 @@
 """
 cognitive_bridge.py
 
-Manages interaction between conscious (ExoProcessor/LLM) and subconscious systems.
+Manages interaction between conscious and subconscious systems.
 Handles reflection requests, meditation effects, and memory traversal while maintaining
 clean separation between mechanical and cognitive layers.
 """

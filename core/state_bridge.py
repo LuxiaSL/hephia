@@ -54,6 +54,7 @@ class StateBridge:
         self.cleanup_interval = timedelta(minutes=5) 
         self.max_states = 5
         self.last_state_hash = None
+        self.last_cognitive_summary: Optional[str] = ""
 
     async def initialize(self):
         """Initialize state management and restore previous session if available."""
@@ -116,12 +117,13 @@ class StateBridge:
     async def update_cognitive_state(self, event: Event):
         """Update cognitive state and broadcast API context."""
         async with self.state_lock:
-            if event.data.get('source') == 'exo_processor':
+            if self.persistent_state and event.data.get('source') == 'exo_processor':
                 self.persistent_state.brain_state = event.data.get('raw_state', {})
+                self.last_cognitive_summary = event.data.get('processed_state', "")
         try:
-            await self.update_state()
+            await self.update_state() 
         except Exception as e:
-            print(f"Error updating cognitive state: {e}")
+            print(f"Error in StateBridge.update_cognitive_state after processing event: {e}")
             raise
 
     def _validate_brain_state(self, state: Any) -> Optional[List[Dict[str, str]]]:
@@ -178,6 +180,16 @@ class StateBridge:
         if self.internal:
             return await self.internal_context.get_api_context(use_memory_emotions=use_memory_emotions)
         return {}
+    
+    def get_latest_cognitive_summary(self) -> str: # Return str, as default is ""
+        """Returns the most recently cached cognitive summary (processed_state)."""
+        return self.last_cognitive_summary if self.last_cognitive_summary is not None else ""
+    
+    def get_latest_raw_conversation_state(self) -> List[Dict[str, str]]:
+        """Returns the most recently cached raw conversation state (brain_state)."""
+        if self.persistent_state and self.persistent_state.brain_state is not None:
+            return self.persistent_state.brain_state
+        return []
 
     async def update_state(self):
         """Update both persistent state and broadcast API context."""

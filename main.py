@@ -6,7 +6,6 @@ Initializes and runs the complete system with all necessary checks and monitorin
 from __future__ import annotations
 import asyncio
 import uvicorn
-import threading
 from dotenv import load_dotenv
 import os
 import sys
@@ -17,8 +16,6 @@ from core.server import HephiaServer
 from config import Config, ProviderType
 from loggers import LogManager
 from event_dispatcher import global_event_dispatcher
-from display.hephia_tui import handle_cognitive_event, handle_state_event, start_monitor
-
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 LogManager.setup_logging()
@@ -70,9 +67,9 @@ def validate_configuration() -> bool:
 async def main() -> None:
     """Initialize and run the complete Hephia system."""
     print(f"""
-╔═══════════════════════════╗
-║    Hephia Project v0.2    ║
-╚═══════════════════════════╝
+╔══════════════════════════════╗
+║     Hephia Project v0.2.5    ║
+╚══════════════════════════════╝
 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     """)
 
@@ -96,29 +93,18 @@ Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         server = await HephiaServer.create()
 
         # Start interface in a separate thread
-        if not headless:
-            vis_thread = threading.Thread(target=start_monitor, daemon=True)
-            vis_thread.start()
-
-            # Hook up event handlers
-            global_event_dispatcher.add_listener(
-                "cognitive:context_update",
-                lambda event: handle_cognitive_event(event)
-            )
-            global_event_dispatcher.add_listener(
-                "state:changed",
-                lambda event: handle_state_event(event)
-            )
-        else:
-            print("gui disabled; using manual printouts of major activity")
+        if headless:
+            print("GUI disabled by config; using manual printouts of major activity.")
             global_event_dispatcher.add_listener(
                 "cognitive:context_update",
                 lambda event: print_cognitive_event(event)
             )
+        else:
+            print("Server running. Start the TUI client separately to monitor activity.")
 
         print("""
 Hephia is now active! 
-
+Connect TUI client to WebSocket endpoint /ws
 Press Ctrl+C to shutdown gracefully
         """)
 
@@ -183,4 +169,5 @@ if __name__ == "__main__":
     finally:
         # This ensures that any lingering tasks are cancelled.
         loop = asyncio.get_running_loop()
-        loop.run_until_complete(shutdown_all_tasks())
+        if loop.is_running():
+            loop.run_until_complete(shutdown_all_tasks())
