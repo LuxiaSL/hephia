@@ -1,0 +1,488 @@
+/* client/config/app.tcss */
+
+/* =================================================================
+   COLOR PALETTE
+   ================================================================= */
+$bg: #0C0C0C;
+$panel-bg: #121212;
+$panel-bg-darken-1: #0F0F0F;
+$panel-bg-darken-2: #0A0A0A;
+$primary-purple: #6A0DAD;
+$secondary-purple: #4B0082;
+$text-primary: #E0E0E0;
+$text-muted: #A0A0A0;
+$text-title: #F0F0F0;
+$success: #66FF66;
+$warning: #FFD700;
+$error: #FF6666;
+
+/* =================================================================
+   APP-LEVEL LAYOUT
+   ================================================================= */
+App {
+    background: $bg;
+    color: $text-primary;
+    layout: vertical;
+}
+
+Header {
+    background: $primary-purple;
+    color: $text-title;
+    text-style: bold;
+    height: 3;
+    dock: top;
+}
+
+Footer {
+    background: $primary-purple;
+    color: $text-muted;
+    height: 1;
+    dock: bottom;
+}
+
+/* =================================================================
+   GLOBAL UI COMPONENTS
+   ================================================================= */
+
+/* Screen Titles */
+.screen-title {
+    padding: 1 2;
+    text-align: center;
+    text-style: bold;
+    color: $text-title;
+    background: $secondary-purple;
+    width: 100%;
+    margin-bottom: 1;
+    height: auto;
+}
+
+/* Button Bars */
+.button-bar {
+    padding: 0 1;
+    height: auto;
+    align: center middle;
+    margin: 1;
+}
+
+.button-bar Button {
+    margin: 1;
+}
+
+/* Status Messages */
+.status-message {
+    padding: 1;
+    height: auto;
+    min-height: 1;
+    text-align: center;
+}
+
+.error-message {
+    color: $error;
+    padding: 1;
+    height: auto;
+}
+
+/* =================================================================
+   TABBED CONTENT LAYOUT
+   ================================================================= */
+TabbedContent {
+    height: 1fr;
+}
+
+TabbedContent ContentSwitcher {
+    height: 1fr;
+}
+
+TabPane > * {
+    height: 1fr;
+}
+
+TabbedContent > TabPane {
+    width: 100%;
+    padding: 0;
+    background: $panel-bg;
+    layout: vertical;
+}
+
+/* =================================================================
+   DIALOG COMPONENTS
+   ================================================================= */
+
+/* General Dialog Styling */
+.dialog {
+    align: center middle;
+    background: rgba(12, 12, 12, 0.7);
+}
+
+.dialog-title {
+    text-align: center;
+    text-style: bold;
+    width: 100%;
+    padding-bottom: 1;
+    color: $text-title;
+}
+
+.modal-dialog {
+    width: 90%;
+    min-width: 50;
+    max-width: 120;
+    height: auto;
+    max-height: 80%;
+    background: $panel-bg;
+    border: round $primary-purple;
+    padding: 2 3;
+}
+
+.modal-dialog-compact {
+    width: auto;
+    max-width: 80%;
+    padding: 1 2;
+}
+
+.dialog-prompt {
+    padding: 1 0;
+    height: auto;
+    text-align: center;
+}
+
+.dialog-buttons {
+    width: 100%;
+    align-horizontal: right;
+    height: auto;
+    margin-top: 2;
+}
+
+.dialog-buttons Button {
+    margin-left: 2;
+}
+
+.dialog-form-layout {
+    layout: grid;
+    grid-size: 2;
+    grid-columns: 1fr 1fr;
+    grid-gutter: 1;
+}
+
+.dialog-column {
+    padding: 0 1;
+}
+
+/* Confirmation Dialog Specific */
+ConfirmationDialog {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+ConfirmationDialog #confirmation_dialog_content {
+    width: auto;
+    min-width: 40;
+    max-width: 80%;
+    height: auto;
+    padding: 2 3;
+    background: $panel-bg;
+    border: round $primary-purple;
+}
+
+ConfirmationDialog #confirmation_prompt {
+    margin-bottom: 2;
+    height: auto;
+    text-align: center;
+    padding: 1 0;
+}
+
+ConfirmationDialog #confirmation_buttons {
+    width: 100%;
+    align-horizontal: right;
+    height: auto;
+    margin-top: 1;
+}
+
+ConfirmationDialog #confirmation_buttons Button {
+    margin-left: 2;
+}
+
+/* =================================================================
+   ENV EDITOR SCREEN
+   ================================================================= */
+
+/* -------------  main two‑column frame ------------- */
+#env_form_main {
+    height: 1fr;          /* let it stretch to fill the tab            */
+    margin: 2;               /* breathing space between the two columns   */
+}
+
+/* Left / right column widths (responsive‑ish) */
+#api_keys_section   { width:38%; min-width: 32; }  /* ≈ ½‑screen but never <36 cells */
+#config_section     { width: 1fr;  min-width: 40; } /* takes the rest               */
+
+EnvEditorScreen {
+    layout: vertical;
+    width: 100%;
+    height: 1fr;
+}
+
+EnvEditorScreen #env_editor_layout {
+    padding: 0 1;
+    height: 1fr;
+    layout: vertical;
+}
+
+EnvEditorScreen #env_editor_layout > .screen-title {
+    height: auto;
+}
+
+EnvEditorScreen #env_editor_layout > .button-bar {
+    height: auto;
+}
+
+EnvEditorScreen #env_editor_layout > #env_form_container {
+    height: 1fr;
+    padding: 1;
+    border: round $secondary-purple;
+    background: $panel-bg;
+}
+
+EnvEditorScreen .field-description {
+    color: $text-muted;
+    margin: 0 0 1 2;
+    height: auto;
+}
+
+EnvEditorScreen #env_editor_layout > #fixed_status_message {
+    height: auto;
+    min-height: 1;
+}
+
+/* =================================================================
+   MODELS EDITOR SCREEN
+   ================================================================= */
+ModelsEditorScreen {
+    layout: vertical;
+    width: 100%;
+    height: 1fr;
+}
+
+ModelsEditorScreen > DataTable {
+    height: 1fr;
+}
+
+ModelsEditorScreen DataTable {
+    background: $panel-bg;
+    border: round $secondary-purple;
+    margin-top: 1;
+}
+
+ModelsEditorScreen DataTable:focus {
+    border: round $primary-purple;
+}
+
+/* =================================================================
+   PROMPT EDITOR SCREEN
+   ================================================================= */
+
+/* Main Layout */
+PromptEditorScreen #main_layout_prompts {
+    layout: horizontal;
+    height: 1fr;
+}
+
+/* Left Navigation Panel */
+PromptEditorScreen #nav_context_panel {
+    width: 35%;
+    min-width: 35;
+    max-width: 45%;
+    padding: 1;
+    border-right: heavy $secondary-purple;
+    background: $panel-bg;
+    layout: vertical;
+    overflow-y: auto;
+}
+
+/* File Tree */
+PromptEditorScreen #prompt_file_tree {
+    height: 24;
+    border: round $secondary-purple;
+    margin-bottom: 1;
+    background: $bg;
+    overflow-y: auto;
+}
+
+PromptEditorScreen #prompt_file_tree:focus {
+    border: round $primary-purple;
+}
+
+PromptEditorScreen .navigation-tree {
+    height: 24;
+    border: round $secondary-purple;
+    margin-bottom: 1;
+    background: $bg;
+}
+
+PromptEditorScreen .navigation-tree:focus {
+    border: round $primary-purple;
+}
+
+/* Parameter Display */
+PromptEditorScreen .parameter-display {
+    height: auto;
+    min-height: 4;
+    max-height: 8;
+    padding: 1;
+    margin-top: 1;
+    background: $panel-bg-darken-2;
+    border: round $secondary-purple;
+    overflow-y: auto;
+    text-wrap: wrap;
+}
+
+/* Labels and Selectors */
+PromptEditorScreen .sub-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+/* Right Editing Panel */
+PromptEditorScreen #editing_panel {
+    width: 65%;
+    padding: 1;
+    layout: vertical;
+    background: $panel-bg;
+}
+
+/* Editor Layout */
+PromptEditorScreen #editor_comparison_layout {
+    layout: horizontal;
+    height: 1fr;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+PromptEditorScreen .editor-pane {
+    width: 1fr;
+    height: 100%;
+}
+
+PromptEditorScreen .editor-pane TextArea {
+    height: 1fr;
+}
+
+/* Text Areas */
+PromptEditorScreen #base_content {
+    background: $panel-bg-darken-2;
+}
+
+PromptEditorScreen #user_content {
+    background: $bg;
+}
+
+PromptEditorScreen .read-only-editor {
+    background: $panel-bg-darken-2;
+}
+
+/* Editor Container Spacing */
+PromptEditorScreen .editor-pane:first-child {
+    margin-right: 1;
+}
+
+/* =================================================================
+   FORM + FIELD HELPERS  (shared across Env / Models editors)
+   ================================================================= */
+
+.form-section {
+    height: 1fr;
+    layout: vertical;
+    padding: 0 1;
+}
+
+.form-scroll {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+.section-header {
+    text-style: bold;
+    margin: 1 0;
+}
+
+.subsection-header {
+    text-style: bold italic;
+    margin: 1 0;
+}
+
+/* ── compact label / value rows ─────────────────────────────────── */
+.compact-field {
+    layout: horizontal;
+    align: left middle;
+    margin-bottom: 0;
+}
+
+.field-label-compact {
+    width: 16;                     /* keep labels flush‑right */
+    min-width: 14;
+    text-align: right;
+    padding-right: 1;
+    color: $text-muted;
+}
+
+.field-input-compact,
+.field-select-compact {
+    width: 1fr;                    /* consume remaining row width */
+    min-width:24;
+}
+
+.help-text-compact {
+    color: $text-muted;
+    margin-left: 1;
+}
+
+/* fixed footer‑style status line */
+.fixed-status-message {
+    dock: bottom;
+    height: 2;
+    padding: 0 1;
+    background: $panel-bg-darken-1;
+    align: left middle;
+    color: $text-muted;
+}
+
+/* =================================================================
+   UTILITY CLASSES
+   ================================================================= */
+
+/* Text Styling */
+.text-success {
+    color: $success;
+}
+
+.text-warning {
+    color: $warning;
+}
+
+.text-error {
+    color: $error;
+}
+
+.text-muted {
+    color: $text-muted;
+}
+
+/* Panel Styling */
+.panel {
+    background: $panel-bg;
+    border: round $secondary-purple;
+    padding: 1;
+}
+
+.panel:focus-within {
+    border: round $primary-purple;
+}
+
+/* Interactive Elements */
+.interactive:hover {
+    background: $panel-bg-darken-1;
+}
+
+.interactive:focus {
+    background: $panel-bg-darken-1;
+    border: round $primary-purple;
+}

@@ -46,6 +46,7 @@ Thumbs.db
 
 # Precious vars
 .env
+.env.bak
 
 # Storage
 data/

@@ -1,4 +1,4 @@
-# hephia_project/shared_models/tui_events.py
+# shared_models/tui_events.py
 from pydantic import BaseModel, field_validator
 from typing import List, Dict, Any, Optional
 
