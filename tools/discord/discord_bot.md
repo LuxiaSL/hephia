@@ -3,6 +3,8 @@
 ## Overview
 This guide outlines how to set up and configure a Discord bot to work with Hephia's systems. The bot serves as a bridge between Discord and the Hephia server, allowing for message handling and channel monitoring.
 
+(note: this looks scarier than it is. its a lot of steps, but i tried to be verbose and get *all* of them.)
+
 ## Prerequisites
 - Discord developer account
 - Access to Discord server with admin privileges
@@ -41,11 +43,7 @@ This guide outlines how to set up and configure a Discord bot to work with Hephi
     - Click "Authorize"
 
 3. Environment Setup
-    - Edit `.env` file in project root
-    - Update Discord token:
-      ```
-      DISCORD_BOT_TOKEN=your_token_here
-      ```
+    - Update the discord token using the config tool, or directly modifying .env.
 
 4. Install Bot
     - Copy generated OAuth2 URL
@@ -55,7 +53,7 @@ This guide outlines how to set up and configure a Discord bot to work with Hephi
 
 5. Run Bot Server
     ```bash
-    python tools/discord_bot.py
+    python tools/discord/discord_bot.py
     ```
     Default port: 5518
 

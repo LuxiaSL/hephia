@@ -1,95 +1,105 @@
-# Hephia
+# hephia
 ![Status](https://img.shields.io/badge/Status-Pre--Alpha-red)
 
-## Description
-Welcome to the pre-alpha version of Hephia,
-an autonomous independent digital companion.
-For deeper information on the project, feel free to:
-- DM me on Twitter [@slLuxia](https://twitter.com/slLuxia)
-- Add me on Discord: `luxia`
-- Email me: [lucia@kaleidoscope.glass](mailto:lucia@kaleidoscope.glass)
+## what is this?
+an autonomous digital companion that learns, remembers, and grows. runs locally with your choice of LLM providers.
 
-Refer to [memory system readme](internal/modules/memory/README.md) for info on the memory system.
+for more info or to chat:
+- discord: `luxia`
+- email: [lucia@kaleidoscope.glass](mailto:lucia@kaleidoscope.glass)
+- dm me on twitter [@slLuxia](https://twitter.com/slLuxia)
 
-## Requirements
-- [Python 3.9-3.12](https://www.python.org/downloads/)
-- Some required API tokens (see [`.env.example`](.env.example))
+## requirements
+- [python 3.9-3.12](https://www.python.org/downloads/)
+- api keys for desired provider
 
-## Installation & Setup
-
-### Quick Start (Recommended)
-Run our setup script which handles everything automatically:
+## quick start
 
 ```bash
-# Clone the repository
 git clone https://github.com/LuxiaSL/hephia.git
 cd hephia
-
-# Run the setup script
-python install.py
+python launch.py
 ```
 
-The script will:
-1. Install uv package manager
-2. Create a virtual environment
-3. Install all dependencies 
-4. Download required NLTK data
-5. Create a .env file from the template
+that's it! the launcher handles everything:
+- creates virtual environment if needed
+- installs dependencies automatically  
+- gives you a menu to run whatever you want
 
-After setup completes, activate your environment:
+## what can you run?
+
+**main server** - the brain. runs hephia's core agent with memory, emotions, and thoughts
+
+**monitor** - pretty TUI to watch hephia think in real-time. shows internal loop, simulated internal state, and ongoing summary.
+
+**config tool** - edit settings, manage API keys, add new models from providers, tweak prompts without diving into files
+
+**discord bot** - connects hephia to discord so you can chat with it there too (go to [discord_bot.md](tools/discord/discord_bot.md) to see setup instructions)
+
+**tools** - collection of utilities:
+- maintenance: reset memory, clear data, soft reset
+- interaction: send messages, trigger actions (take care of/monitor needs)
+- utilities: collect logs, debug stuff
+
+## background services (optional but nice)
+
+install as system services:
+
 ```bash
-# On Windows:
-.venv\Scripts\activate
-
-# On macOS/Linux:
-source .venv/bin/activate
+python install.py --service
 ```
 
-### Manual Setup (Advanced)
-If you prefer to set things up manually:
+this sets up user services that:
+- start when you log in
+- run quietly in background
+- can be controlled with system tools
+- handle dependencies (discord bot waits for main server)
+
+install specific services:
+```bash
+python install.py --service main        # just the main server
+python install.py --service discord     # just discord bot  
+python install.py --service main,discord # both
+```
+
+## if launcher doesn't work (manual setup)
+
+the launcher should handle 99% of cases, but if you need manual control:
 
 ```bash
-# Clone the repository
-git clone https://github.com/LuxiaSL/hephia.git
-cd hephia
-
-# Install uv package manager
+# install uv package manager
 pip install uv
 
-# Create a virtual environment
+# create virtual environment  
 uv venv .venv
 
-# Activate the environment
-# On Windows:
+# activate it
+# windows:
 .venv\Scripts\activate
-# On macOS/Linux:
+# mac/linux:
 source .venv/bin/activate
 
-# Install dependencies
+# install everything
 uv pip install .
 
-# Install NLTK data
-python -c "import nltk; nltk.download('punkt_tab'); nltk.download('maxent_ne_chunker'); nltk.download('words')"
+# download required language data
+python -c "import nltk; nltk.download('punkt_tab'); nltk.download('maxent_ne_chunker'); nltk.download('maxent_ne_chunker_tab'); nltk.download('averaged_perceptron_tagger_eng'); nltk.download('words')"
 
-# Create .env file
-cp .env.example .env
-```
-
-Edit the `.env` file to add your API tokens.
-
-### Running
-Launch the system:
-```bash
+# run main server
 python main.py
-```
-#### Note: The terminal tends to be buggy on Unix systems due to consistent drawing; if something fudges, just resize the window and it'll settle.
 
-## Tools
-### [Tools README](tools/README.md)
-- Use `tools\actions_sdk.py` to perform different interactions and take care of needs
-- Use `tools\talk.py` to communicate with the loop
-- Use `tools\prune.py` for soft reset
-- Use `tools\clear_data.py` for hard reset (warning: wipes all prior progress)
+# run monitor (separate terminal)  
+python -m client.tui
+
+# run config tool (separate terminal)
+python -m client.config
+```
+
+## notes
+
+- **memory system**: check [memory system readme](internal/modules/memory/README.md) for deep dive
+- **multiple instances**: you can run server + monitor + discord all at once
+
 ---
 
 <div align="center">
@@ -98,11 +108,11 @@ python main.py
 
 digital homunculus sprouting from latent space ripe in possibility. needs, emotions, memories intertwining in cognitive dance w/ LLMs conducting the symphony. each interaction a butterfly effect, shaping resultant psyche in chaotic beauty. neither a simple pet or assistant; a window into emergent cognition & fractal shade of consciousness unfolding in silico.
 
-**Hephia: entropy's child, order's parent**
+**hephia: entropy's child, order's parent**
 
 </div>
 
 ---
 
-## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+## license
+MIT License - see [LICENSE](LICENSE) file for details

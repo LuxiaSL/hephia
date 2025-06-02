@@ -1,0 +1,88 @@
+{
+    "categories": {
+      "maintenance": {
+        "name": "Maintenance & Cleanup",
+        "tools": {
+          "prune": {
+            "type": "simple",
+            "file": "prune.py",
+            "description": "soft reset - clear recent memory"
+          },
+          "clear_memory": {
+            "type": "simple", 
+            "file": "clear_memory_db.py",
+            "description": "clear memory database only"
+          },
+          "clear_all": {
+            "type": "args",
+            "file": "clear_data.py",
+            "description": "hard reset - wipe ALL data",
+            "confirm": true,
+            "args": [
+              {
+                "name": "--include-logs",
+                "description": "also delete log files",
+                "type": "flag"
+              }
+            ]
+          }
+        }
+      },
+      "interaction": {
+        "name": "Talk & Actions",
+        "tools": {
+          "actions": {
+            "type": "cli",
+            "file": "actions_sdk.py", 
+            "description": "interact with hephia's action system",
+            "subcommands": {
+              "list": {
+                "description": "show available actions",
+                "args": []
+              },
+              "execute": {
+                "description": "run an action",
+                "args": [
+                  {"name": "action_name", "required": true, "description": "name of action"},
+                  {"name": "--message", "description": "message to attach"},
+                  {"name": "--param", "description": "parameters (key=value)", "multiple": true}
+                ]
+              },
+              "status": {
+                "description": "check action status", 
+                "args": [
+                  {"name": "action_name", "required": true, "description": "name of action"}
+                ]
+              },
+              "get-state": {
+                "description": "show internal state",
+                "args": []
+              },
+              "test-connection": {
+                "description": "test server connection",
+                "args": []
+              }
+            }
+          },
+          "talk": {
+            "type": "args",
+            "file": "talk.py",
+            "description": "send message to hephia",
+            "args": [
+              {"name": "message", "required": true, "description": "message to send"}
+            ]
+          }
+        }
+      },
+      "utilities": {
+        "name": "Utilities",
+        "tools": {
+          "collect_logs": {
+            "type": "simple",
+            "file": "collect_logs.py", 
+            "description": "gather logs for debugging"
+          }
+        }
+      }
+    }
+  }

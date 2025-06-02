@@ -1,0 +1,20 @@
+{
+    "services": {
+      "hephia-main": {
+        "name": "Hephia Main Server",
+        "script": "main.py",
+        "description": "core hephia agent and server",
+        "port": 5517,
+        "auto_restart": true,
+        "log_file": "hephia-main.log"
+      },
+      "hephia-discord": {
+        "name": "Hephia Discord Bot", 
+        "script": "tools/discord/discord_bot.py",
+        "description": "discord integration bridge",
+        "depends_on": ["hephia-main"],
+        "auto_restart": true,
+        "log_file": "hephia-discord.log"
+      }
+    }
+  }

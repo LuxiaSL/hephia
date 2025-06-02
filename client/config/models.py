@@ -70,7 +70,7 @@ class EnvConfigModel(BaseModel):
     FALLBACK_MODEL: Optional[str] = Field("opus", description="Fallback model if primary models fail.") #
 
     # System Behavior
-    EXO_MIN_INTERVAL: float = Field(120.0, description="Minimum interval for Exo's main processing loop in seconds.", gt=0) #
+    EXO_MIN_INTERVAL: int = Field(120, description="Minimum interval for Exo's main processing loop in seconds.", gt=0) #
     HEADLESS: bool = Field(False, description="Run Hephia without its own TUI/GUI (server mode).") #
     LOG_PROMPTS: bool = Field(False, description="Enable detailed logging of prompts (can create large log files).") #
     ADVANCED_C2_LOGGING: bool = Field(False, description="Enable advanced Chapter2 logging if Chapter2 provider is used.") #
