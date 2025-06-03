@@ -65,12 +65,9 @@
             }
           },
           "talk": {
-            "type": "args",
+            "type": "simple",
             "file": "talk.py",
-            "description": "send message to hephia",
-            "args": [
-              {"name": "message", "required": true, "description": "message to send"}
-            ]
+            "description": "start 1:1 convo with hephia"
           }
         }
       },

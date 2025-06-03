@@ -22,9 +22,8 @@ if __name__ == "__main__":
                        help='Include logs folder in cleanup')
     args = parser.parse_args()
     
-    # Get the parent directory path
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
+    parent_dir = os.path.dirname(os.path.dirname(current_dir))
     data_folder = os.path.join(parent_dir, 'data')
     
     clear_data(data_folder, args.include_logs)

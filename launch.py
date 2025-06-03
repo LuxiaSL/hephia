@@ -371,15 +371,15 @@ def show_category_tools(cat_id, category):
             
         if choice in tool_choices:
             tool_id = tool_choices[choice]
-            run_tool_enhanced(tool_id, tools[tool_id])
+            run_tool_enhanced(tool_id, tools[tool_id], cat_id)
 
-def run_tool_enhanced(tool_id, tool_config):
+def run_tool_enhanced(tool_id, tool_config, category_id):
     """Run tool based on its type"""
     ensure_venv()  # make sure venv is ready
     
     tool_type = tool_config.get('type', 'simple')
     venv_python = get_venv_paths()['python']
-    script_path = Path('tools') / tool_config['file']
+    script_path = Path('tools') / category_id / tool_config['file']
     
     if not script_path.exists():
         print(f"error: tool script not found: {script_path}")

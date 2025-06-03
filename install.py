@@ -8,7 +8,6 @@ import platform
 import argparse
 from pathlib import Path
 import json
-import getpass
 import shutil
 
 def print_status(message, status="info"):
