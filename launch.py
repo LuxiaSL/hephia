@@ -519,13 +519,19 @@ def run_cli_subcommand(sub_id, sub_config, venv_python, script_path):
 def find_hephia_processes():
     """Find any running hephia processes"""
     processes = []
+    current_pid = os.getpid()
+    project_dir = str(Path.cwd().absolute())
+    
     for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
         try:
+            if proc.pid == current_pid:
+                continue
+                
             cmdline = ' '.join(proc.info['cmdline'] or [])
-            if any(x in cmdline for x in ['main.py', 'client.tui', 'client.config', 'hephia']):
-                # exclude this launcher process
-                if 'launch.py' not in cmdline:
-                    processes.append(proc)
+            
+            if project_dir in cmdline and 'python' in cmdline:
+                processes.append(proc)
+                
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
     return processes
