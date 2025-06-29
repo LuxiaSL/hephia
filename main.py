@@ -38,9 +38,8 @@ def validate_configuration() -> bool:
         ProviderType.GOOGLE: "GOOGLE_API_KEY",
         ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
         ProviderType.PERPLEXITY: "PERPLEXITY_API_KEY",
-        ProviderType.CHAPTER2: "CHAPTER2_API_KEY",
-        # Note: If you have two different keys for CHAPTER2, adjust the mapping accordingly.
-        ProviderType.CHAPTER2: "CHAPTER2_SOCKET_PATH"
+        ProviderType.CHAPTER2: "CHAPTER2_SOCKET_PATH",
+        ProviderType.LOCAL: "LOCAL_INFERENCE_BASE_URL"
     }
 
     # Validate model configurations

@@ -397,6 +397,46 @@ class OpenRouterClient(BaseAPIClient):
         response = await self._make_request("chat/completions", payload=payload)
         return self._extract_message_content(response) if return_content_only else response
 
+class LocalInferenceClient(BaseAPIClient):
+    def __init__(self, base_url: str):
+        super().__init__(
+            api_key="N/A",  # No API key needed for local inference
+            base_url=base_url,
+            service_name="LocalInference"
+        )
+
+    def _get_headers(self, extra_headers: Optional[Dict] = None) -> Dict[str, str]:
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
+    
+    def _extract_message_content(self, response: Dict[str, Any]) -> str:
+        """Extract message content from local inference response."""
+        if "choices" in response and len(response["choices"]) > 0:
+            return response["choices"][0]["message"]["content"]
+        return ""
+    
+    async def create_completion(
+        self,
+        messages: List[Dict[str, str]],
+        model: str = "none",
+        temperature: float = 0.7,
+        max_tokens: int = 150,
+        return_content_only: bool = False
+    ) -> Union[Dict[str, Any], str]:
+        """Create chat completion via local inference."""
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        
+        response = await self._make_request("chat/completions", payload=payload, timeout=Config.LLM_TIMEOUT) #more permissive timeout for generation
+        return self._extract_message_content(response) if return_content_only else response
 
 class OpenPipeClient(BaseAPIClient):
     """Client for OpenPipe API interactions"""
@@ -971,7 +1011,8 @@ class APIManager:
         google_key: Optional[str] = None,
         openrouter_key: Optional[str] = None,
         openpipe_key: Optional[str] = None,
-        perplexity_key: Optional[str] = None
+        perplexity_key: Optional[str] = None,
+        local_inference_base_url: Optional[str] = None
     ):
         self.clients = {}
         if openai_key:
@@ -987,6 +1028,8 @@ class APIManager:
         if perplexity_key:
             self.clients["perplexity"] = PerplexityClient(perplexity_key)
         self.clients["chapter2"] = Chapter2Client()
+        if local_inference_base_url:
+            self.clients["local"] = LocalInferenceClient(local_inference_base_url)
     
     @classmethod
     def from_env(cls):
@@ -998,7 +1041,8 @@ class APIManager:
             google_key=os.getenv("GOOGLE_API_KEY"),
             openrouter_key=os.getenv("OPENROUTER_API_KEY"),
             openpipe_key=os.getenv("OPENPIPE_API_KEY"),
-            perplexity_key=os.getenv("PERPLEXITY_API_KEY")
+            perplexity_key=os.getenv("PERPLEXITY_API_KEY"),
+            local_inference_base_url=os.getenv("LOCAL_INFERENCE_BASE_URL")
         )
     
     def get_client(self, provider: str) -> BaseAPIClient:

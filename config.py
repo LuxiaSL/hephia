@@ -21,6 +21,7 @@ class ProviderType(Enum):
     OPENROUTER = "openrouter"
     PERPLEXITY = "perplexity"
     CHAPTER2 = "chapter2"
+    LOCAL = "local"
 
 @dataclass
 class ModelConfig:
@@ -273,6 +274,13 @@ class Config:
             model_id="foo",
             max_tokens=550,
             description="Arago"
+        ),
+        "local-model": ModelConfig(
+            provider=ProviderType.LOCAL,
+            model_id="foo",
+            max_tokens=550,
+            description="Local Inference Model",
+            env_var="LOCAL_INFERENCE_BASE_URL"
         )
     }
 

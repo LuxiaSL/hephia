@@ -24,6 +24,7 @@ class ProviderType(Enum):
     OPENROUTER = "openrouter"
     PERPLEXITY = "perplexity"
     CHAPTER2 = "chapter2"
+    LOCAL = "local"
 
 
 class ModelConfig(BaseModel):
@@ -34,7 +35,7 @@ class ModelConfig(BaseModel):
     """
     provider: MainProviderType # Directly use the enum from main config.py
     model_id: str = Field(..., description="The specific ID of the model (e.g., 'gpt-4-turbo-preview').")
-    env_var: Optional[str] = Field(None, description="Optional environment variable to fetch API key if provider requires it specifically for this model.")
+    env_var: Optional[str] = Field(None, description="Optional environment variable to fetch API key/etc other pieces if provider requires it specifically for this model.")
     max_tokens: int = Field(250, description="Default maximum number of tokens for this model.", gt=0)
     temperature: float = Field(0.7, description="Default temperature for this model (0.0-2.0).", ge=0.0, le=2.0)
     description: str = Field("", description="User-friendly description of the model.")
@@ -81,6 +82,9 @@ class EnvConfigModel(BaseModel):
     # Chapter2 Specific (if used)
     CHAPTER2_SOCKET_PATH: Optional[str] = Field(None, description="Filesystem path to Chapter 2 Uvicorn socket (Unix-like systems).") #
     CHAPTER2_HTTP_PORT: Optional[int] = Field(5519, description="HTTP port for Chapter 2 service if not using socket.", gt=1023, lt=65536) #
+
+    # Local Inference Server
+    LOCAL_INFERENCE_BASE_URL: Optional[HttpUrl] = Field(None, description="Base URL for the local inference server (e.g., 'http://localhost:5520/v1')") #
 
     class Config:
         validate_assignment = True # Re-validate fields upon assignment

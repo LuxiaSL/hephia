@@ -176,7 +176,7 @@ class EnvEditorScreen(Vertical):
         ]
         
         advanced_fields = [
-            "LOG_PROMPTS", "ADVANCED_C2_LOGGING", "CHAPTER2_SOCKET_PATH", "CHAPTER2_HTTP_PORT"
+            "LOG_PROMPTS", "ADVANCED_C2_LOGGING", "CHAPTER2_SOCKET_PATH", "CHAPTER2_HTTP_PORT", "LOCAL_INFERENCE_BASE_URL"
         ]
         
         # Build each section
@@ -218,7 +218,7 @@ class EnvEditorScreen(Vertical):
                 self._form_widgets[field_name] = widget
             
             # Help text below (optional, only for complex fields)
-            if field_name in ["EXO_MIN_INTERVAL", "CHAPTER2_SOCKET_PATH", "CHAPTER2_HTTP_PORT"]:
+            if field_name in ["EXO_MIN_INTERVAL"]:
                 help_text = Static(description, classes="help-text-compact")
                 container.mount(help_text)
 
