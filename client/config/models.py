@@ -6,25 +6,7 @@ from pydantic import BaseModel, Field, HttpUrl
 from typing import Optional, Dict, List, Any
 from enum import Enum
 
-# To ensure we can reference ProviderType and ModelConfig from the main project
-# this import assumes the TUI is run from the project root.
 from config import ProviderType as MainProviderType, ModelConfig as MainModelConfig
-
-class ProviderType(Enum):
-    """
-    Mirrors the ProviderType enum from the main project's config.py.
-    This is used by the TUI to populate choices and validate provider types
-    independently if direct import causes issues or for type hinting within TUI models.
-    However, direct use of MainProviderType is preferred if stable.
-    """
-    OPENPIPE = "openpipe"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    GOOGLE = "google"
-    OPENROUTER = "openrouter"
-    PERPLEXITY = "perplexity"
-    CHAPTER2 = "chapter2"
-    LOCAL = "local"
 
 
 class ModelConfig(BaseModel):
@@ -33,7 +15,7 @@ class ModelConfig(BaseModel):
     mirroring the main project's ModelConfig for consistency.
     This is used for validating data to be written to models.json.
     """
-    provider: MainProviderType # Directly use the enum from main config.py
+    provider: MainProviderType
     model_id: str = Field(..., description="The specific ID of the model (e.g., 'gpt-4-turbo-preview').")
     env_var: Optional[str] = Field(None, description="Optional environment variable to fetch API key/etc other pieces if provider requires it specifically for this model.")
     max_tokens: int = Field(250, description="Default maximum number of tokens for this model.", gt=0)
@@ -72,6 +54,7 @@ class EnvConfigModel(BaseModel):
 
     # System Behavior
     EXO_MIN_INTERVAL: int = Field(120, description="Minimum interval for Exo's main processing loop in seconds.", gt=0) #
+    EXO_MAX_TURNS: int = Field(50, description="Maximum number of turns to manage context limits.", gt=0) #
     HEADLESS: bool = Field(False, description="Run Hephia without its own TUI/GUI (server mode).") #
     LOG_PROMPTS: bool = Field(False, description="Enable detailed logging of prompts (can create large log files).") #
     ADVANCED_C2_LOGGING: bool = Field(False, description="Enable advanced Chapter2 logging if Chapter2 provider is used.") #

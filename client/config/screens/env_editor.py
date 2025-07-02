@@ -168,7 +168,7 @@ class EnvEditorScreen(Vertical):
         ]
         
         system_fields = [
-            "EXO_MIN_INTERVAL", "HEADLESS", "USE_LOCAL_EMBEDDING"
+            "EXO_MIN_INTERVAL", "EXO_MAX_TURNS", "HEADLESS", "USE_LOCAL_EMBEDDING"
         ]
         
         discord_fields = [
@@ -218,9 +218,9 @@ class EnvEditorScreen(Vertical):
                 self._form_widgets[field_name] = widget
             
             # Help text below (optional, only for complex fields)
-            if field_name in ["EXO_MIN_INTERVAL"]:
-                help_text = Static(description, classes="help-text-compact")
-                container.mount(help_text)
+            # if field_name in ["EXO_MIN_INTERVAL"]:
+            #     help_text = Static(description, classes="help-text-compact")
+            #     container.mount(help_text)
 
     def _create_field_widget(self, field_name: str, field_type: Any, current_value: Any, description: str) -> Optional[Any]:
         """Create the appropriate widget for a field."""

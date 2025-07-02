@@ -134,7 +134,7 @@ class SystemHudSection(BaseHudSection):
             system_vars["system_turn_pacing_status_str"] = "First turn"
             
         # 4. Conversation Limit Info (Data provided by ExoProcessorInterface in hud_metadata)
-        conv_fill_percent = (hud_metadata.get("conversation_state_size") / Config.EXO_MAX_PAIRS) * 100 if hud_metadata.get("conversation_state_size") is not None else None
+        conv_fill_percent = (hud_metadata.get("conversation_state_size") / Config.get_exo_max_turns()) * 100 if hud_metadata.get("conversation_state_size") is not None else None
         if conv_fill_percent is not None:
             if conv_fill_percent >= 100:
                 system_vars["system_conversation_fill_percent_str"] = f"{conv_fill_percent:.0f}% full, trimming active..."

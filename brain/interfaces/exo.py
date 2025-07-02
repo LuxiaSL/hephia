@@ -189,7 +189,7 @@ class ExoProcessorInterface(CognitiveInterface):
                     assistant_metadata={"command": command if command else None},
                     user_metadata={"result": result if result else None}
                 )
-                self.conversation_state.trim_to_size(Config.EXO_MAX_PAIRS)
+                self.conversation_state.trim_to_size(Config.get_exo_max_turns())
 
                 # collecting metadata for HUD
                 if result.success:

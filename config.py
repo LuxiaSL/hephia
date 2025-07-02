@@ -45,11 +45,12 @@ class Config:
     format:
     {
         "model_name": {
-            "provider": "openai",  # or "anthropic", "google", etc.
-            "model_id": "your-model-id",
+            "provider": "openrouter",  # or "anthropic", "google", etc.
+            "model_id": "vendor/your-model-id", # or "model-id" for non-openrouter providers,
             "max_tokens": 300,
             "temperature": 0.8,
             "description": "Your custom model description",
+            "env_var": "LOCAL_INFERENCE_BASE_URL" # optional, only needed for local inference models
         }
     }
 
@@ -160,11 +161,15 @@ class Config:
     def get_log_prompts(cls) -> bool:
         return os.getenv("LOG_PROMPTS", "False").lower() in ("true", "1", "yes")
     
-    @staticmethod
-    def get_advanced_c2_logging():
+    @classmethod
+    def get_advanced_c2_logging(cls) -> bool:
         """Return whether advanced Chapter2 logging is enabled"""
         return os.getenv('ADVANCED_C2_LOGGING', 'False').lower() in ('true', '1', 'yes')
     
+    @classmethod
+    def get_exo_max_turns(cls) -> int:
+        return int(os.getenv("EXO_MAX_TURNS", "50"))
+
     AVAILABLE_MODELS = {
         "gpt4": ModelConfig(
             provider=ProviderType.OPENAI,
@@ -299,7 +304,6 @@ class Config:
     # Processor settings
     EXO_TIMEOUT = 100.0
     LLM_TIMEOUT = 90.0     
-    EXO_MAX_PAIRS = 50
     INITIALIZATION_TIMEOUT = 30
     SHUTDOWN_TIMEOUT = 15
 
