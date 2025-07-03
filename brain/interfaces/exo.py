@@ -184,10 +184,8 @@ class ExoProcessorInterface(CognitiveInterface):
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
 
-                if command.applied_fixes != []:
-                    response_to_return = command.metadata["parsed_text"]
-                else:
-                    response_to_return = llm_response
+                response_to_return = TerminalFormatter.format_command_cleanly(command)
+                
                 self.conversation_state.add_exchange(
                     assistant_content=response_to_return,
                     user_content=final_response,

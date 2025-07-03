@@ -13,7 +13,8 @@ from brain.commands.model import (
     CommandResult,
     CommandDefinition,
     EnvironmentCommands,
-    CommandValidationError
+    CommandValidationError,
+    ParsedCommand
 )
 from brain.environments.base_environment import BaseEnvironment
 
@@ -117,6 +118,53 @@ class TerminalFormatter:
             state_str = state_str + "\n" + "###\n".join(memory_lines)
 
         return state_str
+    
+    @staticmethod
+    def format_command_cleanly(command: ParsedCommand) -> str:
+        """
+        Format a successfully parsed command back into clean canonical syntax.
+        
+        This reconstructs the clean command that was actually executed,
+        not the raw LLM output that may have contained formatting issues.
+
+        Args:
+            command: ParsedCommand object containing the executed command details
+
+        Returns:
+            Clean canonical command string (e.g., 'notes create "My Note" --tags=work')
+        """
+        if not isinstance(command, ParsedCommand):
+            return "Invalid command structure"
+
+        # Start building the command string
+        parts = []
+        
+        # Add environment if it exists (global commands have None environment)
+        if command.environment:
+            parts.append(command.environment)
+        
+        # Add action
+        parts.append(command.action)
+        
+        # Add parameters, properly quoted if they contain spaces or special characters
+        for param in command.parameters:
+            if ' ' in param or '"' in param or "'" in param:
+                # Escape any existing quotes and wrap in quotes
+                escaped_param = param.replace('"', '\\"')
+                parts.append(f'"{escaped_param}"')
+            else:
+                parts.append(param)
+        
+        # Add flags in --name=value format
+        for flag_name, flag_value in command.flags.items():
+            if ' ' in flag_value or '"' in flag_value or "'" in flag_value:
+                # Escape and quote flag values that need it
+                escaped_value = flag_value.replace('"', '\\"')
+                parts.append(f'--{flag_name}="{escaped_value}"')
+            else:
+                parts.append(f'--{flag_name}={flag_value}')
+        
+        return ' '.join(parts)
     
     @staticmethod
     def format_notifications(updates: str, result: str) -> str:
