@@ -59,9 +59,16 @@ class CommandPreprocessor:
             Tuple of (parsed_command, error) - one will always be None
         """
         try: 
-            if '"' not in command and "'" not in command and command.count('\n') > 0:
-                command = command.split('\n', 1)[0].strip()
-                
+            fixes_applied = []
+            if '"' not in command and "'" not in command:
+                command = command.split('\n')[0].strip()
+                fixes_applied.append("linecut")
+            elif '\n' in command:
+                first_line = command.split('\n')[0]
+                if '"' not in first_line and "'" not in first_line:
+                    command = first_line.strip()
+                fixes_applied.append("linecut")
+
             # Handle global commands first
             if command.strip().lower() == GlobalCommands.HELP:
                 return ParsedCommand(
@@ -70,10 +77,9 @@ class CommandPreprocessor:
                     parameters=[],
                     flags={},
                     raw_input=command,
-                    applied_fixes=[]
+                    applied_fixes=fixes_applied,
+                    metadata={"parsed_text": command}
                 ), None
-
-            
 
             # Extract only the first valid command from potential multi-command input
             extracted = self._extract_first_command(command, available_commands)
@@ -96,6 +102,8 @@ class CommandPreprocessor:
             try:
                 sanitized = self._sanitize_command(extracted)
                 parsed = self._parse_command(sanitized)
+                parsed.applied_fixes = fixes_applied
+                parsed.metadata["parsed_text"] = sanitized
             except ValueError as e:
                 error = CommandValidationError(
                         message=str(e),
@@ -542,7 +550,7 @@ class CommandPreprocessor:
         command: ParsedCommand,
         available_commands: Dict[str, EnvironmentCommands]
     ) -> Optional[ParsedCommand]:
-        #rework this to make sure that it's a tuple/returns the necessary info in parsedcommand for applied fixes via new model structure
+        #TODO: rework this to make sure that it's a tuple/returns the necessary info in parsedcommand for applied fixes via new model structure
         """Attempt to correct invalid command using LLM."""
         if not isinstance(command, ParsedCommand):
             return None

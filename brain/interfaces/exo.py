@@ -184,9 +184,12 @@ class ExoProcessorInterface(CognitiveInterface):
                 # Update conversation
                 brain_trace.interaction.update("Updating conversation state")
 
-                #just return the llm response; the final_response should carry all information relating to any processing *we* did.
+                if command.applied_fixes != []:
+                    response_to_return = command.metadata["parsed_text"]
+                else:
+                    response_to_return = llm_response
                 self.conversation_state.add_exchange(
-                    assistant_content=llm_response,
+                    assistant_content=response_to_return,
                     user_content=final_response,
                     assistant_metadata={"command": command if command else None},
                     user_metadata={"result": result if result else None}

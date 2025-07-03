@@ -82,6 +82,7 @@ class ParsedCommand:
     # but with direction on what we did internally so that it might be able to fix in the future.
     raw_input: str  # Original LLM text for reference/debugging
     applied_fixes: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class CommandValidationError:
