@@ -149,6 +149,8 @@ class ExoProcessorInterface(CognitiveInterface):
 
                 log_path = "data/logs/exo_conversation.log"
 
+                BrainLogger.debug(f"collected notifications: {other_updates}")
+
                 if error:
                     # cleaning only for when hallucinated context is terribly long
                     cleaned_response = await self.clean_errored_response(llm_response)

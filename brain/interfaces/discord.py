@@ -56,28 +56,27 @@ class DiscordInterface(CognitiveInterface):
             context_parts = {}
             async for key, value in self.get_cognitive_context():
                 context_parts[key] = value
-            
-            # Build final context string from parts
-            formatted_context = context_parts.get('formatted_context', 'No context available')
-            other_updates = context_parts.get('updates', '')
-            context = f"{formatted_context}\n###\nRecent Updates:\n{other_updates}"
-            
-            # Log the entire context for debugging
-            BrainLogger.info(f"[{self.interface_id}] Received cognitive context: {context}")
-            
-            # Get LLM response
-            prompt = await self._format_social_prompt(
-                message_content,
-                author,
-                channel_data,
-                content.get('conversation_history', []),
-                context
-            )
-
-            max_retries = 3
-            response = None
 
             if Config.get_discord_reply_on_tag():
+                # Build final context string from parts
+                formatted_context = context_parts.get('formatted_context', 'No context available')
+                other_updates = context_parts.get('updates', '')
+                context = f"{formatted_context}\n###\nRecent Updates:\n{other_updates}"
+                
+                # Log the entire context for debugging
+                BrainLogger.info(f"[{self.interface_id}] Received cognitive context: {context}")
+                
+                # Get LLM response
+                prompt = await self._format_social_prompt(
+                    message_content,
+                    author,
+                    channel_data,
+                    content.get('conversation_history', []),
+                    context
+                )
+
+                max_retries = 3
+                response = None
                 for attempt in range(max_retries):
                     response = await self._get_social_response(prompt)
                     if response is not None:
@@ -88,7 +87,10 @@ class DiscordInterface(CognitiveInterface):
                 # If all retries failed, return empty string
                 if response is None:
                     BrainLogger.error("Failed to get social response after 3 attempts")
-            
+            else:
+                # return N/A for reply if not replying on tag
+                response = "N/A"
+
             # Create notification for other interfaces
             notification = await self.create_notification({
                 "response": response,
@@ -152,12 +154,20 @@ class DiscordInterface(CognitiveInterface):
                     path = f"{guild}:{channel}" if guild else channel
 
                 author = content.get('author', 'Unknown')
-                
-                summary_text = (
-                    f"Discord update: Replied to {author} in {path}\n"
-                    f"{author}: {content.get('message', '')}\n"
-                    f"I responded: {content.get('response', '')[:150]}{'...' if len(content.get('response', '')) > 150 else ''}" if content.get("response") != None else None
-                )
+
+                if content.get("response") is "N/A":
+                    # If no response, just summarize the message
+                    summary_text = (
+                        f"Discord Ping: {author} in {path}\n"
+                        f"{author}: {content.get('message', '')}"
+                    )
+                else:
+                    summary_text = (
+                        f"Discord update: Replied to {author} in {path}\n"
+                        f"{author}: {content.get('message', '')}\n"
+                        f"I responded: {content.get('response', '')[:150]}{'...' if len(content.get('response', '')) > 150 else ''}" if content.get("response") != None else None
+                    )
+
                 formatted.append(summary_text)
         
         if not formatted:
