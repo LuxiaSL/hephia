@@ -155,7 +155,7 @@ class DiscordInterface(CognitiveInterface):
 
                 author = content.get('author', 'Unknown')
 
-                if content.get("response") is "N/A":
+                if content.get("response") == "N/A":
                     # If no response, just summarize the message
                     summary_text = (
                         f"Discord Ping: {author} in {path}\n"
