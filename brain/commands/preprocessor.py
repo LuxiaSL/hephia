@@ -59,6 +59,9 @@ class CommandPreprocessor:
             Tuple of (parsed_command, error) - one will always be None
         """
         try: 
+            if '"' not in command and "'" not in command and command.count('\n') > 0:
+                command = command.split('\n', 1)[0].strip()
+                
             # Handle global commands first
             if command.strip().lower() == GlobalCommands.HELP:
                 return ParsedCommand(
@@ -70,8 +73,7 @@ class CommandPreprocessor:
                     applied_fixes=[]
                 ), None
 
-            if '"' not in command and "'" not in command and command.count('\n') > 0:
-                command = command.split('\n', 1)[0].strip()
+            
 
             # Extract only the first valid command from potential multi-command input
             extracted = self._extract_first_command(command, available_commands)
