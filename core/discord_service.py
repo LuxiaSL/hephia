@@ -319,7 +319,20 @@ class DiscordService:
                                     f"Successfully parsed JSON response | Data keys: "
                                     f"{list(data.keys()) if isinstance(data, dict) else 'array'}"
                                 )
+
+                                if isinstance(data, dict) and "success" in data:                                    
+                                    if data.get("success") and "data" in data:
+                                        extracted_data = data["data"]
+                                        SystemLogger.debug(f"Extracted data from wrapper: {type(extracted_data)}")
+                                        return extracted_data, status
+                                        
+                                    elif not data.get("success"):
+                                        error_msg = data.get("message", "Unknown error")
+                                        SystemLogger.warning(f"Returned error: {error_msg}")
+                                        return {"error": error_msg}, status
+                                
                                 return data, status
+                            
                             except json.JSONDecodeError as e:
                                 SystemLogger.error(
                                     f"Invalid JSON | Endpoint: {endpoint} | Status: {status} | "
@@ -558,6 +571,15 @@ class DiscordService:
                 
                 # Return structured error
                 return {"error": error_msg}, status
+            
+            if status == 200 and isinstance(result, dict):
+                if "reply_message" in result and "target_message" in result:
+                    legacy_format = {
+                        **result["reply_message"],  # id, author, content, timestamp, etc.
+                        "replied_to": result["target_message"],
+                        "status": "ok"
+                    }
+                    return legacy_format, status
             
             return result, status
             

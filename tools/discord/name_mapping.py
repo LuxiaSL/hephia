@@ -17,11 +17,11 @@ import logging
 from typing import Dict, List, Optional, Tuple, Set
 import discord
 
-from .bot_models import (
+from bot_models import (
     UserMapping, ChannelMapping, EmojiMapping, 
     MessageFormatResult
 )
-from .bot_exceptions import (
+from bot_exceptions import (
     UserNotFoundError, ChannelNotFoundError, EmojiNotFoundError
 )
 

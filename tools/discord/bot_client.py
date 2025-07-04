@@ -13,17 +13,18 @@ Key responsibilities:
 """
 
 import asyncio
+import contextlib
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 import discord
 import aiohttp
 
-from .bot_models import BotConfig, BotStatus
-from .name_mapping import NameMappingService
-from .message_cache import MessageCacheManager
-from .context_windows import ContextWindowManager
-from .message_logic import MessageProcessor
+from bot_models import BotConfig, BotStatistics
+from name_mapping import NameMappingService
+from message_cache import MessageCacheManager
+from context_windows import ContextWindowManager
+from message_logic import MessageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +49,16 @@ class DiscordBotClient(discord.Client):
         
         self.config = config
         self.session = session
-        self.status = BotStatus()
+        self.bot_stats = BotStatistics()
         
         # Service modules (will be initialized after client is ready)
         self.name_mapping: Optional[NameMappingService] = None
         self.cache_manager: Optional[MessageCacheManager] = None
         self.context_manager: Optional[ContextWindowManager] = None
         self.message_processor: Optional[MessageProcessor] = None
+
+        # Handle for the periodic mapping-refresh task
+        self._periodic_task: Optional[asyncio.Task] = None
         
         # Initialization flag
         self._services_initialized = False
@@ -101,8 +105,10 @@ class DiscordBotClient(discord.Client):
         if self.context_manager:
             await self.context_manager.shutdown()
             
-        if self.cache_manager:
-            await self.cache_manager.shutdown()
+        if self._periodic_task:
+            self._periodic_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._periodic_task
             
         # name_mapping doesn't have async shutdown
         
@@ -115,9 +121,9 @@ class DiscordBotClient(discord.Client):
         logger.info(f"Bot logged in as {self.user} (id={self.user.id})")
         
         # Update status
-        self.status.is_ready = True
-        self.status.connected_guilds = len(self.guilds)
-        self.status.uptime_start = datetime.now()
+        self.bot_stats.is_ready = True
+        self.bot_stats.connected_guilds = len(self.guilds)
+        self.bot_stats.uptime_start = datetime.now()
         
         # Set up service modules
         await self.setup_services()
@@ -125,25 +131,28 @@ class DiscordBotClient(discord.Client):
         # Update status with service info
         if self.cache_manager:
             cache_stats = self.cache_manager.get_global_stats()
-            self.status.total_channels = cache_stats.get("total_channels", 0)
-            self.status.cached_messages = cache_stats.get("total_messages", 0)
+            self.bot_stats.total_channels = cache_stats.get("total_channels", 0)
+            self.bot_stats.cached_messages = cache_stats.get("total_messages", 0)
         
         if self.context_manager:
             context_stats = self.context_manager.get_window_stats()
-            self.status.active_context_windows = context_stats.get("active_windows", 0)
+            self.bot_stats.active_context_windows = context_stats.get("active_windows", 0)
         
-        logger.info(f"Bot ready - Connected to {self.status.connected_guilds} guilds")
-        logger.info(f"Cached {self.status.cached_messages} messages across {self.status.total_channels} channels")
+        logger.info(f"Bot ready - Connected to {self.bot_stats.connected_guilds} guilds")
+        logger.info(f"Cached {self.bot_stats.cached_messages} messages across {self.bot_stats.total_channels} channels")
         
         # Set up periodic tasks
         if self.name_mapping:
-            asyncio.create_task(self._periodic_mapping_updates())
+            # Keep a reference so we can cancel it on shutdown
+            self._periodic_task = asyncio.create_task(
+                self._periodic_mapping_updates()
+            )
     
     async def on_message(self, message: discord.Message):
         """Handle new message events."""
         try:
             # Update status
-            self.status.last_message_time = datetime.now()
+            self.bot_stats.last_message_time = datetime.now()
             
             # Ensure services are initialized
             if not self._services_initialized:
@@ -197,7 +206,7 @@ class DiscordBotClient(discord.Client):
             logger.info(f"Bot joined guild: {guild.name} (id={guild.id})")
             
             # Update status
-            self.status.connected_guilds = len(self.guilds)
+            self.bot_stats.connected_guilds = len(self.guilds)
             
             # Update mappings
             if self.name_mapping:
@@ -212,7 +221,7 @@ class DiscordBotClient(discord.Client):
             logger.info(f"Bot removed from guild: {guild.name} (id={guild.id})")
             
             # Update status
-            self.status.connected_guilds = len(self.guilds)
+            self.bot_stats.connected_guilds = len(self.guilds)
             
             # Update mappings
             if self.name_mapping:
@@ -333,23 +342,23 @@ class DiscordBotClient(discord.Client):
     
     # Utility methods
     
-    def get_status(self) -> BotStatus:
+    def get_bot_stats(self) -> BotStatistics:
         """Get current bot status."""
         if self.cache_manager:
             cache_stats = self.cache_manager.get_global_stats()
-            self.status.cached_messages = cache_stats.get("total_messages", 0)
-            self.status.total_channels = cache_stats.get("total_channels", 0)
+            self.bot_stats.cached_messages = cache_stats.get("total_messages", 0)
+            self.bot_stats.total_channels = cache_stats.get("total_channels", 0)
         
         if self.context_manager:
             context_stats = self.context_manager.get_window_stats()
-            self.status.active_context_windows = context_stats.get("active_windows", 0)
+            self.bot_stats.active_context_windows = context_stats.get("active_windows", 0)
         
-        return self.status
+        return self.bot_stats
     
     def get_detailed_stats(self) -> Dict[str, Any]:
         """Get detailed statistics about the bot."""
         stats = {
-            "status": self.get_status().__dict__,
+            "status": self.get_bot_stats().to_dict(),
             "guilds": len(self.guilds),
             "text_channels": sum(1 for guild in self.guilds for channel in guild.channels if isinstance(channel, discord.TextChannel)),
             "voice_channels": sum(1 for guild in self.guilds for channel in guild.channels if isinstance(channel, discord.VoiceChannel)),

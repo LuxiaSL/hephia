@@ -191,6 +191,18 @@ class MessageCacheStats:
     def api_efficiency(self) -> float:
         """Calculate API call efficiency (messages per API call)."""
         return self.total_messages / self.api_calls if self.api_calls > 0 else 0.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-serializable dictionary."""
+        return {
+            "total_messages": self.total_messages,
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "api_calls": self.api_calls,
+            "last_reset": self.last_reset.isoformat(),
+            "hit_rate": self.hit_rate,
+            "api_efficiency": self.api_efficiency
+        }
 
 
 @dataclass
@@ -218,7 +230,7 @@ class BotConfig:
 
 
 @dataclass
-class BotStatus:
+class BotStatistics:
     """
     Current status of the Discord bot.
     """
@@ -242,6 +254,20 @@ class BotStatus:
         hours, remainder = divmod(total_seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
         return f"{hours}h {minutes}m {seconds}s"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to JSON-serializable dictionary."""
+        return {
+            "is_ready": self.is_ready,
+            "connected_guilds": self.connected_guilds,
+            "total_channels": self.total_channels,
+            "cached_messages": self.cached_messages,
+            "active_context_windows": self.active_context_windows,
+            "uptime_start": self.uptime_start.isoformat(),
+            "last_message_time": self.last_message_time.isoformat() if self.last_message_time else None,
+            "uptime_seconds": self.uptime_seconds,
+            "uptime_formatted": self.uptime_formatted
+        }
 
 
 @dataclass

@@ -32,6 +32,7 @@ from aiohttp import web
 from dotenv import load_dotenv
 from datetime import datetime
 
+# Import all our modular components
 from bot_client import DiscordBotClient
 from api_handlers import DiscordAPIHandlers, create_routes
 from bot_models import BotConfig
@@ -80,24 +81,10 @@ load_dotenv()
 
 # Bot configuration
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-HEPHIA_SERVER_URL = os.getenv("HEPHIA_SERVER_URL", "http://localhost:5517")
-BOT_HTTP_PORT = int(os.getenv("BOT_HTTP_PORT", "5518"))
+HEPHIA_SERVER_URL = "http://localhost:5517"
+BOT_HTTP_PORT = 5520
 
 # Create bot configuration
-bot_config = BotConfig(
-    max_message_cache_size=int(os.getenv("MAX_MESSAGE_CACHE_SIZE", "1000")),
-    context_window_expiry_minutes=int(os.getenv("CONTEXT_WINDOW_EXPIRY_MINUTES", "5")),
-    max_concurrent_requests=int(os.getenv("MAX_CONCURRENT_REQUESTS", "5")),
-    enable_debug_logging=os.getenv("ENABLE_DEBUG_LOGGING", "false").lower() == "true",
-    high_message_threshold=int(os.getenv("HIGH_MESSAGE_THRESHOLD", "50")),
-    random_engagement_rate=float(os.getenv("RANDOM_ENGAGEMENT_RATE", "0.75")),
-    cache_cleanup_interval=int(os.getenv("CACHE_CLEANUP_INTERVAL", "300")),
-    max_cache_age_hours=int(os.getenv("MAX_CACHE_AGE_HOURS", "24")),
-    requests_per_minute=int(os.getenv("REQUESTS_PER_MINUTE", "60")),
-    burst_size=int(os.getenv("BURST_SIZE", "10"))
-)
-
-# Global configuration
 bot_config = BotConfig(
     max_message_cache_size=int(os.getenv("MAX_MESSAGE_CACHE_SIZE", "1000")),
     context_window_expiry_minutes=int(os.getenv("CONTEXT_WINDOW_EXPIRY_MINUTES", "5")),
@@ -147,14 +134,16 @@ class DiscordBotService:
                 config=self.config,
                 session=self.session
             )
-            
+
             # Wait for bot to be ready before setting up HTTP server
             logger.info("Starting Discord bot client...")
             bot_task = asyncio.create_task(self.bot_client.start(token))
             
-            # Wait for bot to be ready
             while not self.bot_client.is_ready():
                 await asyncio.sleep(0.1)
+
+            while self.bot_client.context_manager is None:
+                await asyncio.sleep(0.05)
             
             logger.info("Discord bot client ready, setting up HTTP server...")
             

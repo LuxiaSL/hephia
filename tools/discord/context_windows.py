@@ -11,8 +11,8 @@ from typing import Dict, Optional, List
 from datetime import datetime
 import discord
 
-from .bot_models import ContextWindow, EnhancedMessage
-from .bot_exceptions import (
+from bot_models import ContextWindow, EnhancedMessage
+from bot_exceptions import (
     NoContextWindowError,
     ContextWindowExpiredError, 
     InvalidWindowTimestampError,

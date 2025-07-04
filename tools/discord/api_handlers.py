@@ -21,10 +21,11 @@ from datetime import datetime
 from aiohttp import web
 import discord
 
-from .bot_exceptions import CacheTimeoutError, ContextWindowError
-from .name_mapping import NameMappingService
-from .message_cache import MessageCacheManager
-from .context_windows import ContextWindowManager
+from bot_exceptions import CacheTimeoutError, ContextWindowError
+from name_mapping import NameMappingService
+from message_cache import MessageCacheManager
+from context_windows import ContextWindowManager
+from bot_client import DiscordBotClient
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class DiscordAPIHandlers:
     
     def __init__(
         self,
-        bot_client: discord.Client,
+        bot_client: DiscordBotClient,
         name_mapping: NameMappingService,
         cache_manager: MessageCacheManager,
         context_manager: ContextWindowManager
@@ -464,6 +465,8 @@ class DiscordAPIHandlers:
                     formatted_msg["reference"] = reference
                     formatted_messages.append(formatted_msg)
                 
+                formatted_messages.reverse()  # Newest first
+
                 # Create context window
                 if message_references:
                     await self.context_manager.create_window(
@@ -478,10 +481,10 @@ class DiscordAPIHandlers:
                     "channel_name": channel.name,
                     "message_count": len(formatted_messages),
                     "messages": formatted_messages,
-                    "display_order": "newest_first",
+                    "display_order": "oldest_first",
                     "numbering": "newest_first",
                     "context_window_created": len(message_references) > 0,
-                    "cache_stats": self.cache_manager.get_cache(channel).get_stats().__dict__
+                    "cache_stats": self.cache_manager.get_cache(channel).get_stats().to_dict()
                 }
                 
                 logger.info(f"[{request_id}] Successfully retrieved {len(formatted_messages)} messages")
@@ -968,39 +971,26 @@ class DiscordAPIHandlers:
                 ),
                 status=500
             )
-    
+
     async def handle_health_check(self, request: web.Request) -> web.Response:
-        """
-        GET /health
-        
-        Health check endpoint with detailed status information.
-        """
+        """GET /health or /status"""
         try:
+            detailed_stats = self.bot.get_detailed_stats()
+            
             stats = {
-                "bot_ready": self.bot.is_ready(),
-                "guild_count": len(self.bot.guilds),
-                "cache_stats": self.cache_manager.get_global_stats(),
-                "mapping_stats": self.name_mapping.get_mapping_stats(),
-                "context_stats": self.context_manager.get_window_stats(),
+                **detailed_stats,
                 "request_count": self.request_count,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
             return web.json_response(
-                APIResponse.success(
-                    data=stats,
-                    message="Discord bot is healthy"
-                )
+                APIResponse.success(data=stats, message="Discord bot is healthy")
             )
             
         except Exception as e:
+            logger.error(f"Health check error: {e}")
             return web.json_response(
-                APIResponse.error(
-                    "HEALTH_CHECK_ERROR",
-                    "Health check failed",
-                    details=str(e),
-                    status_code=500
-                ),
+                APIResponse.error("HEALTH_CHECK_ERROR", "Health check failed", details=str(e), status_code=500),
                 status=500
             )
 
@@ -1015,4 +1005,5 @@ def create_routes(handlers: DiscordAPIHandlers) -> List[web.RouteDef]:
         web.post("/reply-to-message", handlers.handle_reply_to_message),
         web.get("/user-list", handlers.handle_get_user_list),
         web.get("/health", handlers.handle_health_check),
+        web.get("/status", handlers.handle_health_check)
     ]

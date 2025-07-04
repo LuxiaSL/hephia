@@ -15,10 +15,10 @@ from typing import Dict, Optional, List, Any
 import discord
 import aiohttp
 
-from .bot_models import BotConfig
-from .name_mapping import NameMappingService
-from .message_cache import MessageCacheManager
-from .context_windows import ContextWindowManager
+from bot_models import BotConfig
+from name_mapping import NameMappingService
+from message_cache import MessageCacheManager
+from context_windows import ContextWindowManager
 
 logger = logging.getLogger(__name__)
 

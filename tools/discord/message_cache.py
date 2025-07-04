@@ -1,5 +1,5 @@
 """
-Enhanced message cache with real-time updates and sophisticated caching. It provides:
+Enhanced message cache with real-time updates and sophisticated caching.
 
 - Real-time message updates (edits, deletions)
 - Linked-list sparse indexing for efficient traversal
@@ -22,9 +22,9 @@ from collections import defaultdict
 import discord
 from sortedcontainers import SortedDict
 
-from .bot_models import EnhancedMessage, MessageCacheStats, BotConfig
-from .bot_exceptions import CacheError, CacheTimeoutError
-from .name_mapping import NameMappingService
+from bot_models import EnhancedMessage, MessageCacheStats, BotConfig
+from bot_exceptions import CacheError, CacheTimeoutError
+from name_mapping import NameMappingService
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +68,7 @@ class EnhancedChannelCache:
         """
         Set the previous link in the sparse linked-list structure.
         
-        This is a key method from Chapter 2 that maintains cache coherency
-        during updates. It handles the complex logic of updating the linked-list
+        It handles the complex logic of updating the linked-list
         structure when messages are added or removed.
         
         Args:
@@ -113,40 +112,7 @@ class EnhancedChannelCache:
             latest: Whether this is the latest message in the channel
         """
         async with self._lock:
-            try:
-                # Handle case where message comes in after deletion
-                if self.messages.get(message.id, True) is None:
-                    logger.debug(f"Ignoring update for previously deleted message {message.id}")
-                    return
-                
-                # Check if we already have this message
-                if old := self.messages.get(message.id):
-                    # Only update if this is a more recent edit
-                    if (message.edited_at and old.edited_at and 
-                        message.edited_at <= old.edited_at):
-                        logger.debug(f"Ignoring older edit for message {message.id}")
-                        return
-                
-                # Store the message
-                self.messages[message.id] = message
-                self.stats.total_messages += 1
-                
-                # Update sparse linked-list structure
-                if latest:
-                    # This is the newest message, update the chain
-                    self.sparse[message.id] = self._set_prev(
-                        message.id, lambda prev, last: last or prev
-                    )
-                else:
-                    # This is an older message, just mark it as not linked
-                    if message.id not in self.sparse:
-                        self.sparse[message.id] = False
-                
-                logger.debug(f"Updated cache for message {message.id} (latest={latest})")
-                
-            except Exception as e:
-                logger.error(f"Error updating cache for message {message.id}: {e}")
-                raise CacheError(f"Failed to update cache: {e}")
+            await self._update_without_lock(message, latest)
     
     async def delete(self, message_id: int) -> None:
         """
@@ -184,31 +150,18 @@ class EnhancedChannelCache:
     ) -> AsyncIterator[discord.Message]:
         """
         Get message history with smart cache + API fallback.
-        
-        This is the core method that provides efficient history traversal
-        using the cached data when possible and falling back to the Discord API
-        when necessary.
-        
-        Args:
-            limit: Maximum number of messages to return
-            before: Get messages before this message
-            after: Get messages after this message
-            oldest_first: Whether to return oldest messages first
-            
-        Yields:
-            discord.Message objects in the requested order
         """
-        async with self._lock:
-            try:
-                remaining = limit
+        # Step 1: Get cached messages (brief lock acquisition)
+        cached_messages = []
+        last_cached_id: Optional[int] = None
+        remaining = limit
+        
+        try:
+            async with self._lock:
                 beforeid: Optional[int] = before and before.id
                 afterid: Optional[int] = after and after.id
                 
-                # Track messages yielded from cache
-                cached_messages = []
-                last_cached_id: Optional[int] = None
-                
-                # First, try to serve from cache
+                # Try to serve from cache
                 if (before is None and self.up_to_date) or self.sparse.get(beforeid):
                     logger.debug(f"Serving history from cache for channel {self.channel_id}")
                     self.stats.cache_hits += 1
@@ -242,59 +195,108 @@ class EnhancedChannelCache:
                         # If this message doesn't link to the next, we need API fallback
                         if not has_next:
                             break
-                
-                # If we need more messages, fall back to Discord API
-                if remaining is None or remaining > 0:
-                    logger.debug(f"Falling back to API for channel {self.channel_id}")
-                    self.stats.cache_misses += 1
-                    self.stats.api_calls += 1
-                    
-                    # Determine the starting point for API fetch
-                    api_before = None
-                    if last_cached_id:
-                        api_before = discord.Object(last_cached_id)
-                    elif before:
-                        api_before = before
-                    
-                    # Fetch from Discord API
-                    try:
-                        async with asyncio.timeout(30.0):  # 30 second timeout
-                            api_messages = []
-                            async for message in self.channel.history(
-                                limit=remaining,
-                                before=api_before,
-                                after=after,
-                                oldest_first=False  # Always fetch newest first
-                            ):
-                                api_messages.append(message)
-                                
-                                # Update cache with fetched messages
-                                await self.update(message, len(api_messages) == 1 and not api_before)
-                            
-                            # Combine cached and API messages
-                            all_messages = cached_messages + api_messages
-                            
-                    except asyncio.TimeoutError:
-                        logger.error(f"API timeout fetching history for channel {self.channel_id}")
-                        raise CacheTimeoutError("Discord API timeout")
-                    except Exception as e:
-                        logger.error(f"API error fetching history for channel {self.channel_id}: {e}")
-                        # Still return cached messages if we have them
-                        all_messages = cached_messages
-                else:
-                    # We have enough from cache
-                    all_messages = cached_messages
-                
-                # Sort messages by timestamp (newest first by default)
-                all_messages.sort(key=lambda m: m.created_at, reverse=not oldest_first)
-                
-                # Yield messages in the requested order
-                for message in all_messages:
-                    yield message
-                    
+        except Exception as e:
+            logger.error(f"Error accessing cache for channel {self.channel_id}: {e}")
+            # Continue with API fallback
+            cached_messages = []
+            remaining = limit
+        
+        # Step 2: API fallback if needed (NO LOCK during network calls)
+        api_messages = []
+        if remaining is None or remaining > 0:
+            logger.debug(f"Falling back to API for channel {self.channel_id}")
+            self.stats.cache_misses += 1
+            self.stats.api_calls += 1
+            
+            # Determine the starting point for API fetch
+            api_before = None
+            if last_cached_id:
+                api_before = discord.Object(last_cached_id)
+            elif before:
+                api_before = before
+            
+            # Fetch from Discord API with timeout (outside any locks)
+            try:
+                async with asyncio.timeout(30.0):  # 30 second timeout
+                    async for message in self.channel.history(
+                        limit=remaining,
+                        before=api_before,
+                        after=after,
+                        oldest_first=False  # Always fetch newest first
+                    ):
+                        api_messages.append(message)
+                        
+            except asyncio.TimeoutError:
+                logger.error(f"API timeout fetching history for channel {self.channel_id}")
+                # Return what we have from cache instead of raising if we have cached messages
+                if not cached_messages:
+                    raise CacheTimeoutError("Discord API timeout")
             except Exception as e:
-                logger.error(f"Error in history traversal for channel {self.channel_id}: {e}")
-                raise CacheError(f"Failed to get history: {e}")
+                logger.error(f"API error fetching history for channel {self.channel_id}: {e}")
+                # Return cached messages if we have them, otherwise raise
+                if not cached_messages:
+                    raise CacheError(f"Failed to get history: {e}")
+            
+            # Step 3: Update cache with fetched messages (separate lock acquisition)
+            if api_messages:
+                try:
+                    async with self._lock:
+                        for i, message in enumerate(api_messages):
+                            # Only call update without the lock inside
+                            await self._update_without_lock(message, i == 0 and not api_before)
+                except Exception as e:
+                    logger.warning(f"Error updating cache with API results: {e}")
+                    # Continue - we still have the messages to return
+        
+        # Step 4: Combine and yield results
+        all_messages = cached_messages + api_messages
+        
+        # Sort messages by timestamp (newest first by default)
+        all_messages.sort(key=lambda m: m.created_at, reverse=not oldest_first)
+        
+        # Yield messages in the requested order
+        for message in all_messages:
+            yield message
+
+    async def _update_without_lock(self, message: discord.Message, latest: bool = False) -> None:
+        """
+        Update the cache without acquiring the lock (lock should already be held).
+        This is a helper method to avoid deadlocks in the history method.
+        """
+        try:
+            # Handle case where message comes in after deletion
+            if self.messages.get(message.id, True) is None:
+                logger.debug(f"Ignoring update for previously deleted message {message.id}")
+                return
+            
+            # Check if we already have this message
+            if old := self.messages.get(message.id):
+                # Only update if this is a more recent edit
+                if (message.edited_at and old.edited_at and 
+                    message.edited_at <= old.edited_at):
+                    logger.debug(f"Ignoring older edit for message {message.id}")
+                    return
+            
+            # Store the message
+            self.messages[message.id] = message
+            self.stats.total_messages += 1
+            
+            # Update sparse linked-list structure
+            if latest:
+                # This is the newest message, update the chain
+                self.sparse[message.id] = self._set_prev(
+                    message.id, lambda prev, last: last or prev
+                )
+            else:
+                # This is an older message, just mark it as not linked
+                if message.id not in self.sparse:
+                    self.sparse[message.id] = False
+            
+            logger.debug(f"Updated cache for message {message.id} (latest={latest})")
+            
+        except Exception as e:
+            logger.error(f"Error updating cache for message {message.id}: {e}")
+            raise CacheError(f"Failed to update cache: {e}")
     
     async def get_message(self, message_id: int) -> Optional[discord.Message]:
         """
@@ -582,21 +584,34 @@ class MessageCacheManager:
                 await asyncio.sleep(60)  # Wait before retrying
     
     def get_global_stats(self) -> Dict[str, Any]:
-        """Get global cache statistics."""
-        total_messages = sum(len(cache.messages) for cache in self.channel_caches.values())
-        total_cache_hits = sum(cache.stats.cache_hits for cache in self.channel_caches.values())
-        total_cache_misses = sum(cache.stats.cache_misses for cache in self.channel_caches.values())
-        total_api_calls = sum(cache.stats.api_calls for cache in self.channel_caches.values())
-        
-        return {
-            "total_channels": len(self.channel_caches),
-            "total_messages": total_messages,
-            "total_cache_hits": total_cache_hits,
-            "total_cache_misses": total_cache_misses,
-            "total_api_calls": total_api_calls,
-            "hit_rate": total_cache_hits / (total_cache_hits + total_cache_misses) if (total_cache_hits + total_cache_misses) > 0 else 0,
-            "api_efficiency": total_messages / total_api_calls if total_api_calls > 0 else 0
-        }
+        """Get global cache statistics - JSON serializable."""
+        try:
+            total_messages = sum(len(cache.messages) for cache in self.channel_caches.values())
+            total_cache_hits = sum(cache.stats.cache_hits for cache in self.channel_caches.values())
+            total_cache_misses = sum(cache.stats.cache_misses for cache in self.channel_caches.values())
+            total_api_calls = sum(cache.stats.api_calls for cache in self.channel_caches.values())
+            
+            return {
+                "total_channels": len(self.channel_caches),
+                "total_messages": total_messages,
+                "total_cache_hits": total_cache_hits,
+                "total_cache_misses": total_cache_misses,
+                "total_api_calls": total_api_calls,
+                "hit_rate": total_cache_hits / (total_cache_hits + total_cache_misses) if (total_cache_hits + total_cache_misses) > 0 else 0.0,
+                "api_efficiency": total_messages / total_api_calls if total_api_calls > 0 else 0.0
+            }
+        except Exception as e:
+            logger.error(f"Error getting global stats: {e}")
+            return {
+                "total_channels": 0,
+                "total_messages": 0,
+                "total_cache_hits": 0,
+                "total_cache_misses": 0,
+                "total_api_calls": 0,
+                "hit_rate": 0.0,
+                "api_efficiency": 0.0,
+                "error": str(e)
+            }
     
     def clear_all_caches(self) -> None:
         """Clear all caches (for testing/debugging)."""
