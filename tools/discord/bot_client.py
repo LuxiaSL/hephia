@@ -19,7 +19,6 @@ from datetime import datetime
 import discord
 import aiohttp
 
-from .bot_exceptions import CacheError
 from .bot_models import BotConfig, BotStatus
 from .name_mapping import NameMappingService
 from .message_cache import MessageCacheManager

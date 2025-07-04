@@ -15,16 +15,14 @@ Key features:
 import re
 import logging
 from typing import Dict, List, Optional, Tuple, Set
-from datetime import datetime
 import discord
 
 from .bot_models import (
     UserMapping, ChannelMapping, EmojiMapping, 
-    MessageFormatResult, EnhancedMessage
+    MessageFormatResult
 )
 from .bot_exceptions import (
-    UserNotFoundError, ChannelNotFoundError, EmojiNotFoundError,
-    MappingError
+    UserNotFoundError, ChannelNotFoundError, EmojiNotFoundError
 )
 
 logger = logging.getLogger(__name__)

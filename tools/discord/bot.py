@@ -1,5 +1,5 @@
 """
-Discord Bot - Modular Architecture
+Discord Bot
 
 This is the main entry point for the Discord bot that provides LLM-friendly
 HTTP API endpoints for autonomous Discord interaction.
@@ -22,26 +22,19 @@ Architecture:
 - bot_exceptions.py: Error handling hierarchy
 """
 
-import math
 import os
 import sys
 import logging
 import asyncio
 from typing import Optional, Dict, List
 import aiohttp
-import discord
 from aiohttp import web
 from dotenv import load_dotenv
 from datetime import datetime
 
-# Import all our modular components
 from bot_client import DiscordBotClient
 from api_handlers import DiscordAPIHandlers, create_routes
-from message_cache import MessageCacheManager
-from name_mapping import NameMappingService
-from context_windows import ContextWindowManager
-from message_logic import MessageProcessor
-from bot_models import BotConfig, BotStatus
+from bot_models import BotConfig
 from bot_exceptions import *
 
 ###############################################################################
@@ -104,10 +97,19 @@ bot_config = BotConfig(
     burst_size=int(os.getenv("BURST_SIZE", "10"))
 )
 
-# Global references
-bot_client: Optional[DiscordBotClient] = None
-persistent_session: Optional[aiohttp.ClientSession] = None
-api_handlers: Optional[DiscordAPIHandlers] = None
+# Global configuration
+bot_config = BotConfig(
+    max_message_cache_size=int(os.getenv("MAX_MESSAGE_CACHE_SIZE", "1000")),
+    context_window_expiry_minutes=int(os.getenv("CONTEXT_WINDOW_EXPIRY_MINUTES", "5")),
+    max_concurrent_requests=int(os.getenv("MAX_CONCURRENT_REQUESTS", "5")),
+    enable_debug_logging=os.getenv("ENABLE_DEBUG_LOGGING", "false").lower() == "true",
+    high_message_threshold=int(os.getenv("HIGH_MESSAGE_THRESHOLD", "50")),
+    random_engagement_rate=float(os.getenv("RANDOM_ENGAGEMENT_RATE", "0.75")),
+    cache_cleanup_interval=int(os.getenv("CACHE_CLEANUP_INTERVAL", "300")),
+    max_cache_age_hours=int(os.getenv("MAX_CACHE_AGE_HOURS", "24")),
+    requests_per_minute=int(os.getenv("REQUESTS_PER_MINUTE", "60")),
+    burst_size=int(os.getenv("BURST_SIZE", "10"))
+)
 
 ###############################################################################
 # DISCORD BOT SERVICE
@@ -271,7 +273,6 @@ class DiscordBotService:
 
 async def main():
     """Main entry point for the Discord bot."""
-    global bot_client, persistent_session, api_handlers
     
     # Validate configuration
     if not DISCORD_TOKEN:

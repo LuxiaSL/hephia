@@ -6,21 +6,16 @@ This module handles the core message processing logic including:
 - Forwarding messages to Hephia server
 - High message count notifications
 - Engagement probability calculations
-
-Extracted from discord_bot.py to provide clean separation of concerns.
 """
 
-import asyncio
 import logging
 import math
 import random
 from typing import Dict, Optional, List, Any
-from datetime import datetime
 import discord
 import aiohttp
 
-from .bot_models import BotConfig, EnhancedMessage
-from .bot_exceptions import CacheError
+from .bot_models import BotConfig
 from .name_mapping import NameMappingService
 from .message_cache import MessageCacheManager
 from .context_windows import ContextWindowManager
