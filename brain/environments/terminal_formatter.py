@@ -146,21 +146,17 @@ class TerminalFormatter:
         # Add action
         parts.append(command.action)
         
-        # Add parameters, properly quoted if they contain spaces or special characters
+        # Add parameters, properly quoted if they contain spaces
         for param in command.parameters:
-            if ' ' in param or '"' in param or "'" in param:
-                # Escape any existing quotes and wrap in quotes
-                escaped_param = param.replace('"', '\\"')
-                parts.append(f'"{escaped_param}"')
+            if ' ' in param:
+                parts.append(f'"{param}"')
             else:
                 parts.append(param)
         
         # Add flags in --name=value format
         for flag_name, flag_value in command.flags.items():
-            if ' ' in flag_value or '"' in flag_value or "'" in flag_value:
-                # Escape and quote flag values that need it
-                escaped_value = flag_value.replace('"', '\\"')
-                parts.append(f'--{flag_name}="{escaped_value}"')
+            if ' ' in flag_value:
+                parts.append(f'--{flag_name}="{flag_value}"')
             else:
                 parts.append(f'--{flag_name}={flag_value}')
         
