@@ -54,7 +54,7 @@ class DiscordHudSection(BaseHudSection):
         error_messages_for_hud_list = []
 
         try:
-            hud_message_limit = 10
+            hud_message_limit = 20
             max_snippet_len = 500
 
             history_data, hist_status = await self.discord_service.get_enhanced_history(
