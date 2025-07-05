@@ -10,7 +10,7 @@
       },
       "hephia-discord": {
         "name": "Hephia Discord Bot", 
-        "script": "tools/discord/discord_bot.py",
+        "script": "tools/discord/bot.py",
         "description": "discord integration bridge",
         "port": 5518,
         "auto_restart": true,

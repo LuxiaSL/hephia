@@ -82,7 +82,7 @@ load_dotenv()
 # Bot configuration
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 HEPHIA_SERVER_URL = "http://localhost:5517"
-BOT_HTTP_PORT = 5520
+BOT_HTTP_PORT = 5518
 
 # Create bot configuration
 bot_config = BotConfig(

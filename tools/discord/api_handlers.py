@@ -553,7 +553,7 @@ class DiscordAPIHandlers:
         try:
             # Parse query parameters
             path = request.query.get("path", "").strip()
-            reference = request.query.get("reference", "").strip()
+            raw_reference = request.query.get("reference", "").strip()
             
             if not path:
                 return web.json_response(
@@ -566,7 +566,7 @@ class DiscordAPIHandlers:
                     status=400
                 )
             
-            if not reference:
+            if not raw_reference:
                 return web.json_response(
                     APIResponse.error(
                         "MISSING_REFERENCE",
@@ -578,6 +578,7 @@ class DiscordAPIHandlers:
                     status=400
                 )
             
+            reference = self._sanitize_reference(raw_reference)
             logger.debug(f"[{request_id}] Finding message in '{path}' with reference '{reference}'")
             
             # Resolve channel path
@@ -698,10 +699,10 @@ class DiscordAPIHandlers:
             
             # Validate required fields
             path = data.get("path", "").strip()
-            reference = data.get("reference", "").strip()
+            raw_reference = data.get("reference", "").strip()
             content = data.get("content", "").strip()
             
-            if not all([path, reference, content]):
+            if not all([path, raw_reference, content]):
                 return web.json_response(
                     APIResponse.error(
                         "MISSING_PARAMETERS",
@@ -713,6 +714,7 @@ class DiscordAPIHandlers:
                     status=400
                 )
             
+            reference = self._sanitize_reference(raw_reference)
             logger.debug(f"[{request_id}] Replying to '{reference}' in '{path}'")
             
             # Resolve channel path
@@ -994,6 +996,19 @@ class DiscordAPIHandlers:
                 status=500
             )
 
+    def _sanitize_reference(self, reference: str) -> str:
+        """
+        Sanitize reference string by removing surrounding quotes.
+        Matches the behavior of the original discord_bot.py find_message_by_reference method.
+        """
+        reference = reference.strip()
+        
+        # Remove surrounding quotes if present (same logic as original discord_bot.py)
+        if (reference.startswith('"') and reference.endswith('"')) or \
+        (reference.startswith("'") and reference.endswith("'")):
+            reference = reference[1:-1].strip()
+        
+        return reference
 
 def create_routes(handlers: DiscordAPIHandlers) -> List[web.RouteDef]:
     """Create all the HTTP routes for the Discord bot API."""

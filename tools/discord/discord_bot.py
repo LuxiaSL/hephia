@@ -1293,6 +1293,7 @@ def create_app() -> web.Application:
 
 async def main():
     global bot, persistent_session
+    logger.warning("WARNING: This service is deprecated and will be removed in a future release. Please use ./bot.py and associated pieces.")
     # Create a persistent aiohttp session for all outbound requests
     persistent_session = aiohttp.ClientSession()
 
