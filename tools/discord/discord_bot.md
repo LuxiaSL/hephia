@@ -39,21 +39,15 @@ This guide outlines how to set up and configure a Discord bot to work with Hephi
     - Verify "Installation Type" is set to "Guild Install"
     - Copy the generated URL at the bottom
     - Open URL in browser
-    - Select your target server
+    - Select your target server (must have admin privileges or equivalent perms set)
     - Click "Authorize"
 
 3. Environment Setup
     - Update the discord token using the config tool, or directly modifying .env.
 
-4. Install Bot
-    - Copy generated OAuth2 URL
-    - Open in browser
-    - Select target Discord server
-    - Authorize the bot
-
-5. Run Bot Server
+4. Run Bot Server
     ```bash
-    python tools/discord/discord_bot.py
+    python tools/discord/bot.py
     ```
     Default port: 5518
 

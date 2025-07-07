@@ -977,6 +977,71 @@ class MemorySystemOrchestrator:
             logger.error(f"Failed to handle conflict resolution: {e}")
 
     # -----------------------------
+    # Performance Monitoring
+    # -----------------------------
+    async def get_performance_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive performance statistics for monitoring
+        """
+        stats = {
+            'throttling_status': {},
+            'cache_performance': {},
+            'system_health': {}
+        }
+        
+        try:
+            # Throttling effectiveness
+            current_time = time.time()
+            recent_updates = 0
+            stale_nodes = 0
+            
+            # Check cognitive nodes
+            for node in self.cognitive_network.nodes.values():
+                if node.last_connection_update:
+                    if (current_time - node.last_connection_update) < 3600:  # Updated in last hour
+                        recent_updates += 1
+                    else:
+                        stale_nodes += 1
+            
+            stats['throttling_status'] = {
+                'nodes_updated_recently': recent_updates,
+                'nodes_with_stale_connections': stale_nodes,
+                'throttling_working': stale_nodes > recent_updates * 2  # More stale than recent = good
+            }
+            
+            # Cache performance
+            if hasattr(self.metrics_orchestrator, 'get_cache_stats'):
+                stats['cache_performance'] = self.metrics_orchestrator.get_cache_stats()
+            
+            # System health
+            stats['system_health'] = {
+                'total_cognitive_nodes': len(self.cognitive_network.nodes),
+                'total_body_nodes': len(self.body_network.nodes),
+                'active_cognitive_nodes': len([n for n in self.cognitive_network.nodes.values() if not n.ghosted]),
+                'active_body_nodes': len([n for n in self.body_network.nodes.values() if not n.ghosted])
+            }
+            
+        except Exception as e:
+            stats['error'] = str(e)
+        
+        return stats
+    
+    async def debug_cache_performance(self) -> None:
+        """Debug method to monitor cache effectiveness."""
+        try:
+            if hasattr(self.metrics_orchestrator.calculate_metrics, 'cache'):
+                cache_stats = self.metrics_orchestrator.calculate_metrics.cache.get_stats()
+                self.logger.info(f"Metrics cache stats: {cache_stats}")
+                
+                # Trigger cache cleanup if hit rate is low
+                if cache_stats.get('hit_rate', 0) < 0.3:
+                    self.logger.warning("Low cache hit rate detected - clearing cache")
+                    await self.metrics_orchestrator.clear_metrics_cache()
+            
+        except Exception as e:
+            self.logger.error(f"Cache debugging failed: {e}")
+
+    # -----------------------------
     # Shutdown
     # -----------------------------
     async def shutdown(self) -> None:

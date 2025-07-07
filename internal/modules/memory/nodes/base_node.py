@@ -84,7 +84,8 @@ class BaseMemoryNode(ABC):
             'ghost_nodes': json.dumps(self.ghost_nodes),
             'ghost_states': json.dumps(self.ghost_states),
             'connections': json.dumps(self.connections),
-            'last_connection_update': self.last_connection_update
+            'last_connection_update': self.last_connection_update,
+            'last_accessed': self.last_accessed
         }
 
     @classmethod

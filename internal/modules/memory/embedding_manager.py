@@ -1,4 +1,7 @@
-# embeddings/embedding_manager.py
+import asyncio
+import hashlib
+import time
+
 from typing import List, Optional, Any
 
 from loggers.loggers import MemoryLogger
@@ -28,6 +31,28 @@ class EmbeddingManager:
             MemoryLogger.info("Local embedding configured - will load on first use")
         else:
             MemoryLogger.info("Using API embedding")
+
+    def _generate_similarity_cache_key(self, vec1: List[float], vec2: List[float]) -> str:
+        """Generate cache key for similarity calculations."""
+        try:
+            # Create deterministic hash from vector contents
+            # Use first and last few values as signature to avoid hashing entire vectors
+            if not vec1 or not vec2 or len(vec1) != len(vec2):
+                return f"invalid:{len(vec1)}:{len(vec2)}"
+                
+            # Sample key points from vectors for efficient hashing
+            v1_sample = vec1[:3] + vec1[-3:] if len(vec1) >= 6 else vec1
+            v2_sample = vec2[:3] + vec2[-3:] if len(vec2) >= 6 else vec2
+            
+            # Create ordered pair (smaller hash first for consistency)
+            h1 = hashlib.md5(str(v1_sample).encode()).hexdigest()[:8]
+            h2 = hashlib.md5(str(v2_sample).encode()).hexdigest()[:8]
+            
+            return f"{min(h1, h2)}:{max(h1, h2)}"
+            
+        except Exception:
+            # Fallback to basic string hash
+            return f"fallback:{hash((str(vec1[:3]), str(vec2[:3])))}"
 
     @property
     def sentence_transformer(self) -> Optional[Any]:
@@ -177,10 +202,21 @@ class EmbeddingManager:
             MemoryLogger.error(f"API embedding failed: {str(e)}")
             raise
 
-    def calculate_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+    @async_lru_cache(
+        maxsize=5000, 
+        ttl=21600, 
+        key_func=lambda self, vec1, vec2: self._generate_similarity_cache_key(vec1, vec2)
+    )
+    async def calculate_similarity_cached(self, vec1: List[float], vec2: List[float]) -> float:
         """
-        Calculate cosine similarity between two vectors.
-        Handles edge cases gracefully.
+        Cached version of similarity calculation.
+        Uses custom key generation via decorator.
+        """
+        return self._calculate_similarity_internal(vec1, vec2)
+
+    def _calculate_similarity_internal(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Internal similarity calculation that gets cached.
         """
         try:
             if not vec1 or not vec2:
@@ -204,3 +240,19 @@ class EmbeddingManager:
         except Exception as e:
             MemoryLogger.error(f"Similarity calculation failed: {str(e)}")
             return 0.0
+
+    def calculate_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Calculate cosine similarity with intelligent caching.
+        Automatically uses cached version for identical vector pairs.
+        """
+        try:
+            # For async contexts, use cached version
+            if asyncio.current_task() is not None:
+                return asyncio.create_task(self.calculate_similarity_cached(vec1, vec2))
+            else:
+                # For sync contexts, use direct calculation
+                return self._calculate_similarity_internal(vec1, vec2)
+        except RuntimeError:
+            # No event loop - use direct calculation
+            return self._calculate_similarity_internal(vec1, vec2)

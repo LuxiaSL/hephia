@@ -55,6 +55,7 @@ BODY_MEMORY_SCHEMA = {
             ghost_states TEXT,              -- Serialized array of past states
             connections TEXT,               -- Serialized connection mapping
             last_connection_update REAL,
+            last_accessed REAL,
             FOREIGN KEY(parent_node_id) REFERENCES body_memory_nodes(id)
         )
     """,
@@ -62,7 +63,8 @@ BODY_MEMORY_SCHEMA = {
     'body_memory_indexes': [
         "CREATE INDEX IF NOT EXISTS idx_body_timestamp ON body_memory_nodes(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_body_strength ON body_memory_nodes(strength)",
-        "CREATE INDEX IF NOT EXISTS idx_body_ghosted ON body_memory_nodes(ghosted)"
+        "CREATE INDEX IF NOT EXISTS idx_body_ghosted ON body_memory_nodes(ghosted)",
+        "CREATE INDEX IF NOT EXISTS idx_body_last_accessed ON body_memory_nodes(last_accessed)"
     ]
 }
 
@@ -90,6 +92,7 @@ COGNITIVE_MEMORY_SCHEMA = {
             formation_source TEXT,          -- Event/trigger that created memory
             last_echo_time REAL,
             echo_dampening REAL DEFAULT 1.0,
+            last_connection_update REAL,
             FOREIGN KEY(parent_node_id) REFERENCES cognitive_memory_nodes(id)
         )
     """,
@@ -98,7 +101,8 @@ COGNITIVE_MEMORY_SCHEMA = {
         "CREATE INDEX IF NOT EXISTS idx_cognitive_timestamp ON cognitive_memory_nodes(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_cognitive_strength ON cognitive_memory_nodes(strength)",
         "CREATE INDEX IF NOT EXISTS idx_cognitive_ghosted ON cognitive_memory_nodes(ghosted)",
-        "CREATE INDEX IF NOT EXISTS idx_cognitive_last_accessed ON cognitive_memory_nodes(last_accessed)"
+        "CREATE INDEX IF NOT EXISTS idx_cognitive_last_accessed ON cognitive_memory_nodes(last_accessed)",
+        "CREATE INDEX IF NOT EXISTS idx_cognitive_last_connection_update ON cognitive_memory_nodes(last_connection_update)"
     ]
 }
 

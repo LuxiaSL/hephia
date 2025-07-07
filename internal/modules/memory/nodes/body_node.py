@@ -13,6 +13,7 @@ Key capabilities:
 """
 
 from dataclasses import dataclass, field
+import json
 from typing import Dict, List, Any, Optional
 import time
 from .base_node import BaseMemoryNode, MemoryNodeError
@@ -113,7 +114,11 @@ class BodyMemoryNode(BaseMemoryNode):
             formation_metadata = {}
             if 'formation_metadata' in data:
                 formation_metadata = deserialize_state(data['formation_metadata'])
-            last_accessed = data.get('last_accessed', data.get('timestamp', time.time()))
+                
+            current_time = time.time()
+            last_accessed = data.get('last_accessed', current_time)
+            last_connection_update = data.get('last_connection_update', current_time)
+            
             node = cls(
                 timestamp=data['timestamp'],
                 raw_state=raw_state,
@@ -125,14 +130,24 @@ class BodyMemoryNode(BaseMemoryNode):
                 ghost_nodes=ghost_nodes,
                 ghost_states=ghost_states,
                 connections=connections,
-                last_connection_update=data.get('last_connection_update'),
+                last_connection_update=last_connection_update,
                 formation_metadata=formation_metadata
             )
-            # Set the new attribute explicitly
             node.last_accessed = last_accessed
             return node
         except Exception as e:
             raise MemoryNodeError(f"Failed to create body node from data: {e}")
+        
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert node to database-friendly format."""
+        data = super().to_dict()
+        
+        data.update({
+            'formation_metadata': json.dumps(self.formation_metadata),
+            'last_accessed': getattr(self, 'last_accessed', time.time())
+        })
+        
+        return data
 
     def calculate_state_similarity(self, other: 'BodyMemoryNode') -> float:
         """

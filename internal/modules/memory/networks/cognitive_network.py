@@ -171,8 +171,14 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
 
             current_time = time.time()
             node.last_accessed = current_time
-            node.last_connection_update = node.last_connection_update or current_time
-            if (current_time - node.last_connection_update) > self.config.activity_window:
+            
+            if node.last_connection_update is None:
+                node.last_connection_update = current_time
+                should_update_connections = True
+            else:
+                should_update_connections = (current_time - node.last_connection_update) > self.config.activity_window
+            
+            if should_update_connections:
                 try:
                     # Add timeout to connection update
                     async with asyncio.timeout(5.0):  # 5 second timeout
@@ -209,8 +215,14 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
             if node:
                 current_time = time.time()
                 node.last_accessed = current_time
-                node.last_connection_update = node.last_connection_update or current_time
-                if (current_time - node.last_connection_update) > self.config.activity_window:
+                
+                if node.last_connection_update is None:
+                    node.last_connection_update = current_time
+                    should_update_connections = True
+                else:
+                    should_update_connections = (current_time - node.last_connection_update) > self.config.activity_window
+                
+                if should_update_connections:
                     try:
                         # Add timeout to connection update
                         async with asyncio.timeout(5.0):  # 5 second timeout

@@ -1,4 +1,5 @@
 import time
+import hashlib
 from typing import Optional, TYPE_CHECKING
 
 from .base_manager import (
@@ -7,6 +8,7 @@ from .base_manager import (
 )
 
 from loggers.loggers import MemoryLogger
+from ...async_lru_cache import async_lru_cache
 
 if TYPE_CHECKING:
     from ..body_network import BodyMemoryNetwork
@@ -21,10 +23,10 @@ from ...nodes.node_utils import (
 
 class BodyConnectionManager(BaseConnectionManager[BodyMemoryNode]):
     """
-    Concrete connection manager for BodyMemoryNodes.
+    Concrete connection manager for BodyMemoryNodes with intelligent caching.
 
     Uses shared utilities to compute:
-class BodyConnectionManager(BaseConnectionManager['BodyMemoryNode']):
+      - Emotional similarity (calculate_emotional_similarity)
       - Mood similarity (calculate_mood_similarity)
       - Needs similarity (calculate_needs_similarity)
       - Behavior similarity (via a simple equality check)
@@ -45,14 +47,63 @@ class BodyConnectionManager(BaseConnectionManager['BodyMemoryNode']):
             'needs': 0.20
         }
         self.logger = MemoryLogger
-    
-    async def _calculate_connection_weight(
+
+    def _generate_connection_cache_key(self, node_a: BodyMemoryNode, node_b: BodyMemoryNode, operation: ConnectionOperation) -> str:
+        """Generate cache key for body connection weight calculations."""
+        try:
+            # Create ordered pair for consistent caching
+            id_a, id_b = str(node_a.node_id), str(node_b.node_id)
+            ordered_ids = tuple(sorted([id_a, id_b]))
+            
+            # Include emotional state signatures for cache invalidation
+            try:
+                # Use emotional vectors as signature (main component of body similarity)
+                emot_a = node_a.raw_state.get("emotional_vectors", [])
+                emot_b = node_b.raw_state.get("emotional_vectors", [])
+                
+                # Create simple signature from first emotional vector if present
+                if emot_a and len(emot_a) > 0 and isinstance(emot_a[0], dict):
+                    sig_a = f"{emot_a[0].get('valence', 0):.1f}_{emot_a[0].get('arousal', 0):.1f}"
+                else:
+                    sig_a = "no_emot"
+                    
+                if emot_b and len(emot_b) > 0 and isinstance(emot_b[0], dict):
+                    sig_b = f"{emot_b[0].get('valence', 0):.1f}_{emot_b[0].get('arousal', 0):.1f}"
+                else:
+                    sig_b = "no_emot"
+                    
+            except Exception:
+                sig_a = sig_b = "emot_error"
+            
+            # Include operation type for different contexts
+            op_type = str(operation.value) if hasattr(operation, 'value') else str(operation)
+            
+            return f"body_conn:{ordered_ids[0]}:{ordered_ids[1]}:emot:{sig_a}:{sig_b}:op:{op_type}"
+            
+        except Exception:
+            return f"body_fallback:{hash((str(node_a.node_id), str(node_b.node_id), str(operation)))}"
+
+    @async_lru_cache(
+        maxsize=1500, 
+        ttl=7200,
+        key_func=lambda self, node_a, node_b, operation: self._generate_connection_cache_key(node_a, node_b, operation)
+    )
+    async def _calculate_connection_weight_cached(
         self,
         node_a: BodyMemoryNode,
         node_b: BodyMemoryNode,
         operation: ConnectionOperation
     ) -> float:
-        """Ensure order-independent weight calculation."""
+        """Cached connection weight calculation for body nodes."""
+        return await self._calculate_connection_weight_internal(node_a, node_b, operation)
+
+    async def _calculate_connection_weight_internal(
+        self,
+        node_a: BodyMemoryNode,
+        node_b: BodyMemoryNode,
+        operation: ConnectionOperation
+    ) -> float:
+        """Internal connection weight calculation (the actual computation)."""
         try:
             # Validate nodes and raw states exist
             if not node_a or not node_b:
@@ -88,9 +139,17 @@ class BodyConnectionManager(BaseConnectionManager['BodyMemoryNode']):
                 mood_sim = 0.0
 
             try:
-                behavior_a = node_a.raw_state.get("behavior")
-                behavior_b = node_b.raw_state.get("behavior")
-                behavior_sim = 1.0 if behavior_a and behavior_b and behavior_a == behavior_b else 0.0
+                behavior_a = node_a.raw_state.get("behavior", {})
+                behavior_b = node_b.raw_state.get("behavior", {})
+                
+                # Compare behavior names if they exist
+                if isinstance(behavior_a, dict) and isinstance(behavior_b, dict):
+                    name_a = behavior_a.get("name")
+                    name_b = behavior_b.get("name")
+                    behavior_sim = 1.0 if name_a and name_b and name_a == name_b else 0.0
+                else:
+                    behavior_sim = 1.0 if behavior_a == behavior_b else 0.0
+                    
             except Exception as e:
                 self.logger.error(f"Error comparing behaviors: {e}")
                 behavior_sim = 0.0
@@ -106,18 +165,32 @@ class BodyConnectionManager(BaseConnectionManager['BodyMemoryNode']):
 
             # Calculate final weight
             base_weight = (
-                self.weights.get("emotional", 0.25) * emotional_sim +
+                self.weights.get("emotional", 0.35) * emotional_sim +
                 self.weights.get("mood", 0.25) * mood_sim +
-                self.weights.get("behavior", 0.25) * behavior_sim +
-                self.weights.get("needs", 0.25) * needs_sim
+                self.weights.get("behavior", 0.20) * behavior_sim +
+                self.weights.get("needs", 0.20) * needs_sim
             )
 
             # Ensure weight is in valid range
             return max(0.0, min(1.0, base_weight))
 
         except Exception as e:
-            self.logger.error(f"Unexpected error in connection weight calculation: {str(e)}")
+            self.logger.error(f"Unexpected error in body connection weight calculation: {str(e)}")
             return 0.0
+
+    async def _calculate_connection_weight(
+        self,
+        node_a: BodyMemoryNode,
+        node_b: BodyMemoryNode,
+        operation: ConnectionOperation
+    ) -> float:
+        """Calculate connection weight with intelligent caching."""
+        try:
+            return await self._calculate_connection_weight_cached(node_a, node_b, operation)
+        except Exception as e:
+            self.logger.error(f"Cached body connection calculation failed: {e}")
+            # Fallback to direct calculation
+            return await self._calculate_connection_weight_internal(node_a, node_b, operation)
     
     def _get_node_by_id(self, node_id: str) -> Optional[BodyMemoryNode]:
         """
@@ -152,5 +225,3 @@ class BodyConnectionManager(BaseConnectionManager['BodyMemoryNode']):
         to_node.last_connection_update = time.time()
         from_node.connections.clear()
         from_node.last_connection_update = time.time()
-
-    

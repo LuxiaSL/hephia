@@ -151,9 +151,9 @@ class BaseDBOperations:
             INSERT INTO body_memory_nodes (
                 timestamp, raw_state, processed_state, strength, ghosted,
                 parent_node_id, ghost_nodes, ghost_states, connections,
-                last_connection_update
+                last_connection_update, last_accessed
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             node_data['timestamp'],
@@ -165,7 +165,8 @@ class BaseDBOperations:
             node_data.get('ghost_nodes', '[]'),
             node_data.get('ghost_states', '[]'),
             node_data.get('connections', '{}'),
-            node_data.get('last_connection_update')
+            node_data.get('last_connection_update'),
+            node_data.get('last_accessed')
         )
         async with self.transaction() as conn:
             await self._execute_query(query, params, conn=conn)
@@ -187,7 +188,7 @@ class BaseDBOperations:
         columns = [
             'id', 'timestamp', 'raw_state', 'processed_state', 'strength',
             'ghosted', 'parent_node_id', 'ghost_nodes', 'ghost_states',
-            'connections', 'last_connection_update'
+            'connections', 'last_connection_update', 'last_accessed'
         ]
         row = results[0]
         node_dict = dict(zip(columns, row))
@@ -200,7 +201,7 @@ class BaseDBOperations:
             UPDATE body_memory_nodes
             SET timestamp = ?, raw_state = ?, processed_state = ?, strength = ?,
                 ghosted = ?, parent_node_id = ?, ghost_nodes = ?, ghost_states = ?,
-                connections = ?, last_connection_update = ?
+                connections = ?, last_connection_update = ?, last_accessed = ?
             WHERE id = ?
         """
         params = (
@@ -214,6 +215,7 @@ class BaseDBOperations:
             node_data.get('ghost_states', '[]'),
             node_data.get('connections', '{}'),
             node_data.get('last_connection_update'),
+            node_data.get('last_accessed'),
             node_id
         )
         async with self.transaction() as conn:
@@ -238,7 +240,7 @@ class BaseDBOperations:
         columns = [
             'id', 'timestamp', 'raw_state', 'processed_state', 'strength',
             'ghosted', 'parent_node_id', 'ghost_nodes', 'ghost_states',
-            'connections', 'last_connection_update'
+            'connections', 'last_connection_update', 'last_accessed'
         ]
         nodes = [dict(zip(columns, row)) for row in results]
         self.logger.debug(f"Loaded {len(nodes)} body_memory_nodes from DB.")
@@ -257,9 +259,9 @@ class BaseDBOperations:
                 timestamp, text_content, embedding, raw_state, processed_state,
                 strength, ghosted, parent_node_id, ghost_nodes, ghost_states,
                 connections, semantic_context, last_accessed, formation_source,
-                last_echo_time, echo_dampening
+                last_echo_time, echo_dampening, last_connection_update
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             node_data['timestamp'],
@@ -277,7 +279,8 @@ class BaseDBOperations:
             node_data.get('last_accessed'),
             node_data.get('formation_source', ''),
             node_data.get('last_echo_time'),
-            node_data.get('echo_dampening', 1.0)
+            node_data.get('echo_dampening', 1.0),
+            node_data.get('last_connection_update')
         )
         async with self.transaction() as conn:
             await self._execute_query(query, params, conn=conn)
@@ -300,7 +303,7 @@ class BaseDBOperations:
             'id', 'timestamp', 'text_content', 'embedding', 'raw_state', 'processed_state',
             'strength', 'ghosted', 'parent_node_id', 'ghost_nodes', 'ghost_states',
             'connections', 'semantic_context', 'last_accessed', 'formation_source',
-            'last_echo_time', 'echo_dampening'
+            'last_echo_time', 'echo_dampening', 'last_connection_update'
         ]
         row = results[0]
         node_dict = dict(zip(columns, row))
@@ -315,7 +318,7 @@ class BaseDBOperations:
                 processed_state = ?, strength = ?, ghosted = ?, parent_node_id = ?,
                 ghost_nodes = ?, ghost_states = ?, connections = ?, semantic_context = ?,
                 last_accessed = ?, formation_source = ?, last_echo_time = ?,
-                echo_dampening = ?
+                echo_dampening = ?, last_connection_update = ?
             WHERE id = ?
         """
         params = (
@@ -335,6 +338,7 @@ class BaseDBOperations:
             node_data.get('formation_source', ''),
             node_data.get('last_echo_time'),
             node_data.get('echo_dampening', 1.0),
+            node_data.get('last_connection_update'),
             node_id
         )
         async with self.transaction() as conn:
@@ -371,7 +375,7 @@ class BaseDBOperations:
             'id', 'timestamp', 'text_content', 'embedding', 'raw_state', 'processed_state',
             'strength', 'ghosted', 'parent_node_id', 'ghost_nodes', 'ghost_states',
             'connections', 'semantic_context', 'last_accessed', 'formation_source',
-            'last_echo_time', 'echo_dampening'
+            'last_echo_time', 'echo_dampening', 'last_connection_update'
         ]
         nodes = [dict(zip(columns, row)) for row in results]
         self.logger.debug(f"Loaded {len(nodes)} cognitive_memory_nodes from DB.")

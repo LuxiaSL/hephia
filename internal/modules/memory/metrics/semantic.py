@@ -13,9 +13,12 @@ Key capabilities:
 
 from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
+
+import time
 import numpy as np
 import concurrent.futures as cf
 import asyncio
+import hashlib
 
 # Attempt to import NLTK and its components; if unavailable, define fallbacks.
 try:
@@ -116,6 +119,15 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         """
         self.embedding_manager = embedding_manager
         self.logger = MemoryLogger
+
+    def _generate_text_cache_key(self, text: str, query: str = "") -> str:
+        """Generate cache key for text-based calculations."""
+        try:
+            text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()[:12]
+            query_hash = hashlib.md5(query.encode('utf-8')).hexdigest()[:8] if query else "no_query"
+            return f"text:{text_hash}:query:{query_hash}"
+        except Exception:
+            return f"fallback:{hash((text, query))}"
         
     async def calculate_metrics(
         self,
@@ -169,10 +181,31 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             self.logger.log_error(f"Semantic metrics calculation failed: {str(e)}")
             return self._get_fallback_metrics()
             
+    @async_lru_cache(
+        maxsize=1000, 
+        ttl=3600, 
+        key_func=lambda self, text, query: self._generate_text_cache_key(text, query)
+    )
+    async def _calculate_text_relevance_cached(self, text: str, query: str) -> float:
+        """Cached version of text relevance calculation."""
+        return self._calculate_text_relevance_internal(text, query)
+
     def _calculate_text_relevance(self, text: str, query: str) -> float:
         """
-        Calculate text relevance using multiple methods.
-        Combines keyword matching with semantic pattern recognition.
+        Calculate text relevance using cached computation.
+        """
+        try:
+            # Use cached version if in async context
+            if asyncio.current_task() is not None:
+                return asyncio.create_task(self._calculate_text_relevance_cached(text, query))
+            else:
+                return self._calculate_text_relevance_internal(text, query)
+        except RuntimeError:
+            return self._calculate_text_relevance_internal(text, query)
+
+    def _calculate_text_relevance_internal(self, text: str, query: str) -> float:
+        """
+        Internal text relevance calculation (the actual computation).
         """
         try:
             if not text or not query:
@@ -190,7 +223,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             # Direct keyword matching
             word_matches = query_words.intersection(text_words)
             keyword_score = len(word_matches) / len(query_words)
-            
+
             # Add semantic patterns here in future
             # EXPANSION POINT: Enhanced semantic pattern matching
             
@@ -200,7 +233,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             self.logger.log_error(f"Text relevance calculation failed: {str(e)}")
             return 0.0
             
-    @async_lru_cache(maxsize=500)  # Cache results for frequently accessed content
+    @async_lru_cache(maxsize=1000, ttl=7200)
     async def _calculate_semantic_density(self, text: str) -> float:
         """
         Optimized semantic density calculation with tiered processing and parallelization.

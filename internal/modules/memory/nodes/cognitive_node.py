@@ -124,6 +124,10 @@ class CognitiveMemoryNode(BaseMemoryNode):
                 except (json.JSONDecodeError, KeyError):
                     references = []
             
+            current_time = time.time()
+            last_accessed = data.get('last_accessed', current_time)
+            last_connection_update = data.get('last_connection_update', current_time)
+            
             return cls(
                 timestamp=data['timestamp'],
                 raw_state=raw_state,
@@ -137,9 +141,9 @@ class CognitiveMemoryNode(BaseMemoryNode):
                 ghost_nodes=ghost_nodes,
                 ghost_states=ghost_states,
                 connections=connections,
-                last_connection_update=data.get('last_connection_update'),
+                last_connection_update=last_connection_update,
                 semantic_context=semantic_context,
-                last_accessed=data.get('last_accessed'),
+                last_accessed=last_accessed,
                 formation_source=data.get('formation_source'),
                 last_echo_time=data.get('last_echo_time'),
                 echo_dampening=data.get('echo_dampening', 1.0),
@@ -161,6 +165,7 @@ class CognitiveMemoryNode(BaseMemoryNode):
             'formation_source': self.formation_source,
             'last_echo_time': self.last_echo_time,
             'echo_dampening': self.echo_dampening,
+            'last_connection_update': getattr(self, 'last_connection_update', time.time()),
             'body_references': json.dumps([
                 ref.to_dict() for ref in self.body_references
             ])
