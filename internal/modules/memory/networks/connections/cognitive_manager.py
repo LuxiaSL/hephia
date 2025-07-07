@@ -208,19 +208,40 @@ class CognitiveConnectionManager(BaseConnectionManager[CognitiveMemoryNode]):
         """
         return self.network.nodes.get(node_id)
 
-    async def transfer_connections(self, from_node: CognitiveMemoryNode, to_node: CognitiveMemoryNode, transfer_weight: float = 0.9) -> None:
+    async def transfer_connections(
+        self,
+        from_node: CognitiveMemoryNode,
+        to_node: CognitiveMemoryNode,
+        transfer_weight: float = 0.9
+    ) -> None:
         """
-        Transfer connections from one node to another with proper weight adjustment.
+        Transfer connections from one node to another with proper weight adjustment and max_connections enforcement.
         """
         source_connections = from_node.get_connected_nodes(min_weight=0.2)
+        
+        # Calculate new connection weights
+        potential_transfers = {}
         for conn_id, weight in source_connections.items():
             if conn_id == to_node.node_id:
                 continue  # Skip self-connection
             new_weight = weight * transfer_weight
             if conn_id in to_node.connections:
-                to_node.connections[conn_id] = max(new_weight, to_node.connections[conn_id])
+                potential_transfers[conn_id] = max(new_weight, to_node.connections[conn_id])
             else:
-                to_node.connections[conn_id] = new_weight
+                potential_transfers[conn_id] = new_weight
+        
+        # Enforce connection limits
+        final_transfers = self._enforce_connection_limit(to_node, potential_transfers)
+        
+        # Apply the transfers that made the cut
+        to_node.connections.update(final_transfers)
         to_node.last_connection_update = time.time()
+        
+        # Clear source connections
         from_node.connections.clear()
         from_node.last_connection_update = time.time()
+        
+        transferred_count = len(final_transfers)
+        total_potential = len(potential_transfers)
+        if transferred_count < total_potential:
+            self.logger.debug(f"Connection transfer: transferred {transferred_count}/{total_potential} connections due to max_connections limit")

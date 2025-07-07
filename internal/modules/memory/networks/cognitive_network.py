@@ -118,7 +118,6 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
                 connection_weights = await self.connection_manager.form_initial_connections(
                     node=node,
                     candidates=candidates,
-                    max_candidates=self.config.min_active_nodes,
                     lock_acquired=lock_acquired
                 )
                 

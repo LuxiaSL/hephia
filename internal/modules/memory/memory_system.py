@@ -1041,6 +1041,59 @@ class MemorySystemOrchestrator:
         except Exception as e:
             self.logger.error(f"Cache debugging failed: {e}")
 
+    def get_connection_health_stats(self) -> Dict[str, Any]:
+        """Get statistics about connection health across the network."""
+        stats = {
+            'cognitive_network': {},
+            'body_network': {}
+        }
+        
+        try:
+            # Cognitive network stats
+            if hasattr(self, 'cognitive_network') and self.cognitive_network:
+                cog_nodes = self.cognitive_network.nodes.values()
+                connection_counts = [len(node.connections) for node in cog_nodes if not node.ghosted]
+                if connection_counts:
+                    stats['cognitive_network'] = {
+                        'total_nodes': len(connection_counts),
+                        'avg_connections': sum(connection_counts) / len(connection_counts),
+                        'max_connections': max(connection_counts),
+                        'min_connections': min(connection_counts),
+                        'nodes_at_limit': sum(1 for count in connection_counts if count >= 50),
+                        'connection_distribution': {
+                            '0-10': sum(1 for c in connection_counts if c <= 10),
+                            '11-25': sum(1 for c in connection_counts if 11 <= c <= 25),
+                            '26-40': sum(1 for c in connection_counts if 26 <= c <= 40),
+                            '41-50': sum(1 for c in connection_counts if 41 <= c <= 50),
+                            '50+': sum(1 for c in connection_counts if c > 50)
+                        }
+                    }
+            
+            # Body network stats  
+            if hasattr(self, 'body_network') and self.body_network:
+                body_nodes = self.body_network.nodes.values()
+                connection_counts = [len(node.connections) for node in body_nodes if not node.ghosted]
+                if connection_counts:
+                    stats['body_network'] = {
+                        'total_nodes': len(connection_counts),
+                        'avg_connections': sum(connection_counts) / len(connection_counts),
+                        'max_connections': max(connection_counts),
+                        'min_connections': min(connection_counts),
+                        'nodes_at_limit': sum(1 for count in connection_counts if count >= 50),
+                        'connection_distribution': {
+                            '0-10': sum(1 for c in connection_counts if c <= 10),
+                            '11-25': sum(1 for c in connection_counts if 11 <= c <= 25),
+                            '26-40': sum(1 for c in connection_counts if 26 <= c <= 40),
+                            '41-50': sum(1 for c in connection_counts if 41 <= c <= 50),
+                            '50+': sum(1 for c in connection_counts if c > 50)
+                        }
+                    }
+                    
+        except Exception as e:
+            stats['error'] = str(e)
+        
+        return stats
+
     # -----------------------------
     # Shutdown
     # -----------------------------

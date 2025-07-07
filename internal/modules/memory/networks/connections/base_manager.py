@@ -50,9 +50,9 @@ class ConnectionOperation(Enum):
 @dataclass
 class ConnectionThresholds:
     """Configuration thresholds for connection management."""
-    min_initial_weight: float = 0.2      # Minimum weight for new connections
-    min_maintain_weight: float = 0.15    # Minimum weight to maintain connection
-    strong_connection: float = 0.7       # Threshold for "strong" connections
+    min_initial_weight: float = 0.3      # Minimum weight for new connections
+    min_maintain_weight: float = 0.25    # Minimum weight to maintain connection
+    strong_connection: float = 0.8       # Threshold for "strong" connections
     merge_threshold: float = 0.85        # Weight suggesting nodes should merge
     temporal_window: float = 3600        # Time window for temporal bonuses (1 hour)
     max_connections: int = 50            # Soft limit on connections per node
@@ -235,13 +235,16 @@ class BaseConnectionManager(Generic[T], ABC):
                     for other_id, weight in connections.items():
                         other = self._get_node_by_id(other_id)
                         if other and not getattr(other, 'ghosted', False):
-                            # Update other node's connections
-                            other.connections[node.node_id] = weight
-                            other.last_connection_update = time.time()
+                            if self._can_accept_connection(other) or self._make_room_for_connection(other, weight):
+                                # Update other node's connections
+                                other.connections[node.node_id] = weight
+                                other.last_connection_update = time.time()
 
-                            # Update health tracking for BOTH directions
-                            await self._update_connection_health(node.node_id, other_id, weight)
-                            await self._update_connection_health(other_id, node.node_id, weight)
+                                # Update health tracking for BOTH directions
+                                await self._update_connection_health(node.node_id, other_id, weight)
+                                await self._update_connection_health(other_id, node.node_id, weight)
+                            else:
+                                self.logger.debug(f"Skipped reciprocal connection from {other_id} to {node.node_id}: target node at capacity")
 
                 return connections
 
@@ -255,6 +258,89 @@ class BaseConnectionManager(Generic[T], ABC):
         else:
             async with self.connection_operation("form_initial_connections"):
                 return await _form_connections()
+            
+    def _enforce_connection_limit(self, node: T, new_connections: Dict[str, float]) -> Dict[str, float]:
+        """
+        Enforce max_connections limit on a node by keeping only the strongest connections.
+        
+        Args:
+            node: Node to enforce limit on
+            new_connections: New connections to potentially add
+            
+        Returns:
+            Dict of connections that respect the limit
+        """
+        max_connections = self.config.thresholds.max_connections
+        
+        # Combine existing and new connections
+        all_connections = {**node.connections, **new_connections}
+        
+        # If under limit, return all
+        if len(all_connections) <= max_connections:
+            return new_connections
+        
+        # Sort by weight (descending) and take top max_connections
+        sorted_connections = sorted(all_connections.items(), key=lambda x: x[1], reverse=True)
+        top_connections = dict(sorted_connections[:max_connections])
+        
+        # Return only the new connections that made the cut
+        filtered_new = {
+            conn_id: weight for conn_id, weight in new_connections.items()
+            if conn_id in top_connections
+        }
+        
+        # Update node's connections to respect limit
+        node.connections = {
+            conn_id: weight for conn_id, weight in top_connections.items()
+            if conn_id not in new_connections  # Keep existing that made the cut
+        }
+        
+        if len(all_connections) > max_connections:
+            removed_count = len(all_connections) - max_connections
+            self.logger.debug(f"Enforced connection limit on node {node.node_id}: removed {removed_count} weakest connections")
+        
+        return filtered_new
+
+    def _can_accept_connection(self, node: T) -> bool:
+        """
+        Check if a node can accept a new connection without exceeding max_connections.
+        
+        Args:
+            node: Node to check
+            
+        Returns:
+            True if node can accept more connections
+        """
+        return len(node.connections) < self.config.thresholds.max_connections
+
+    def _make_room_for_connection(self, node: T, new_weight: float) -> bool:
+        """
+        Make room for a new connection by removing the weakest existing connection if needed.
+        
+        Args:
+            node: Node to make room in
+            new_weight: Weight of the new connection
+            
+        Returns:
+            True if room was made (new connection is stronger than weakest existing)
+        """
+        if len(node.connections) < self.config.thresholds.max_connections:
+            return True
+        
+        # Find weakest connection
+        if not node.connections:
+            return True
+            
+        weakest_id = min(node.connections, key=node.connections.get)
+        weakest_weight = node.connections[weakest_id]
+        
+        # Only make room if new connection is stronger
+        if new_weight > weakest_weight:
+            self.logger.debug(f"Removing weakest connection {weakest_id} (weight: {weakest_weight:.3f}) to make room for stronger connection (weight: {new_weight:.3f})")
+            node.connections.pop(weakest_id)
+            return True
+        
+        return False
             
     @abstractmethod
     async def _calculate_connection_weight(
@@ -385,7 +471,7 @@ class BaseConnectionManager(Generic[T], ABC):
         skip_reciprocal: bool
     ) -> List[str]:
         """
-        Internal implementation of connection updates.
+        Internal implementation of connection updates with max_connections enforcement.
         
         Returns:
             List of node IDs that had their connections updated.
@@ -413,6 +499,9 @@ class BaseConnectionManager(Generic[T], ABC):
 
                 await self._update_connection_health(node.node_id, other_id, new_weight)
 
+            # ENFORCE MAX CONNECTIONS LIMIT
+            updated = self._enforce_connection_limit(node, updated)
+            
             pruned = set(connections.keys()) - set(updated.keys())
             if pruned:
                 await self._handle_pruned_connections(node, pruned)
@@ -421,12 +510,44 @@ class BaseConnectionManager(Generic[T], ABC):
 
             updated_nodes = []
             if not skip_reciprocal:
-                updated_nodes = await self._update_reciprocal_connections(node, updated)
+                updated_nodes = await self._update_reciprocal_connections_safe(node, updated)
 
             return updated_nodes
 
         except Exception as e:
             self.logger.error(f"Failed to update connections: {e}")
+            return []
+
+    async def _update_reciprocal_connections_safe(
+        self,
+        node: T,
+        new_weights: Dict[str, float]
+    ) -> List[str]:
+        """
+        Update reciprocal connections while respecting max_connections limits.
+        
+        Args:
+            node: Node whose connections were updated.
+            new_weights: New connection weights.
+            
+        Returns:
+            List of node IDs that had their connections updated.
+        """
+        try:
+            updated_nodes = []
+            for other_id, weight in new_weights.items():
+                other = self._get_node_by_id(other_id)
+                if other and not getattr(other, 'ghosted', False):
+                    # Respect max_connections on reciprocal updates
+                    if self._can_accept_connection(other) or self._make_room_for_connection(other, weight):
+                        other.connections[str(node.node_id)] = weight
+                        other.last_connection_update = time.time()
+                        updated_nodes.append(other_id)
+                    else:
+                        self.logger.debug(f"Skipped reciprocal connection update {other_id} -> {node.node_id}: target at capacity")
+            return updated_nodes
+        except Exception as e:
+            self.logger.error(f"Failed to update reciprocal connections: {e}")
             return []
 
     async def _update_connection_health(

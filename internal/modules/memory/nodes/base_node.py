@@ -60,7 +60,7 @@ class BaseMemoryNode(ABC):
         self.ghost_nodes = ghost_nodes or []
         self.ghost_states = ghost_states or []
         self.connections = connections or {}
-        self.last_connection_update = last_connection_update
+        self.last_connection_update = last_connection_update or time.time()
         self.last_accessed = time.time()
 
     def __post_init__(self):
