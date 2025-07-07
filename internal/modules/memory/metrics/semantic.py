@@ -145,9 +145,8 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             metrics = {}
             
             # Start the expensive semantic density calculation first
-            # This runs in the background while we do other calculations
-            density_task = self._calculate_semantic_density(text_content)
-            
+            density_task = asyncio.create_task(self._calculate_semantic_density(text_content))
+
             # Start cluster analysis in parallel if requested (also expensive)
             cluster_task = None
             if analyze_clusters and 'cluster_nodes' in kwargs:
@@ -155,15 +154,14 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
                     embedding, kwargs['cluster_nodes']
                 ))
             
-            # Do quick calculations immediately
             if query_embedding is not None:
-                metrics['embedding_similarity'] = self.embedding_manager.calculate_similarity(
+                metrics['embedding_similarity'] = await self.embedding_manager.calculate_similarity_async(
                     embedding,
                     query_embedding
                 )
             
             if query_text:
-                metrics['text_relevance'] = self._calculate_text_relevance(
+                metrics['text_relevance'] = await self._calculate_text_relevance_async(
                     text_content,
                     query_text
                 )
@@ -190,18 +188,19 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         """Cached version of text relevance calculation."""
         return self._calculate_text_relevance_internal(text, query)
 
+    async def _calculate_text_relevance_async(self, text: str, query: str) -> float:
+        """
+        Async version of text relevance calculation with caching.
+        Use this when calling from async contexts.
+        """
+        return await self._calculate_text_relevance_cached(text, query)
+
     def _calculate_text_relevance(self, text: str, query: str) -> float:
         """
-        Calculate text relevance using cached computation.
+        Synchronous text relevance calculation.
+        Always returns a float, never a Task.
         """
-        try:
-            # Use cached version if in async context
-            if asyncio.current_task() is not None:
-                return asyncio.create_task(self._calculate_text_relevance_cached(text, query))
-            else:
-                return self._calculate_text_relevance_internal(text, query)
-        except RuntimeError:
-            return self._calculate_text_relevance_internal(text, query)
+        return self._calculate_text_relevance_internal(text, query)
 
     def _calculate_text_relevance_internal(self, text: str, query: str) -> float:
         """

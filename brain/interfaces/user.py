@@ -147,7 +147,7 @@ class UserInterface(CognitiveInterface):
         # Format recent conversation context
         conversation_context = "\n".join([
             f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
-            for msg in conversation[-3:]  # Last 3 messages
+            for msg in conversation[-5:]  # Last 5 messages
         ]) if conversation else "No conversation context"
 
         return get_prompt(

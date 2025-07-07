@@ -176,7 +176,7 @@ class EnvEditorScreen(Vertical):
         ]
         
         advanced_fields = [
-            "LOG_PROMPTS", "ADVANCED_C2_LOGGING", "CHAPTER2_SOCKET_PATH", "CHAPTER2_HTTP_PORT", "LOCAL_INFERENCE_BASE_URL"
+            "ADVANCED_C2_LOGGING", "CHAPTER2_SOCKET_PATH", "CHAPTER2_HTTP_PORT", "LOCAL_INFERENCE_BASE_URL"
         ]
         
         # Build each section

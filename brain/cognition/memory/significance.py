@@ -59,7 +59,7 @@ class SignificanceAnalyzer:
     def __init__(self):
         self.thresholds: Dict[str, float] = {
             "exo_processor": Config.MEMORY_SIGNIFICANCE_THRESHOLD,
-            "discord": Config.MEMORY_SIGNIFICANCE_THRESHOLD * 0.8, # more lenient for pieces outside of exo
+            "discord": Config.MEMORY_SIGNIFICANCE_THRESHOLD * 0.75,
             "user": Config.MEMORY_SIGNIFICANCE_THRESHOLD * 0.75
         }
 
@@ -72,7 +72,7 @@ class SignificanceAnalyzer:
         elif memory_data.source_type == SourceType.DISCORD:
             score = self._analyze_social_significance(memory_data)
         elif memory_data.source_type == SourceType.DIRECT_CHAT:
-            score = self._analyze_social_significance(memory_data)  # Can reuse social for direct chat
+            score = self._analyze_social_significance(memory_data)
         elif memory_data.source_type == SourceType.ENVIRONMENT:
             score = self._analyze_environment_significance(memory_data)
             
@@ -118,7 +118,6 @@ class SignificanceAnalyzer:
 
         return score
 
-
     def _analyze_social_significance(self, data: MemoryData) -> float:
         """
         Analyze significance of social interactions with path-based channel references.
@@ -127,38 +126,28 @@ class SignificanceAnalyzer:
         metadata = data.metadata
         
         if data.source_type == SourceType.DISCORD:
-            # Message length (0.3)
+            # Message length (0.5)
             message = metadata.get('message', {}).get('content', '')
             msg_words = message.split()
-            score += min(0.3, len(msg_words) / 50)
-            
-            # Channel context (0.2)
-            channel_data = metadata.get('channel', {})
-            is_dm = channel_data.get('is_dm', False)
-            
-            # If is_dm not explicitly provided, check path for absence of ':'
-            if not is_dm and 'path' in channel_data:
-                is_dm = ':' not in channel_data['path']
-                
-            if is_dm:
-                score += 0.2
-            
-            # Interaction depth (0.3)
+            score += min(0.5, len(msg_words) / 50)
+
+            # Interaction depth (0.5)
             if len(metadata.get('history', [])) >= 2:
-                score += 0.15
+                score += 0.25
             if metadata.get('mentions_bot'):
-                score += 0.15
+                score += 0.25
         else:  # DIRECT_CHAT
-            # Conversation depth (0.4)
+            # Conversation depth (0.5)
             conv_data = metadata.get('conversation', {})
             if conv_data.get('has_multi_turn'):
                 score += 0.2
             score += min(0.2, conv_data.get('total_messages', 0) * 0.05)
-            
-            # Message content (0.4)
+
+            # Message content (0.5)
             if last_msg := conv_data.get('last_user_message'):
-                score += min(0.4, len(last_msg.split()) / 50)
-                
+                score += min(0.5, len(last_msg.split()) / 50)
+
+        score = min(score, 1.0)
         return score
 
     def _analyze_environment_significance(self, data: MemoryData) -> float:

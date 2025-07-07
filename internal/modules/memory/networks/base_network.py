@@ -36,7 +36,7 @@ class NetworkConfig:
     min_connection_strength: float = 0.2  # For traversal/retrieval
     decay_rate: float = 0.1  # Base decay rate for nodes
     enable_maintenance: bool = True  # For basic maintenance
-    activity_window: float = 3600            # 1 hour window for activity tracking
+    activity_window: float = 3600            # 1 hour window for activity tracking (3600)
     consolidation_ratio: float = 0.7         # Activity threshold for consolidation
 
 class NetworkError(Exception):

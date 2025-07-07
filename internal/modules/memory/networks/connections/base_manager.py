@@ -499,7 +499,6 @@ class BaseConnectionManager(Generic[T], ABC):
 
                 await self._update_connection_health(node.node_id, other_id, new_weight)
 
-            # ENFORCE MAX CONNECTIONS LIMIT
             updated = self._enforce_connection_limit(node, updated)
             
             pruned = set(connections.keys()) - set(updated.keys())

@@ -314,34 +314,45 @@ class ExoProcessorInterface(CognitiveInterface):
         """
         # Ensure metadata is a dictionary.
         metadata = metadata or {}
-
-        command = metadata.get('command')
-        result = metadata.get('result')
         
-        # Extract command input string.
-        if isinstance(command, ParsedCommand):
-            command_input = command.raw_input
-        elif isinstance(command, dict):
-            command_input = command.get('raw_input', 'Unknown command')
-        else:
-            command_input = 'Unknown command'
+        # Get the most recent 4 interaction pairs from conversation state for cohesive memory context
+        interaction_snippets = []
+        try:
+            if (hasattr(self, 'conversation_state') and 
+                self.conversation_state and 
+                hasattr(self.conversation_state, 'pairs') and 
+                self.conversation_state.pairs):
+                # Get last 4 pairs since conversation state is guaranteed to be up to date when this fires
+                recent_pairs = self.conversation_state.pairs[-4:] if len(self.conversation_state.pairs) >= 4 else self.conversation_state.pairs
+                
+                for pair in recent_pairs:
+                    if (hasattr(pair, 'user') and hasattr(pair, 'assistant') and
+                    hasattr(pair.user, 'content') and hasattr(pair.assistant, 'content') and
+                    pair.user.content and pair.assistant.content):
+                        snippet = get_prompt(
+                            'interfaces.exo.memory.snippet',
+                            model=Config.get_cognitive_model(),
+                            vars={
+                                "command_input": pair.assistant.content,
+                                "response": pair.user.content
+                            }
+                        )
+                        interaction_snippets.append(snippet)
 
-        # Extract result message.
-        if isinstance(result, CommandResult):
-            result_message = result.message
-        elif isinstance(result, dict):
-            result_message = result.get('message', 'No result')
-        else:
-            result_message = 'No result'
+        except Exception as e:
+            # Log error but continue with empty interaction history
+            BrainLogger.error(f"Error processing conversation state: {e}")
+            interaction_snippets = []
+        
+        # Join all snippets into cohesive interaction history
+        interaction_history = "\n###\n".join(interaction_snippets)
         
         return get_prompt(
-            'interfaces.exo.memory.template',
+            'interfaces.exo.memory.combined',
             model=Config.get_cognitive_model(),
             vars={
-                "command_input": command_input,
-                "content": content,
-                "result_message": result_message,
-                'context': metadata.get('cognitive_updates', ''),
+                "interaction_history": interaction_history,
+                "context": metadata.get('cognitive_updates', '')
             }
         )
         

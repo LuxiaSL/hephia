@@ -72,18 +72,24 @@ class MergeManager:
             connection_manager = self._get_connection_manager(node)
             candidates = await self.find_merge_candidates(node, connection_manager)
             if candidates:
-                target_candidate = candidates[0]  # Take the best candidate
-                target_node = self._get_node_by_id(target_candidate.node_id)
-                if target_node is None or target_node.ghosted:
-                    self.logger.warning(f"Target node {target_candidate.node_id} not found or ghosted, skipping merge")
-                    return False
-                
-                if isinstance(node, CognitiveMemoryNode):
-                    await self.merge_cognitive_nodes(node, target_node)
-                else:
-                    # For body nodes, perform a direct merge.
-                    await self.merge_body_nodes(node, target_node)
-                return True
+                for target_candidate in candidates:
+                    target_node = self._get_node_by_id(target_candidate.node_id)
+                    
+                    if target_node is None or target_node.ghosted:
+                        self.logger.warning(f"Target node {target_candidate.node_id} not found or ghosted, skipping merge")
+                        continue
+                    
+                    if isinstance(node, CognitiveMemoryNode):
+                        success = await self.merge_cognitive_nodes(node, target_node)
+                    else:
+                        # For body nodes, perform a direct merge.
+                        await self.merge_body_nodes(node, target_node)
+                        success = True
+                    
+                    if success:
+                        return True
+
+                return False
             else:
                 return False
 
@@ -231,7 +237,6 @@ class MergeManager:
         # Use the pairwise comparison to compute dissonance between the two nodes.
         dissonance_metrics = await self.metrics_orchestrator.compare_nodes(child, parent)
 
-        # Optionally, you can log or inspect dissonance_metrics for debugging.
         self.logger.info(f"[MergeManager] Pairwise dissonance metrics: {dissonance_metrics}")
 
         # Based on the dissonance, decide if there's a conflict.

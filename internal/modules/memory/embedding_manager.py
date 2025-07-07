@@ -241,18 +241,16 @@ class EmbeddingManager:
             MemoryLogger.error(f"Similarity calculation failed: {str(e)}")
             return 0.0
 
+    async def calculate_similarity_async(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Async version of similarity calculation with caching.
+        Use this when calling from async contexts.
+        """
+        return await self.calculate_similarity_cached(vec1, vec2)
+
     def calculate_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """
-        Calculate cosine similarity with intelligent caching.
-        Automatically uses cached version for identical vector pairs.
+        Synchronous similarity calculation.
+        Always returns a float, never a Task.
         """
-        try:
-            # For async contexts, use cached version
-            if asyncio.current_task() is not None:
-                return asyncio.create_task(self.calculate_similarity_cached(vec1, vec2))
-            else:
-                # For sync contexts, use direct calculation
-                return self._calculate_similarity_internal(vec1, vec2)
-        except RuntimeError:
-            # No event loop - use direct calculation
-            return self._calculate_similarity_internal(vec1, vec2)
+        return self._calculate_similarity_internal(vec1, vec2)

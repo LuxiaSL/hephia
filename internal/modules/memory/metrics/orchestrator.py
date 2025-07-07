@@ -21,11 +21,15 @@ from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 from enum import Enum, auto
 
+import numpy as np
+
 from .semantic import SemanticMetricsCalculator 
 from .emotional import EmotionalMetricsCalculator
 from .state import StateMetricsCalculator
 from .temporal import TemporalMetricsCalculator
 from .strength import StrengthMetricsCalculator
+from ..nodes.cognitive_node import CognitiveMemoryNode
+from ..nodes.body_node import BodyMemoryNode
 from ..embedding_manager import EmbeddingManager
 from ..state.signatures import EmotionalStateSignature
 from ..async_lru_cache import async_lru_cache
@@ -549,8 +553,8 @@ class RetrievalMetricsOrchestrator:
         
     async def compare_nodes(
         self,
-        nodeA: Any,
-        nodeB: Any,
+        nodeA: Union[CognitiveMemoryNode, BodyMemoryNode],
+        nodeB: Union[CognitiveMemoryNode, BodyMemoryNode],
         override_config: Optional[MetricsConfiguration] = None
     ) -> Dict[str, float]:
         """
@@ -567,6 +571,30 @@ class RetrievalMetricsOrchestrator:
         # Force detailed_metrics on for this computation.
         config.detailed_metrics = True
 
+        # Helper function to get embedding dimension safely
+        def get_embedding_dim(node: Union[CognitiveMemoryNode, BodyMemoryNode]) -> int:
+            if hasattr(node, 'embedding') and node.embedding:
+                if isinstance(node.embedding, list):
+                    return len(node.embedding)
+                elif hasattr(node.embedding, 'shape'):
+                    return node.embedding.shape[0]  # For numpy arrays
+            return 384  # Default embedding dimension
+        
+        # Helper function to get safe embedding
+        def get_safe_embedding(node: Union[CognitiveMemoryNode, BodyMemoryNode], target_dim: int) -> List[float]:
+            if hasattr(node, 'embedding'):
+                validated_embedding = self._validate_embedding(node.embedding, getattr(node, 'node_id', 'unknown'))
+                if len(validated_embedding) == target_dim:
+                    return validated_embedding
+            # Return zero vector of correct dimension
+            return [0.0] * target_dim
+
+        # Get embedding dimensions
+        dim_a = get_embedding_dim(nodeA)
+        dim_b = get_embedding_dim(nodeB)
+
+        target_dim = max(dim_a, dim_b, 384)  # Ensure at least 384 (standard embedding size)
+
         # For pairwise, we pass empty query info. The idea is that the node's own data
         # and the other node's stored state (e.g., raw_state) will drive the comparison.
         # For semantic comparison, use the other node's embedding
@@ -574,14 +602,14 @@ class RetrievalMetricsOrchestrator:
             target_node=nodeA,
             comparison_state=getattr(nodeB, 'raw_state', {}),
             query_text="",
-            query_embedding=getattr(nodeB, 'embedding', [0.0] * (nodeA.embedding.shape[0] if hasattr(nodeA, 'embedding') else 0)),
+            query_embedding=get_safe_embedding(nodeB, target_dim),
             override_config=config
         )
         metricsB = await self.calculate_metrics(
             target_node=nodeB,
             comparison_state=getattr(nodeA, 'raw_state', {}),
             query_text="",
-            query_embedding=getattr(nodeA, 'embedding', [0.0] * (nodeB.embedding.shape[0] if hasattr(nodeB, 'embedding') else 0)),
+            query_embedding=get_safe_embedding(nodeA, target_dim),
             override_config=config
         )
 
@@ -596,7 +624,8 @@ class RetrievalMetricsOrchestrator:
             compA_val = detailedA.get(comp_key, {})
             compB_val = detailedB.get(comp_key, {})
             # Compute a difference value between the two component dicts.
-            dissonance[comp_key] = self._compare_component_dicts(compA_val, compB_val)
+            raw_diff = self._compare_component_dicts(compA_val, compB_val)
+            dissonance[comp_key] = float(raw_diff)
         return dissonance
 
     def _compare_component_dicts(self, dataA: Any, dataB: Any) -> float:
@@ -604,13 +633,11 @@ class RetrievalMetricsOrchestrator:
         Recursively compare two data structures (expected to be dicts or numeric values)
         and return an average absolute difference.
         
-        If both values are numeric, the difference is the absolute difference.
-        If they are dicts, we compute the difference over their union of keys.
-        Otherwise, if one or both values are missing or non-numeric, we assume zero.
+        Ensures all return values are Python floats, not numpy types.
         """
-        # If both are numeric values, return absolute difference.
-        if isinstance(dataA, (int, float)) and isinstance(dataB, (int, float)):
-            return abs(dataA - dataB)
+        # If both are numeric values, return absolute difference as Python float
+        if isinstance(dataA, (int, float, np.number)) and isinstance(dataB, (int, float, np.number)):
+            return float(abs(float(dataA) - float(dataB)))
         
         # If both are dicts, compare recursively key by key.
         if isinstance(dataA, dict) and isinstance(dataB, dict):
@@ -622,10 +649,46 @@ class RetrievalMetricsOrchestrator:
                     dataB.get(key, 0)
                 )
                 differences.append(diff)
-            return sum(differences) / len(differences) if differences else 0.0
+            return float(sum(differences) / len(differences)) if differences else 0.0
         
-        # For any non-numeric and non-dict types, return 0 difference.
+        # For any non-numeric and non-dict types, return 0 difference as Python float
         return 0.0
+    
+    def _validate_embedding(self, embedding: Any, node_id: str = "unknown") -> List[float]:
+        """
+        Validate and normalize an embedding to ensure it's a proper list of floats.
+        
+        Args:
+            embedding: The embedding to validate
+            node_id: Node ID for logging purposes
+            
+        Returns:
+            List[float]: Validated embedding
+        """
+        try:
+            if embedding is None:
+                self.logger.warning(f"Node {node_id} has None embedding, using zero vector")
+                return [0.0] * 384
+                
+            if isinstance(embedding, list):
+                # Ensure all elements are floats
+                return [float(x) for x in embedding]
+                
+            elif hasattr(embedding, 'tolist'):
+                # Convert numpy array to list
+                return [float(x) for x in embedding.tolist()]
+                
+            elif hasattr(embedding, '__iter__'):
+                # Convert any iterable to list of floats
+                return [float(x) for x in embedding]
+                
+            else:
+                self.logger.error(f"Node {node_id} has invalid embedding type: {type(embedding)}")
+                return [0.0] * 384
+                
+        except Exception as e:
+            self.logger.error(f"Failed to validate embedding for node {node_id}: {e}")
+            return [0.0] * 384
 
     def update_configuration(
         self,

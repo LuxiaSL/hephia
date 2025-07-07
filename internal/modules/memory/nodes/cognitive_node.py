@@ -317,3 +317,47 @@ class CognitiveMemoryNode(BaseMemoryNode):
         if not isinstance(other, CognitiveMemoryNode):
             return NotImplemented
         return self.node_id == other.node_id
+    
+    # -------------------------------------------------------------------------
+    # Merge Overwrite
+    # -------------------------------------------------------------------------
+    def merge_into_parent(self, parent: 'CognitiveMemoryNode') -> None:
+        """
+        Handle cognitive node merging with proper field preservation.
+        Overrides base class to include cognitive-specific fields in ghost state.
+        """
+        self.ghosted = True
+        self.parent_node_id = parent.node_id
+        
+        # Record this node as a ghost in the parent with ALL cognitive fields
+        ghost_entry = {
+            'node_id': self.node_id,
+            'timestamp': self.timestamp,
+            'raw_state': self.raw_state,
+            'processed_state': self.processed_state,
+            'strength': self.strength,
+            'ghost_nodes': self.ghost_nodes,  # Preserve any nested ghosts
+            'text_content': self.text_content,
+            'embedding': self.embedding,
+            'semantic_context': self.semantic_context,
+            'formation_source': self.formation_source,
+            'last_echo_time': self.last_echo_time,
+            'echo_dampening': self.echo_dampening,
+            'body_references': [ref.to_dict() for ref in self.body_references]
+        }
+        parent.ghost_nodes.append(ghost_entry)
+        
+        # Transfer remaining strength to parent
+        parent.strength = min(1.0, parent.strength + (self.strength * 0.3))
+        
+        # Merge connections - connections to this node should now point to parent
+        for conn_id, weight in self.connections.items():
+            if conn_id in parent.connections:
+                # If connection already exists, strengthen it
+                parent.connections[conn_id] = min(
+                    1.0, 
+                    parent.connections[conn_id] + (weight * 0.5)
+                )
+            else:
+                # Transfer connection with reduced weight
+                parent.connections[conn_id] = weight * 0.85

@@ -57,15 +57,15 @@ class DiscordInterface(CognitiveInterface):
             async for key, value in self.get_cognitive_context():
                 context_parts[key] = value
 
+             # Build final context string from parts
+            formatted_context = context_parts.get('formatted_context', 'No context available')
+            other_updates = context_parts.get('updates', '')
+            context = f"{formatted_context}\n###\nRecent Updates:\n{other_updates}"
+            
+            # Log the entire context for debugging
+            BrainLogger.info(f"[{self.interface_id}] Received cognitive context: {context}")
+
             if Config.get_discord_reply_on_tag():
-                # Build final context string from parts
-                formatted_context = context_parts.get('formatted_context', 'No context available')
-                other_updates = context_parts.get('updates', '')
-                context = f"{formatted_context}\n###\nRecent Updates:\n{other_updates}"
-                
-                # Log the entire context for debugging
-                BrainLogger.info(f"[{self.interface_id}] Received cognitive context: {context}")
-                
                 # Get LLM response
                 prompt = await self._format_social_prompt(
                     message_content,

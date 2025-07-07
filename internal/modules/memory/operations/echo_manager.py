@@ -415,16 +415,31 @@ class EchoManager:
     async def _build_ghost_node(self, ghost_info: Dict[str, Any]) -> CognitiveMemoryNode:
         """
         Construct temporary node for ghost evaluation.
+        Enhanced to handle missing cognitive fields gracefully.
         """
+        # FIX: Provide defaults for missing cognitive fields
+        text_content = ghost_info.get('text_content', '')
+        if not text_content:
+            # Try to extract from raw_state or processed_state as fallback
+            text_content = (
+                ghost_info.get('processed_state', {}).get('text_content', '') or
+                ghost_info.get('raw_state', {}).get('text_content', '') or
+                f"[Ghost Node {ghost_info.get('node_id', 'unknown')}]"  # Fallback identifier
+            )
+        
         embedding = ghost_info.get('embedding', [])
-        if not embedding and ghost_info.get('text_content'):
+        if not embedding and text_content:
             try:
-                embedding = await self.metrics_orchestrator.embedding_manager.encode(ghost_info['text_content'])
-            except Exception:
-                embedding = []
+                embedding = await self.metrics_orchestrator.embedding_manager.encode(text_content)
+            except Exception as e:
+                self.logger.warning(f"Failed to generate embedding for ghost node: {e}")
+                embedding = [0.0] * 384  # Zero vector fallback
+        elif not embedding:
+            embedding = [0.0] * 384  # Zero vector fallback
+        
         return CognitiveMemoryNode(
             node_id=ghost_info.get('node_id'),
-            text_content=ghost_info.get('text_content', ''),
+            text_content=text_content,
             embedding=embedding,
             raw_state=ghost_info.get('raw_state', {}),
             processed_state=ghost_info.get('processed_state', {}),
@@ -432,6 +447,9 @@ class EchoManager:
             strength=ghost_info.get('strength', 0),
             ghosted=True,
             last_accessed=None,
-            last_echo_time=None,
-            echo_dampening=1.0
+            last_echo_time=ghost_info.get('last_echo_time'),
+            echo_dampening=ghost_info.get('echo_dampening', 1.0),
+            semantic_context=ghost_info.get('semantic_context', {}),
+            formation_source=ghost_info.get('formation_source'),
+            body_references=[]
         )

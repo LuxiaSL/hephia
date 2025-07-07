@@ -56,7 +56,7 @@ class EnvConfigModel(BaseModel):
     EXO_MIN_INTERVAL: int = Field(120, description="Minimum interval for Exo's main processing loop in seconds.", gt=0) #
     EXO_MAX_TURNS: int = Field(50, description="Maximum number of turns to manage context limits.", gt=0) #
     HEADLESS: bool = Field(False, description="Run Hephia without its own TUI/GUI (server mode).") #
-    LOG_PROMPTS: bool = Field(False, description="Enable detailed logging of prompts (can create large log files).") #
+    #LOG_PROMPTS: bool = Field(False, description="Enable detailed logging of prompts (can create large log files).") #
     ADVANCED_C2_LOGGING: bool = Field(False, description="Enable advanced Chapter2 logging if Chapter2 provider is used.") #
 
     # Embedding
