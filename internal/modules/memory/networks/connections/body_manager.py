@@ -212,7 +212,7 @@ class BodyConnectionManager(BaseConnectionManager[BodyMemoryNode]):
             to_node: Target node receiving connections.
             transfer_weight: Dampening factor for transferred connections.
         """
-        source_connections = from_node.get_connected_nodes(min_weight=0.2)
+        source_connections = from_node.get_connections_with_weights(min_weight=0.2)
         
         # Calculate new connection weights
         potential_transfers = {}

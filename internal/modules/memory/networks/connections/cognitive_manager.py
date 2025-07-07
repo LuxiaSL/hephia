@@ -217,7 +217,7 @@ class CognitiveConnectionManager(BaseConnectionManager[CognitiveMemoryNode]):
         """
         Transfer connections from one node to another with proper weight adjustment and max_connections enforcement.
         """
-        source_connections = from_node.get_connected_nodes(min_weight=0.2)
+        source_connections = from_node.get_connections_with_weights(min_weight=0.2)
         
         # Calculate new connection weights
         potential_transfers = {}

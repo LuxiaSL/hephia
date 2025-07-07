@@ -132,6 +132,21 @@ class BaseMemoryNode(ABC):
             node_id for node_id, weight in self.connections.items()
             if weight >= min_weight
         ]
+    
+    def get_connections_with_weights(self, min_weight: float = 0.0) -> Dict[str, float]:
+        """
+        Get connections as a dictionary with their weights, optionally filtered by minimum weight.
+        
+        Args:
+            min_weight: Minimum connection weight to include
+            
+        Returns:
+            Dict mapping node IDs to connection weights
+        """
+        return {
+            node_id: weight for node_id, weight in self.connections.items()
+            if weight >= min_weight
+        }
 
     # -------------------------------------------------------------------------
     # Strength & Decay
