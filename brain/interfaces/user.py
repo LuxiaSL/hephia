@@ -188,9 +188,31 @@ class UserInterface(CognitiveInterface):
     async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to user conversations.
-        Focuses on direct interaction patterns.
+        Uses current conversation context for targeted memory retrieval.
         """
+        # Default query if no metadata available
         query = "user conversation interaction discussion"
+        
+        if metadata:
+            # Extract conversation messages for context
+            conversation = metadata.get('conversation', [])
+            
+            if conversation:
+                # Get recent messages for context (last 3-5 messages)
+                recent_messages = conversation[-5:]
+                
+                # Build context from recent conversation
+                context_parts = []
+                for msg in recent_messages:
+                    role = msg.get('role', 'unknown')
+                    content = msg.get('content', '')
+                    if content:
+                        context_parts.append(f"{role}: {content}")
+                
+                # Use conversation context as query if available
+                if context_parts:
+                    query = " ".join(context_parts)
+        
         return await self.cognitive_bridge.retrieve_memories(
             query=query,
             limit=3

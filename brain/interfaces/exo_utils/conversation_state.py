@@ -1,7 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator
 from typing import Dict, List, Any, Optional
-
+from config import Config
 from loggers import BrainLogger
 
 class MessageRole(str, Enum):
@@ -298,7 +298,7 @@ class ConversationState(BaseModel):
         content_parts = []
         
         for pair in recent_pairs:
-            content_parts.append(f"hephia: {pair.assistant.content}")
+            content_parts.append(f"{Config.get_cognitive_model()}: {pair.assistant.content}")
             content_parts.append(f"exo: {pair.user.content}")
             
         return "\n".join(content_parts)

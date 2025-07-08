@@ -342,7 +342,7 @@ class ExoProcessorInterface(CognitiveInterface):
         except Exception as e:
             # Log error but continue with empty interaction history
             BrainLogger.error(f"Error processing conversation state: {e}")
-            interaction_snippets = []
+            interaction_snippets = ["ERROR: Unable to retrieve recent interactions. Please return an empty memory."]
         
         # Join all snippets into cohesive interaction history
         interaction_history = "\n###\n".join(interaction_snippets)
