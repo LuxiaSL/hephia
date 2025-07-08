@@ -241,18 +241,26 @@ class StateBridge:
             )
         """)
         
-        try:
-            cursor.execute("ALTER TABLE system_state ADD COLUMN temp_brain_state BLOB")
-            print("Running one-time migration: Converting brain_state to BLOB...")
-            cursor.execute("UPDATE system_state SET temp_brain_state = CAST(brain_state AS BLOB)")
-            cursor.execute("ALTER TABLE system_state DROP COLUMN brain_state")
-            cursor.execute("ALTER TABLE system_state RENAME COLUMN temp_brain_state TO brain_state")
-            print("Migration complete.")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" in str(e) or "no such column" in str(e):
-                pass 
-            else:
-                raise
+        # Check if migration is needed by examining the current brain_state column type
+        cursor.execute("PRAGMA table_info(system_state)")
+        columns = cursor.fetchall()
+        brain_state_column = next((col for col in columns if col[1] == 'brain_state'), None)
+        
+        # Only run migration if brain_state exists and is not already BLOB type
+        if brain_state_column and brain_state_column[2] != 'BLOB':
+            try:
+                print("Running one-time migration: Converting brain_state to BLOB...")
+                cursor.execute("ALTER TABLE system_state ADD COLUMN temp_brain_state BLOB")
+                cursor.execute("UPDATE system_state SET temp_brain_state = CAST(brain_state AS BLOB)")
+                cursor.execute("ALTER TABLE system_state DROP COLUMN brain_state")
+                cursor.execute("ALTER TABLE system_state RENAME COLUMN temp_brain_state TO brain_state")
+                print("Migration complete.")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    # Clean up if temp column already exists
+                    cursor.execute("DROP COLUMN temp_brain_state")
+                else:
+                    raise
 
         conn.commit()
         conn.close()
