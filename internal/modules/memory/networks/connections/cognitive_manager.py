@@ -207,6 +207,13 @@ class CognitiveConnectionManager(BaseConnectionManager[CognitiveMemoryNode]):
         Retrieve a CognitiveMemoryNode from the network by its ID.
         """
         return self.network.nodes.get(node_id)
+    
+    async def _persist_node_through_network(self, node: CognitiveMemoryNode, lock_acquired: bool = False) -> None:
+        """Persist node through the cognitive network with proper lock handling."""
+        try:
+            await self.network._persist_node(node, lock_acquired=lock_acquired)
+        except Exception as e:
+            self.logger.error(f"Failed to persist node {node.node_id}: {e}")
 
     async def transfer_connections(
         self,

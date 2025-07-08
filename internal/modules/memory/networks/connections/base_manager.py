@@ -22,16 +22,16 @@ from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List, Optional, Set, TypeVar, Generic, NamedTuple
+from typing import Any, Dict, List, Optional, Set, TypeVar, Generic, NamedTuple
 
 from loggers.loggers import MemoryLogger
+from .queue_manager import ConnectionUpdateQueue, UpdatePriority, UpdateReason, UpdateBatch
 from ..reentrant_lock import shared_reentrant_lock
 from ...metrics.orchestrator import MetricsConfiguration, RetrievalMetricsOrchestrator
 from ...nodes.base_node import BaseMemoryNode
 
 # Type variable for node specialization
 T = TypeVar('T', bound=BaseMemoryNode)
-
 
 class ConnectionError(Exception):
     """Base exception for connection management errors."""
@@ -147,6 +147,9 @@ class BaseConnectionManager(Generic[T], ABC):
 
         # Health tracking for connections
         self.connection_health: Dict[str, Dict[str, ConnectionHealth]] = {}
+
+        self.connection_queue: Optional[ConnectionUpdateQueue] = None
+        self.queue_enabled = False
 
     @asynccontextmanager
     async def connection_operation(self, operation_name: str = "unnamed"):
@@ -341,6 +344,10 @@ class BaseConnectionManager(Generic[T], ABC):
             return True
         
         return False
+    
+    async def _persist_node_through_network(self, node: T, lock_acquired: bool = False) -> None:
+        """Persist node through the network's persistence mechanism."""
+        pass  # Implemented by specialized managers
             
     @abstractmethod
     async def _calculate_connection_weight(
@@ -439,30 +446,25 @@ class BaseConnectionManager(Generic[T], ABC):
                 self.logger.error(f"Failed to prune connections: {e}")
                 return set()
 
-    async def update_connections(
-        self,
-        node: T,
-        connection_filter: Optional[Dict[str, float]] = None,
-        skip_reciprocal: bool = False,
-        lock_acquired: bool = False
-    ) -> List[str]:
-        """
-        Update connection weights for a node.
-        
-        Args:
-            node: Node to update connections for.
-            connection_filter: Optional subset of connections to update.
-            skip_reciprocal: Skip updating reciprocal connections.
-            lock_acquired: Whether the lock is already acquired by caller.
-            
-        Returns:
-            List of node IDs that had their connections updated.
-        """
-        if lock_acquired:
-            return await self._update_connections_internal(node, connection_filter, skip_reciprocal)
+    async def update_connections(self, node: T, lock_acquired: bool = False, **kwargs) -> List[str]:
+        """Update connection weights - routes through queue if enabled."""
+        if self.queue_enabled and self.connection_queue:
+            # Queue the update instead of processing immediately
+            success = await self.queue_connection_update(
+                node=node,
+                priority=UpdatePriority.NORMAL,
+                reason=UpdateReason.NODE_ACCESS,
+                lock_acquired=lock_acquired,
+                **kwargs
+            )
+            return [] if success else await self._immediate_update_fallback(node, lock_acquired=lock_acquired, **kwargs)
         else:
-            async with self.connection_operation("update_connections"):
-                return await self._update_connections_internal(node, connection_filter, skip_reciprocal)
+            # Direct processing (existing behavior)
+            if lock_acquired:
+                return await self._update_connections_internal(node, kwargs.get('connection_filter'), kwargs.get('skip_reciprocal', False))
+            else:
+                async with self.connection_operation("update_connections"):
+                    return await self._update_connections_internal(node, kwargs.get('connection_filter'), kwargs.get('skip_reciprocal', False))
 
     async def _update_connections_internal(
         self,
@@ -477,7 +479,7 @@ class BaseConnectionManager(Generic[T], ABC):
             List of node IDs that had their connections updated.
         """
         try:
-            connections = connection_filter or node.connections
+            connections = connection_filter or node.connections.copy()
             updated: Dict[str, float] = {}
 
             for other_id, old_weight in connections.items():
@@ -736,3 +738,116 @@ class BaseConnectionManager(Generic[T], ABC):
         except Exception as e:
             self.logger.error(f"Error executing function {getattr(func, '__name__', 'anonymous')}: {e}")
             return None
+        
+    # ---
+    # Queue management methods
+    # ---
+    async def initialize_queue(self, **queue_kwargs):
+        """Initialize and start the connection update queue."""
+        self.connection_queue = ConnectionUpdateQueue(**queue_kwargs)
+        
+        # Set the connection manager reference for batch processing
+        self.connection_queue.set_connection_manager(self)
+        
+        await self.connection_queue.start()
+        self.queue_enabled = True
+        self.logger.info("Connection update queue initialized")
+
+    async def shutdown_queue(self):
+        """Shutdown the connection update queue."""
+        if self.connection_queue:
+            await self.connection_queue.stop()
+            self.queue_enabled = False
+
+    async def queue_connection_update(
+        self,
+        node: T,
+        priority: UpdatePriority = UpdatePriority.NORMAL,
+        reason: UpdateReason = UpdateReason.NODE_ACCESS,
+        lock_acquired: bool = False,
+        **kwargs
+    ) -> bool:
+        """Queue a connection update request."""
+        if not self.queue_enabled or not self.connection_queue:
+            # Fallback to immediate processing
+            return await self._immediate_update_fallback(node, lock_acquired, **kwargs)
+        
+        return await self.connection_queue.enqueue_update(
+            node=node,
+            priority=priority,
+            reason=reason,
+            **kwargs
+        )
+
+    async def _immediate_update_fallback(self, node: T, lock_acquired: bool = False, **kwargs) -> List[str]:
+        """Fallback to immediate processing when queue unavailable."""
+        try:
+            # Process immediately and return updated node IDs for persistence
+            if lock_acquired:
+                updated_node_ids = await self._update_connections_internal(
+                    node, 
+                    kwargs.get('connection_filter'), 
+                    kwargs.get('skip_reciprocal', False)
+                )
+            else:
+                updated_node_ids = await self.update_connections(node, lock_acquired=False, **kwargs)
+            
+            return updated_node_ids if isinstance(updated_node_ids, list) else []
+            
+        except Exception as e:
+            self.logger.error(f"Immediate update fallback failed: {e}")
+            return []
+
+    async def process_queued_batch(self, batch: UpdateBatch) -> List[Dict[str, Any]]:
+        """Process a batch of connection updates from the queue."""
+        results = []
+        
+        for request in batch.requests:
+            try:
+                node = request.get_node()
+                if node is None:
+                    results.append({
+                        'request_id': request.request_id,
+                        'success': False,
+                        'error': 'Node no longer available'
+                    })
+                    continue
+                
+                async with asyncio.timeout(request.timeout):
+                    # Process connection updates
+                    updated_node_ids = await self._update_connections_internal(
+                        node=node,
+                        connection_filter=request.connection_filter,
+                        skip_reciprocal=request.skip_reciprocal
+                    )
+                    
+                    # Handle persistence with proper lock state
+                    await self._persist_node_through_network(node, lock_acquired=request.lock_acquired)
+                    
+                    for other_id in updated_node_ids:
+                        other_node = self._get_node_by_id(str(other_id))
+                        if other_node:
+                            await self._persist_node_through_network(other_node, lock_acquired=request.lock_acquired)
+                    
+                    results.append({
+                        'request_id': request.request_id,
+                        'node_id': request.node_id,
+                        'success': True,
+                        'updated_nodes': updated_node_ids,
+                        'processed_at': time.time()
+                    })
+                    
+            except asyncio.TimeoutError:
+                results.append({
+                    'request_id': request.request_id,
+                    'success': False,
+                    'error': f'Timeout after {request.timeout}s'
+                })
+            except Exception as e:
+                results.append({
+                    'request_id': request.request_id,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        return results

@@ -1118,5 +1118,11 @@ class MemorySystemOrchestrator:
                 await self._update_task
             except asyncio.CancelledError:
                 logger.info("Update task was cancelled during shutdown.")
+
+        try:
+            await self.cognitive_network.shutdown()
+            await self.body_network.shutdown()
+        except Exception as e:
+            logger.error(f"Error shutting down networks: {e}")
                 
         logger.info("Memory system shutdown complete.")

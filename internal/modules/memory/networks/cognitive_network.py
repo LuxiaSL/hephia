@@ -14,6 +14,7 @@ import asyncio
 
 from loggers.loggers import MemoryLogger
 from .connections.cognitive_manager import CognitiveConnectionManager
+from .connections.queue_manager import UpdatePriority, UpdateReason
 from .base_network import BaseNetwork, NetworkConfig, NetworkError
 from ..nodes.cognitive_node import CognitiveMemoryNode
 from ..db.managers import CognitiveDBManager
@@ -46,6 +47,7 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
         self.cog_db_manager = db_manager
         self.metrics_orchestrator = metrics_orchestrator
         self.connection_manager = CognitiveConnectionManager(self, metrics_orchestrator)
+        asyncio.create_task(self._initialize_connection_queue())
         self.logger = MemoryLogger
 
     @classmethod
@@ -55,6 +57,18 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
         await instance._load_existing_nodes()
         instance.logger.debug("CognitiveMemoryNetwork initialized.")
         return instance
+
+    async def _initialize_connection_queue(self):
+        """Initialize connection queue after network setup."""
+        try:
+            await self.connection_manager.initialize_queue(
+                max_queue_size=5000,
+                max_batch_size=25,
+                batch_timeout=1.5,
+                max_concurrent_batches=4
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to initialize connection queue: {e}")
 
     async def _load_existing_nodes(self) -> None:
         loaded_nodes = await self.cog_db_manager.load_all_nodes()
@@ -95,7 +109,6 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
     async def add_node(self, node: CognitiveMemoryNode) -> str:
         """Add a new CognitiveMemoryNode to the network."""
         async with self.network_operation("add_node"):
-            # Step 1: Create node (this is the critical part)
             self.logger.debug("Creating node in database...")
             new_id = await self.cog_db_manager.create_node(node)
             self.logger.debug(f"Node created in DB with ID {new_id}")
@@ -179,18 +192,28 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
             
             if should_update_connections:
                 try:
-                    # Add timeout to connection update
-                    async with asyncio.timeout(5.0):  # 5 second timeout
-                        # Get list of nodes that had reciprocal connections updated
-                        updated_node_ids = await self.connection_manager.update_connections(node, lock_acquired=True)
+                    async with asyncio.timeout(5.0):
+                        success = await self.connection_manager.queue_connection_update(
+                            node=node,
+                            priority=UpdatePriority.NORMAL,
+                            reason=UpdateReason.NODE_ACCESS,
+                            lock_acquired=True,
+                            skip_reciprocal=False
+                        )
+
+                        if not success:
+                            updated_node_ids = await self.connection_manager._immediate_update_fallback(
+                                node, lock_acquired=True
+                            )
                         
-                        # Persist each updated node
-                        for other_id in updated_node_ids:
-                            other_node = self.nodes.get(str(other_id))
-                            if other_node:
-                                await self._persist_node(other_node, lock_acquired=True)
+                            # Persist each updated node
+                            for other_id in updated_node_ids:
+                                other_node = self.nodes.get(str(other_id))
+                                if other_node:
+                                    await self._persist_node(other_node, lock_acquired=True)
+                        
+                        node.last_connection_update = current_time
                                 
-                    node.last_connection_update = current_time
                 except TimeoutError:
                     self.logger.error(f"Connection update timed out for node {node.node_id}")
                     # Still update the timestamp to prevent repeated timeout attempts
@@ -223,17 +246,26 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
                 
                 if should_update_connections:
                     try:
-                        # Add timeout to connection update
-                        async with asyncio.timeout(5.0):  # 5 second timeout
-                            # Get list of nodes that had reciprocal connections updated
-                            updated_node_ids = await self.connection_manager.update_connections(node, lock_acquired=True)
+                        async with asyncio.timeout(5.0):
+                            success = await self.connection_manager.queue_connection_update(
+                                node=node,
+                                priority=UpdatePriority.NORMAL,
+                                reason=UpdateReason.NODE_ACCESS,
+                                lock_acquired=True,
+                                skip_reciprocal=False
+                            )
+
+                            if not success:
+                                updated_node_ids = await self.connection_manager._immediate_update_fallback(
+                                    node, lock_acquired=True
+                                )
                             
-                            # Persist each updated node
-                            for other_id in updated_node_ids:
-                                other_node = self.nodes.get(str(other_id))
-                                if other_node:
-                                    await self._persist_node(other_node, lock_acquired=True)
-                                    
+                                # Persist each updated node
+                                for other_id in updated_node_ids:
+                                    other_node = self.nodes.get(str(other_id))
+                                    if other_node:
+                                        await self._persist_node(other_node, lock_acquired=True)
+                            
                             node.last_connection_update = current_time
                     except TimeoutError:
                         self.logger.error(f"Connection update timed out for node {node_id}")
@@ -293,3 +325,7 @@ class CognitiveMemoryNetwork(BaseNetwork[CognitiveMemoryNode]):
     # -------------------------------------------------------------------------
     # Shutdown
     # -------------------------------------------------------------------------
+    async def shutdown(self):
+        """Shutdown network and connection queue."""
+        if self.connection_manager:
+            await self.connection_manager.shutdown_queue()
