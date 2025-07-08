@@ -660,7 +660,7 @@ class BaseConnectionManager(Generic[T], ABC):
                 if new_weight >= self.config.thresholds.min_maintain_weight:
                     updated[other_id] = new_weight
 
-                await self._update_connection_health(node.node_id, other_id, new_weight)
+                await self._update_connection_health_internal(node.node_id, other_id, new_weight)
 
             updated = self._enforce_connection_limit(node, updated)
             
