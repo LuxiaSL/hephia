@@ -2,6 +2,7 @@ import time
 import hashlib
 from typing import Optional, TYPE_CHECKING
 
+from .node_lock_manager import LockType
 from .base_manager import (
     BaseConnectionManager,
     ConnectionOperation
@@ -199,7 +200,7 @@ class BodyConnectionManager(BaseConnectionManager[BodyMemoryNode]):
         return self.network.nodes.get(node_id)
     
     async def _persist_node_through_network(self, node: BodyMemoryNode, lock_acquired: bool = False) -> None:
-        """Persist node through the cognitive network with proper lock handling."""
+        """Persist node through the body network with proper lock handling."""
         try:
             await self.network._persist_node(node, lock_acquired=lock_acquired)
         except Exception as e:
@@ -212,38 +213,55 @@ class BodyConnectionManager(BaseConnectionManager[BodyMemoryNode]):
         transfer_weight: float = 0.9
     ) -> None:
         """
-        Transfer connections from one node to another with proper weight adjustment and max_connections enforcement.
-        
-        Args:
-            from_node: Source node losing connections.
-            to_node: Target node receiving connections.
-            transfer_weight: Dampening factor for transferred connections.
+        Transfer connections from one node to another with granular locking.
         """
+        # Determine all affected nodes  
+        affected_node_ids = {str(from_node.node_id), str(to_node.node_id)}
+        
+        # Add all nodes that will have their connections updated
         source_connections = from_node.get_connections_with_weights(min_weight=0.2)
+        for conn_id in source_connections.keys():
+            affected_node_ids.add(str(conn_id))
         
-        # Calculate new connection weights
-        potential_transfers = {}
-        for conn_id, weight in source_connections.items():
-            if conn_id == to_node.node_id:
-                continue  # Skip self-connection
-            new_weight = weight * transfer_weight
-            if conn_id in to_node.connections:
-                potential_transfers[conn_id] = max(new_weight, to_node.connections[conn_id])
-            else:
-                potential_transfers[conn_id] = new_weight
-        
-        # Enforce connection limits
-        final_transfers = self._enforce_connection_limit(to_node, potential_transfers)
-        
-        # Apply the transfers that made the cut
-        to_node.connections.update(final_transfers)
-        to_node.last_connection_update = time.time()
-        
-        # Clear source connections
-        from_node.connections.clear()
-        from_node.last_connection_update = time.time()
-        
-        transferred_count = len(final_transfers)
-        total_potential = len(potential_transfers)
-        if transferred_count < total_potential:
-            self.logger.debug(f"Connection transfer: transferred {transferred_count}/{total_potential} connections due to max_connections limit")
+        # Use granular locking for the transfer operation
+        async with self.connection_operation_for_nodes(
+            node_ids=affected_node_ids,
+            operation_name="transfer_connections_body",
+            write_node_ids=affected_node_ids  # All nodes will be modified
+        ):
+            # Calculate new connection weights
+            potential_transfers = {}
+            for conn_id, weight in source_connections.items():
+                if conn_id == to_node.node_id:
+                    continue  # Skip self-connection
+                new_weight = weight * transfer_weight
+                if conn_id in to_node.connections:
+                    potential_transfers[conn_id] = max(new_weight, to_node.connections[conn_id])
+                else:
+                    potential_transfers[conn_id] = new_weight
+            
+            # Enforce connection limits
+            final_transfers = self._enforce_connection_limit(to_node, potential_transfers)
+            
+            # Apply the transfers that made the cut
+            to_node.connections.update(final_transfers)
+            to_node.last_connection_update = time.time()
+            
+            # Update reciprocal connections for transferred connections
+            for conn_id, weight in final_transfers.items():
+                other_node = self._get_node_by_id(conn_id)
+                if other_node:
+                    # Update the reciprocal connection to point to new node
+                    if str(from_node.node_id) in other_node.connections:
+                        other_node.connections.pop(str(from_node.node_id))
+                    other_node.connections[str(to_node.node_id)] = weight
+                    other_node.last_connection_update = time.time()
+            
+            # Clear source connections
+            from_node.connections.clear()
+            from_node.last_connection_update = time.time()
+            
+            transferred_count = len(final_transfers)
+            total_potential = len(potential_transfers)
+            if transferred_count < total_potential:
+                self.logger.debug(f"Connection transfer: transferred {transferred_count}/{total_potential} connections due to max_connections limit")

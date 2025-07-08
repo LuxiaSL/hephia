@@ -25,6 +25,7 @@ from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Set, TypeVar, Generic, NamedTuple
 
 from loggers.loggers import MemoryLogger
+from .node_lock_manager import NodeLockManager, LockType
 from .queue_manager import ConnectionUpdateQueue, UpdatePriority, UpdateReason, UpdateBatch
 from ..reentrant_lock import shared_reentrant_lock
 from ...metrics.orchestrator import MetricsConfiguration, RetrievalMetricsOrchestrator
@@ -151,18 +152,110 @@ class BaseConnectionManager(Generic[T], ABC):
         self.connection_queue: Optional[ConnectionUpdateQueue] = None
         self.queue_enabled = False
 
+        self.node_lock_manager = NodeLockManager(
+            default_timeout=30.0,
+            deadlock_detection_timeout=5.0,
+            enable_global_fallback=True
+        )
+
     @asynccontextmanager
     async def connection_operation(self, operation_name: str = "unnamed"):
-        """Async-safe context manager for connection operations."""
-        async with shared_reentrant_lock:
-            self._operation_count += 1
-            self.logger.debug(f"Starting connection operation: {operation_name}")
-            try:
-                yield
-            finally:
-                self.logger.debug(f"Completed connection operation: {operation_name}")
-                self._operation_count -= 1
+        """Async-safe context manager for connection operations using granular locking."""
+        # For now, we'll determine affected nodes dynamically
+        # This is a transitional implementation
+        try:
+            # Try to use granular locking for simple operations
+            async with self.node_lock_manager.acquire_node_lock(
+                node_id="temp_fallback",  # This will be improved in specific methods
+                lock_type=LockType.WRITE,
+                operation_name=operation_name
+            ):
+                self._operation_count += 1
+                self.logger.debug(f"Starting connection operation: {operation_name}")
+                try:
+                    yield
+                finally:
+                    self.logger.debug(f"Completed connection operation: {operation_name}")
+                    self._operation_count -= 1
+        except Exception as e:
+            # Fallback to global lock if granular locking fails
+            self.logger.warning(f"Granular locking failed for {operation_name}, falling back to global lock: {e}")
+            async with shared_reentrant_lock:
+                self._operation_count += 1
+                self.logger.debug(f"Starting connection operation (global fallback): {operation_name}")
+                try:
+                    yield
+                finally:
+                    self.logger.debug(f"Completed connection operation (global fallback): {operation_name}")
+                    self._operation_count -= 1
 
+    @asynccontextmanager
+    async def connection_operation_for_nodes(
+        self, 
+        node_ids: Set[str], 
+        operation_name: str = "unnamed",
+        write_node_ids: Optional[Set[str]] = None
+    ):
+        """
+        Granular locking context manager for operations on specific nodes.
+        
+        Args:
+            node_ids: Set of node IDs that will be affected
+            operation_name: Name for logging/debugging  
+            write_node_ids: Set of node IDs that need write access (defaults to all)
+        """
+        if not node_ids:
+            # No nodes specified, use global lock
+            async with self.connection_operation(operation_name):
+                yield
+            return
+        
+        # Default to write access for all nodes if not specified
+        if write_node_ids is None:
+            write_node_ids = node_ids
+        
+        # Create lock specification
+        node_specs = {}
+        for node_id in node_ids:
+            node_specs[str(node_id)] = LockType.WRITE if node_id in write_node_ids else LockType.READ
+        
+        try:
+            if len(node_specs) == 1:
+                # Single node - use simple lock
+                node_id = next(iter(node_specs.keys()))
+                lock_type = node_specs[node_id]
+                async with self.node_lock_manager.acquire_node_lock(
+                    node_id=node_id,
+                    lock_type=lock_type,
+                    operation_name=operation_name
+                ):
+                    self._operation_count += 1
+                    self.logger.debug(f"Starting connection operation for node {node_id}: {operation_name}")
+                    try:
+                        yield
+                    finally:
+                        self.logger.debug(f"Completed connection operation for node {node_id}: {operation_name}")
+                        self._operation_count -= 1
+            else:
+                # Multiple nodes - use multi-node lock
+                async with self.node_lock_manager.acquire_multiple_node_locks(
+                    node_specs=node_specs,
+                    operation_name=operation_name
+                ):
+                    self._operation_count += 1
+                    self.logger.debug(f"Starting connection operation for nodes {node_ids}: {operation_name}")
+                    try:
+                        yield
+                    finally:
+                        self.logger.debug(f"Completed connection operation for nodes {node_ids}: {operation_name}")
+                        self._operation_count -= 1
+                        
+        except Exception as e:
+            # Fallback to global lock if granular locking fails
+            self.logger.warning(f"Granular locking failed for {operation_name} on nodes {node_ids}, falling back: {e}")
+            async with self.connection_operation(operation_name + "_fallback"):
+                yield
+            
     async def form_initial_connections(
         self,
         node: T,
@@ -172,6 +265,45 @@ class BaseConnectionManager(Generic[T], ABC):
     ) -> Dict[str, float]:
         """
         Form initial bidirectional connections for a new node.
+        Uses granular locking for better concurrency.
+
+        Args:
+            node: Newly created node.
+            candidates: Potential nodes to connect to.
+            max_candidates: Optional limit on connections to form.
+            lock_acquired: Whether the lock is already acquired by caller.
+
+        Returns:
+            Dict mapping node IDs to connection weights.
+        """
+        if lock_acquired:
+            # Caller already has locks, proceed directly
+            return await self._form_connections_internal(node, candidates, max_candidates)
+        
+        # Determine nodes that will be affected
+        affected_node_ids = {str(node.node_id)}
+        max_count = max_candidates or min(len(candidates), self.config.thresholds.max_connections)
+        
+        for other in candidates[:max_count]:
+            if other and other.node_id and other.node_id != node.node_id:
+                affected_node_ids.add(str(other.node_id))
+        
+        # Use granular locking for all affected nodes
+        async with self.connection_operation_for_nodes(
+            node_ids=affected_node_ids,
+            operation_name="form_initial_connections",
+            write_node_ids=affected_node_ids  # All nodes need write access
+        ):
+            return await self._form_connections_internal(node, candidates, max_candidates)
+        
+    async def _form_connections_internal(
+        self,
+        node: T,
+        candidates: List[T], 
+        max_candidates: Optional[int] = None
+    ) -> Dict[str, float]:
+        """
+        Form initial bidirectional connections for a new node (internal implementation).
         Uses softmax scaling for natural connection distribution.
 
         Args:
@@ -183,84 +315,103 @@ class BaseConnectionManager(Generic[T], ABC):
         Returns:
             Dict mapping node IDs to connection weights.
         """
-        async def _form_connections():
-            try:
-                # Validate inputs
-                if not node:
-                    self.logger.error("Cannot form connections - invalid node")
-                    return {}
-                
-                if not node.raw_state:
-                    self.logger.error("Cannot form connections - node has no state")
-                    return {}
-                    
-                max_count = max_candidates or self.config.thresholds.max_connections
-                connection_scores = []
-
-                # Calculate raw similarity scores (ONE TIME for each pair)
-                connection_cache = {}  # Cache weights to ensure consistency
-                for other in candidates[:max_count]:
-                    if not other or other.node_id == node.node_id:
-                        continue
-                        
-                    try:
-                        # Calculate weight once and cache it
-                        score = await self._calculate_connection_weight(
-                            node,
-                            other,
-                            ConnectionOperation.FORMATION
-                        )
-                        if score >= self.config.thresholds.min_initial_weight:
-                            connection_scores.append((other.node_id, score))
-                            connection_cache[other.node_id] = score
-                    except Exception as e:
-                        self.logger.error(f"Error calculating connection weight: {e}")
-                        continue
-
-                # Apply softmax scaling unless extremely similar
-                connections = {}
-                if connection_scores:
-                    scores = [score for _, score in connection_scores]
-                    max_score = max(scores)
-                    
-                    # If any are very strong, use raw scores
-                    if max_score > self.config.thresholds.strong_connection:
-                        connections = {node_id: score for node_id, score in connection_scores}
-                    else:
-                        # Apply softmax scaling
-                        scaled = self._softmax(scores)
-                        connections = {
-                            node_id: scaled[i] 
-                            for i, (node_id, _) in enumerate(connection_scores)
-                        }
-
-                    # Form reciprocal connections with SAME weights
-                    for other_id, weight in connections.items():
-                        other = self._get_node_by_id(other_id)
-                        if other and not getattr(other, 'ghosted', False):
-                            if self._can_accept_connection(other) or self._make_room_for_connection(other, weight):
-                                # Update other node's connections
-                                other.connections[node.node_id] = weight
-                                other.last_connection_update = time.time()
-
-                                # Update health tracking for BOTH directions
-                                await self._update_connection_health(node.node_id, other_id, weight)
-                                await self._update_connection_health(other_id, node.node_id, weight)
-                            else:
-                                self.logger.debug(f"Skipped reciprocal connection from {other_id} to {node.node_id}: target node at capacity")
-
-                return connections
-
-            except Exception as e:
-                self.logger.error(f"Failed to form initial connections: {e}")
-                self.logger.debug(f"Exception traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
+        try:
+            # Validate inputs
+            if not node:
+                self.logger.error("Cannot form connections - invalid node")
                 return {}
+            
+            if not node.raw_state:
+                self.logger.error("Cannot form connections - node has no state")
+                return {}
+                
+            max_count = max_candidates or self.config.thresholds.max_connections
+            connection_scores = []
 
-        if lock_acquired:
-            return await _form_connections()
-        else:
-            async with self.connection_operation("form_initial_connections"):
-                return await _form_connections()
+            # Calculate raw similarity scores (ONE TIME for each pair)
+            connection_cache = {}  # Cache weights to ensure consistency
+            for other in candidates[:max_count]:
+                if not other or other.node_id == node.node_id:
+                    continue
+                    
+                try:
+                    # Calculate weight once and cache it
+                    score = await self._calculate_connection_weight(
+                        node,
+                        other,
+                        ConnectionOperation.FORMATION
+                    )
+                    if score >= self.config.thresholds.min_initial_weight:
+                        connection_scores.append((other.node_id, score))
+                        connection_cache[other.node_id] = score
+                except Exception as e:
+                    self.logger.error(f"Error calculating connection weight: {e}")
+                    continue
+
+            # Apply softmax scaling unless extremely similar
+            connections = {}
+            if connection_scores:
+                scores = [score for _, score in connection_scores]
+                max_score = max(scores)
+                
+                # If any are very strong, use raw scores
+                if max_score > self.config.thresholds.strong_connection:
+                    connections = {node_id: score for node_id, score in connection_scores}
+                else:
+                    # Apply softmax scaling
+                    scaled = self._softmax(scores)
+                    connections = {
+                        node_id: scaled[i] 
+                        for i, (node_id, _) in enumerate(connection_scores)
+                    }
+
+                # Form reciprocal connections with SAME weights
+                for other_id, weight in connections.items():
+                    other = self._get_node_by_id(other_id)
+                    if other and not getattr(other, 'ghosted', False):
+                        if self._can_accept_connection(other) or self._make_room_for_connection(other, weight):
+                            # Update other node's connections
+                            other.connections[node.node_id] = weight
+                            other.last_connection_update = time.time()
+
+                            # Update health tracking for BOTH directions
+                            await self._update_connection_health_internal(node.node_id, other_id, weight)
+                            await self._update_connection_health_internal(other_id, node.node_id, weight)
+                        else:
+                            self.logger.debug(f"Skipped reciprocal connection from {other_id} to {node.node_id}: target node at capacity")
+
+            return connections
+
+        except Exception as e:
+            self.logger.error(f"Failed to form initial connections: {e}")
+            return {}
+    
+    async def _update_connection_health_internal(
+        self,
+        node_id: str,
+        other_id: str,
+        weight: float
+    ) -> bool:
+        """
+        Internal connection health update (assumes locks already held).
+        """
+        try:
+            if str(node_id) not in self.connection_health:
+                self.connection_health[str(node_id)] = {}
+
+            if str(other_id) not in self.connection_health[str(node_id)]:
+                self.connection_health[str(node_id)][str(other_id)] = ConnectionHealth(last_updated=time.time())
+
+            health = self.connection_health[str(node_id)][str(other_id)]
+            health.last_updated = time.time()
+            health.update_count += 1
+            health.add_strength(weight)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update connection health: {e}")
+            return False
             
     def _enforce_connection_limit(self, node: T, new_connections: Dict[str, float]) -> Dict[str, float]:
         """
@@ -446,25 +597,35 @@ class BaseConnectionManager(Generic[T], ABC):
                 self.logger.error(f"Failed to prune connections: {e}")
                 return set()
 
-    async def update_connections(self, node: T, lock_acquired: bool = False, **kwargs) -> List[str]:
-        """Update connection weights - routes through queue if enabled."""
-        if self.queue_enabled and self.connection_queue:
-            # Queue the update instead of processing immediately
-            success = await self.queue_connection_update(
-                node=node,
-                priority=UpdatePriority.NORMAL,
-                reason=UpdateReason.NODE_ACCESS,
-                lock_acquired=lock_acquired,
-                **kwargs
-            )
-            return [] if success else await self._immediate_update_fallback(node, lock_acquired=lock_acquired, **kwargs)
-        else:
-            # Direct processing (existing behavior)
-            if lock_acquired:
-                return await self._update_connections_internal(node, kwargs.get('connection_filter'), kwargs.get('skip_reciprocal', False))
-            else:
-                async with self.connection_operation("update_connections"):
-                    return await self._update_connections_internal(node, kwargs.get('connection_filter'), kwargs.get('skip_reciprocal', False))
+    async def update_connections(
+        self,
+        node: T,
+        connection_filter: Optional[Dict[str, float]] = None,
+        skip_reciprocal: bool = False,
+        lock_acquired: bool = False
+    ) -> List[str]:
+        """
+        Update connection weights for a node using granular locking.
+        """
+        if lock_acquired:
+            # Caller already has locks, proceed directly
+            return await self._update_connections_internal(node, connection_filter, skip_reciprocal)
+        
+        # Determine affected nodes
+        affected_node_ids = {str(node.node_id)}
+        connections_to_check = connection_filter or node.connections
+        
+        for other_id in connections_to_check.keys():
+            if other_id and other_id != node.node_id:
+                affected_node_ids.add(str(other_id))
+        
+        # Use granular locking
+        async with self.connection_operation_for_nodes(
+            node_ids=affected_node_ids,
+            operation_name="update_connections",
+            write_node_ids=affected_node_ids  # All nodes may need updates
+        ):
+            return await self._update_connections_internal(node, connection_filter, skip_reciprocal)
 
     async def _update_connections_internal(
         self,
@@ -556,33 +717,35 @@ class BaseConnectionManager(Generic[T], ABC):
         node_id: str,
         other_id: str,
         weight: float
-    ) -> None:
+    ) -> bool:
         """
-        Update health tracking for a connection.
-
-        Args:
-            node_id: ID of first node.
-            other_id: ID of second node.
-            weight: New connection weight.
+        Update health tracking for a connection with granular locking.
         """
-        async with self.connection_operation("update_connection_health"):
-            try:
-                if node_id not in self.connection_health:
-                    self.connection_health[node_id] = {}
+        # Use read locks since we're just updating health tracking, not the nodes themselves
+        affected_node_ids = {str(node_id), str(other_id)}
+        
+        try:
+            async with self.connection_operation_for_nodes(
+                node_ids=affected_node_ids,
+                operation_name="update_connection_health",
+                write_node_ids=set()  # No write access needed for health tracking
+            ):
+                if str(node_id) not in self.connection_health:
+                    self.connection_health[str(node_id)] = {}
 
-                if other_id not in self.connection_health[node_id]:
-                    self.connection_health[node_id][other_id] = ConnectionHealth(last_updated=time.time())
+                if str(other_id) not in self.connection_health[str(node_id)]:
+                    self.connection_health[str(node_id)][str(other_id)] = ConnectionHealth(last_updated=time.time())
 
-                health = self.connection_health[node_id][other_id]
+                health = self.connection_health[str(node_id)][str(other_id)]
                 health.last_updated = time.time()
                 health.update_count += 1
                 health.add_strength(weight)
-
-            except Exception as e:
-                self.logger.error(f"Failed to update connection health: {e}")
-                # Either re-raise or return a status indicating failure
-                return False
-            return True
+                
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Failed to update connection health: {e}")
+            return False
 
     async def _handle_pruned_connections(
         self,
@@ -684,19 +847,45 @@ class BaseConnectionManager(Generic[T], ABC):
 
     async def maintain_connections(self, nodes: List[T]) -> None:
         """
-        Perform maintenance on network connections.
-
-        Args:
-            nodes: List of nodes to maintain.
+        Perform maintenance on network connections using efficient batching.
         """
-        async with self.connection_operation("maintain_connections"):
+        if not nodes:
+            return
+        
+        # Group nodes into batches to avoid lock contention
+        batch_size = min(10, len(nodes))  # Process up to 10 nodes at once
+        
+        for i in range(0, len(nodes), batch_size):
+            batch = nodes[i:i + batch_size]
+            
+            # Get all affected node IDs for this batch
+            affected_node_ids = set()
+            for node in batch:
+                if not getattr(node, 'ghosted', False):
+                    affected_node_ids.add(str(node.node_id))
+                    # Add connected nodes
+                    for conn_id in node.connections.keys():
+                        affected_node_ids.add(str(conn_id))
+            
+            if not affected_node_ids:
+                continue
+                
+            # Process this batch with granular locking
             try:
-                for node in nodes:
-                    if getattr(node, 'ghosted', False):
-                        continue
-                    await self.update_connections(node, lock_acquired=True)
+                async with self.connection_operation_for_nodes(
+                    node_ids=affected_node_ids,
+                    operation_name=f"maintain_connections_batch_{i//batch_size}",
+                    write_node_ids=affected_node_ids
+                ):
+                    for node in batch:
+                        if not getattr(node, 'ghosted', False):
+                            await self._update_connections_internal(
+                                node, 
+                                connection_filter=None,
+                                skip_reciprocal=False
+                            )
             except Exception as e:
-                self.logger.error(f"Failed to maintain connections: {e}")
+                self.logger.error(f"Failed to maintain connections for batch {i//batch_size}: {e}")
 
     @abstractmethod
     async def transfer_connections(
@@ -797,37 +986,70 @@ class BaseConnectionManager(Generic[T], ABC):
         except Exception as e:
             self.logger.error(f"Immediate update fallback failed: {e}")
             return []
-
-    async def process_queued_batch(self, batch: UpdateBatch) -> List[Dict[str, Any]]:
-        """Process a batch of connection updates from the queue."""
-        results = []
+    
+    async def process_queued_batch_with_locks(self, batch: UpdateBatch) -> List[Dict[str, Any]]:
+        """
+        Enhanced batch processing that coordinates queue and lock systems.
+        """
+        # Determine all affected nodes from the batch
+        affected_node_ids = set()
+        node_refs = {}  # Keep references to prevent garbage collection
         
         for request in batch.requests:
-            try:
-                node = request.get_node()
-                if node is None:
-                    results.append({
-                        'request_id': request.request_id,
-                        'success': False,
-                        'error': 'Node no longer available'
-                    })
-                    continue
+            node = request.get_node()
+            if node:
+                affected_node_ids.add(str(request.node_id))
+                node_refs[str(request.node_id)] = node
                 
-                async with asyncio.timeout(request.timeout):
-                    # Process connection updates
+                # Add connected nodes that might be updated
+                for conn_id in node.connections.keys():
+                    affected_node_ids.add(str(conn_id))
+        
+        if not affected_node_ids:
+            return [{
+                'request_id': req.request_id,
+                'success': False,
+                'error': 'No valid nodes in batch'
+            } for req in batch.requests]
+        
+        # Process the entire batch under a single lock operation
+        async with self.connection_operation_for_nodes(
+            node_ids=affected_node_ids,
+            operation_name=f"process_batch_{batch.batch_id}",
+            write_node_ids=affected_node_ids
+        ):
+            # Pre-warm cache if this is a cognitive batch
+            if hasattr(self, 'warm_connection_cache_for_batch'):
+                valid_nodes = [node for node in node_refs.values() if node]
+                await self.warm_connection_cache_for_batch(valid_nodes)
+            
+            # Process each request in the batch
+            results = []
+            for request in batch.requests:
+                try:
+                    node = request.get_node()
+                    if node is None:
+                        results.append({
+                            'request_id': request.request_id,
+                            'success': False,
+                            'error': 'Node no longer available'
+                        })
+                        continue
+                    
+                    # Process connection updates (locks already held)
                     updated_node_ids = await self._update_connections_internal(
                         node=node,
                         connection_filter=request.connection_filter,
                         skip_reciprocal=request.skip_reciprocal
                     )
                     
-                    # Handle persistence with proper lock state
-                    await self._persist_node_through_network(node, lock_acquired=request.lock_acquired)
+                    # Handle persistence through network
+                    await self._persist_node_through_network(node, lock_acquired=True)
                     
                     for other_id in updated_node_ids:
                         other_node = self._get_node_by_id(str(other_id))
                         if other_node:
-                            await self._persist_node_through_network(other_node, lock_acquired=request.lock_acquired)
+                            await self._persist_node_through_network(other_node, lock_acquired=True)
                     
                     results.append({
                         'request_id': request.request_id,
@@ -837,17 +1059,59 @@ class BaseConnectionManager(Generic[T], ABC):
                         'processed_at': time.time()
                     })
                     
-            except asyncio.TimeoutError:
-                results.append({
-                    'request_id': request.request_id,
-                    'success': False,
-                    'error': f'Timeout after {request.timeout}s'
-                })
-            except Exception as e:
-                results.append({
-                    'request_id': request.request_id,
-                    'success': False,
-                    'error': str(e)
-                })
+                except Exception as e:
+                    results.append({
+                        'request_id': request.request_id,
+                        'success': False,
+                        'error': str(e)
+                    })
+            
+            return results
+    
+    # ---
+    # Lock utilities
+    # ---
+    def cleanup_locks(self) -> Dict[str, int]:
+        """Clean up unused locks and return statistics."""
+        return {
+            'locks_cleaned': self.node_lock_manager.cleanup_unused_locks(),
+            'lock_stats': self.node_lock_manager.get_stats()
+        }
+
+    def get_lock_stats(self) -> Dict[str, Any]:
+        """Get current lock manager statistics."""
+        return self.node_lock_manager.get_stats()
+    
+    async def handle_lock_failure(self, operation_name: str, affected_nodes: Set[str], error: Exception):
+        """
+        Handle lock acquisition failures with appropriate fallbacks.
+        """
+        self.logger.error(f"Lock failure in {operation_name} for nodes {affected_nodes}: {error}")
         
-        return results
+        # Increment failure stats
+        if hasattr(self, 'node_lock_manager'):
+            stats = self.node_lock_manager.get_stats()
+            stats['operation_failures'] = stats.get('operation_failures', 0) + 1
+    
+        return False
+    
+    def get_combined_stats(self) -> Dict[str, Any]:
+        """
+        Get combined statistics from both queue and lock managers.
+        """
+        stats = {
+            'queue_stats': {},
+            'lock_stats': {},
+            'connection_health': {
+                'total_connections': sum(len(health_dict) for health_dict in self.connection_health.values()),
+                'nodes_with_connections': len(self.connection_health)
+            }
+        }
+        
+        if hasattr(self, 'connection_queue') and self.connection_queue:
+            stats['queue_stats'] = self.connection_queue.get_queue_stats()
+        
+        if hasattr(self, 'node_lock_manager'):
+            stats['lock_stats'] = self.node_lock_manager.get_stats()
+        
+        return stats

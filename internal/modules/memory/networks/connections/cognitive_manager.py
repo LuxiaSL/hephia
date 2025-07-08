@@ -4,6 +4,7 @@ import asyncio
 from asyncio import TimeoutError as AsyncTimeoutError
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from .node_lock_manager import LockType
 from .base_manager import (
     BaseConnectionManager,
     ConnectionOperation
@@ -222,33 +223,79 @@ class CognitiveConnectionManager(BaseConnectionManager[CognitiveMemoryNode]):
         transfer_weight: float = 0.9
     ) -> None:
         """
-        Transfer connections from one node to another with proper weight adjustment and max_connections enforcement.
+        Transfer connections from one node to another with granular locking.
         """
+        # Determine all affected nodes
+        affected_node_ids = {str(from_node.node_id), str(to_node.node_id)}
+        
+        # Add all nodes that will have their connections updated
         source_connections = from_node.get_connections_with_weights(min_weight=0.2)
+        for conn_id in source_connections.keys():
+            affected_node_ids.add(str(conn_id))
         
-        # Calculate new connection weights
-        potential_transfers = {}
-        for conn_id, weight in source_connections.items():
-            if conn_id == to_node.node_id:
-                continue  # Skip self-connection
-            new_weight = weight * transfer_weight
-            if conn_id in to_node.connections:
-                potential_transfers[conn_id] = max(new_weight, to_node.connections[conn_id])
-            else:
-                potential_transfers[conn_id] = new_weight
+        # Use granular locking for the transfer operation
+        async with self.connection_operation_for_nodes(
+            node_ids=affected_node_ids,
+            operation_name="transfer_connections_cognitive",
+            write_node_ids=affected_node_ids  # All nodes will be modified
+        ):
+            # Calculate new connection weights
+            potential_transfers = {}
+            for conn_id, weight in source_connections.items():
+                if conn_id == to_node.node_id:
+                    continue  # Skip self-connection
+                new_weight = weight * transfer_weight
+                if conn_id in to_node.connections:
+                    potential_transfers[conn_id] = max(new_weight, to_node.connections[conn_id])
+                else:
+                    potential_transfers[conn_id] = new_weight
+            
+            # Enforce connection limits
+            final_transfers = self._enforce_connection_limit(to_node, potential_transfers)
+            
+            # Apply the transfers that made the cut
+            to_node.connections.update(final_transfers)
+            to_node.last_connection_update = time.time()
+            
+            # Update reciprocal connections for transferred connections
+            for conn_id, weight in final_transfers.items():
+                other_node = self._get_node_by_id(conn_id)
+                if other_node:
+                    # Update the reciprocal connection to point to new node
+                    if str(from_node.node_id) in other_node.connections:
+                        other_node.connections.pop(str(from_node.node_id))
+                    other_node.connections[str(to_node.node_id)] = weight
+                    other_node.last_connection_update = time.time()
+            
+            # Clear source connections
+            from_node.connections.clear()
+            from_node.last_connection_update = time.time()
+            
+            transferred_count = len(final_transfers)
+            total_potential = len(potential_transfers)
+            if transferred_count < total_potential:
+                self.logger.debug(f"Connection transfer: transferred {transferred_count}/{total_potential} connections due to max_connections limit")
         
-        # Enforce connection limits
-        final_transfers = self._enforce_connection_limit(to_node, potential_transfers)
+    async def warm_connection_cache_for_batch(self, batch_nodes: List[CognitiveMemoryNode]) -> None:
+        """
+        Pre-warm connection calculation cache for a batch of nodes.
+        This can improve batch processing performance.
+        """
+        if len(batch_nodes) < 2:
+            return
         
-        # Apply the transfers that made the cut
-        to_node.connections.update(final_transfers)
-        to_node.last_connection_update = time.time()
+        # Only pre-calculate for nodes that will likely have connections
+        strong_nodes = [node for node in batch_nodes if node.strength > 0.3]
         
-        # Clear source connections
-        from_node.connections.clear()
-        from_node.last_connection_update = time.time()
+        if len(strong_nodes) < 2:
+            return
         
-        transferred_count = len(final_transfers)
-        total_potential = len(potential_transfers)
-        if transferred_count < total_potential:
-            self.logger.debug(f"Connection transfer: transferred {transferred_count}/{total_potential} connections due to max_connections limit")
+        # Pre-calculate connection weights for node pairs in the batch
+        for i, node_a in enumerate(strong_nodes):
+            for node_b in strong_nodes[i+1:]:
+                try:
+                    # This will populate the cache
+                    await self._calculate_connection_weight_cached(node_a, node_b)
+                except Exception as e:
+                    self.logger.debug(f"Cache warming failed for nodes {node_a.node_id}-{node_b.node_id}: {e}")
+

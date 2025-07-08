@@ -214,7 +214,7 @@ class ConnectionUpdateQueue:
         # Wait for current processing to complete
         if self._processor_task:
             try:
-                await asyncio.wait_for(self._processor_task, timeout=30.0)
+                await asyncio.wait_for(self._processor_task, timeout=2.0)
             except asyncio.TimeoutError:
                 self.logger.warning("Queue processor did not shut down gracefully, cancelling")
                 self._processor_task.cancel()
@@ -224,7 +224,7 @@ class ConnectionUpdateQueue:
                     pass
         
         # Shutdown thread pool
-        self._thread_pool.shutdown(wait=True)
+        self._thread_pool.shutdown(wait=True, cancel_futures=True)
         
         self.logger.info("ConnectionUpdateQueue stopped")
 
@@ -532,8 +532,13 @@ class ConnectionUpdateQueue:
                     for req in batch.requests]
         
         # Use the connection manager's batch processing method
-        if hasattr(self._connection_manager, 'process_queued_batch'):
-            return await self._connection_manager.process_queued_batch(batch)
+        if hasattr(self._connection_manager, 'process_queued_batch_with_locks'):
+            return await self._connection_manager.process_queued_batch_with_locks(batch)
+        else:
+            # Fallback error handling (should never happen with current implementation)
+            self.logger.error("Connection manager missing batch processing method")
+            return [{'request_id': req.request_id, 'success': False, 'error': 'Batch processing not supported'}
+                    for req in batch.requests]
 
     def set_connection_manager(self, connection_manager: 'BaseConnectionManager'):
         """Set the connection manager reference for batch processing."""

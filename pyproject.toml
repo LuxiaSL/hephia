@@ -30,7 +30,8 @@ dependencies = [
     "aiosqlite",
     "psutil",
     "windows-curses; sys_platform == 'win32'",
-    "sortedcontainers"
+    "sortedcontainers",
+    "aiorwlock"
 ]
 
 [tool.setuptools.packages.find]
