@@ -46,6 +46,11 @@ class CognitiveBridge:
             "cognitive:context_update",
             self.update_cognitive_state
         )
+        global_event_dispatcher.add_listener(
+            "significance:request_metrics_evaluation",
+            lambda event: asyncio.create_task(self._handle_significance_evaluation_request(event))
+        )
+
 
     def update_cognitive_state(self, event: Event):
         try:
@@ -394,8 +399,6 @@ class CognitiveBridge:
         """Handle memory formation requests in a source-agnostic way."""
         try:
             event_data = event.data.get('event_data', {})
-            content = event_data.get('content')
-            context = event_data.get('context')
             
             # Request memory formation through the memory system
             global_event_dispatcher.dispatch_event(Event(
@@ -410,3 +413,195 @@ class CognitiveBridge:
                 "cognitive:error",
                 {"message": f"Memory formation failed: {str(e)}"}
             ))
+
+    async def _handle_significance_evaluation_request(self, event: Event) -> None:
+        """
+        Handle significance evaluation requests from SignificanceAnalyzer.
+        Coordinates with memory system to perform sophisticated metrics evaluation.
+        
+        Expected event data:
+        - request_id: Unique identifier for this evaluation request
+        - memory_data: MemoryData object as dict
+        - generated_content: LLM-generated memory content
+        - timeout: Maximum evaluation time
+        """
+        request_id = None
+        try:
+            request_id = event.data.get("request_id")
+            memory_data_dict = event.data.get("memory_data", {})
+            generated_content = event.data.get("generated_content", "")
+            timeout = event.data.get("timeout", 10.0)
+            
+            if not request_id:
+                self.logger.error("Significance evaluation request missing request_id")
+                return
+                
+            if not generated_content:
+                self.logger.warning(f"Significance evaluation {request_id} has no generated content")
+                await self._send_significance_response(
+                    request_id=request_id,
+                    significance_score=0.0,
+                    component_scores={},
+                    evaluation_method="error",
+                    error="No generated content provided"
+                )
+                return
+            
+            self.logger.debug(f"Processing significance evaluation request {request_id}")
+            
+            # Perform the metrics-based evaluation
+            evaluation_result = await self._evaluate_memory_significance(
+                memory_data_dict=memory_data_dict,
+                generated_content=generated_content,
+                timeout=timeout
+            )
+            
+            # Send response back to SignificanceAnalyzer
+            await self._send_significance_response(
+                request_id=request_id,
+                **evaluation_result
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Failed to handle significance evaluation request {request_id}: {e}")
+            if request_id:
+                await self._send_significance_response(
+                    request_id=request_id,
+                    significance_score=0.0,
+                    component_scores={},
+                    evaluation_method="error",
+                    error=str(e)
+                )
+
+    async def _evaluate_memory_significance(
+        self,
+        memory_data_dict: Dict[str, Any],
+        generated_content: str,
+        timeout: float = 10.0
+    ) -> Dict[str, Any]:
+        """
+        Coordinate with memory system to evaluate memory significance using sophisticated metrics.
+        Creates temporary node and uses existing metrics infrastructure.
+        
+        Args:
+            memory_data_dict: MemoryData as dictionary
+            generated_content: LLM-generated memory content
+            timeout: Maximum evaluation time
+            
+        Returns:
+            Dict containing significance_score, component_scores, evaluation_method, error
+        """
+        try:
+            # Get current memory context for comparison
+            current_context = await self.internal_context.get_memory_context(is_cognitive=True)
+            if not current_context:
+                return {
+                    "significance_score": 0.5,
+                    "component_scores": {},
+                    "evaluation_method": "fallback",
+                    "error": "No memory context available"
+                }
+            
+            # Use memory system's evaluation infrastructure
+            # This leverages the same temporary node + metrics pattern from _calculate_initial_strength
+            significance_score = await self._delegate_to_memory_system_evaluation(
+                generated_content=generated_content,
+                current_context=current_context,
+                source_type=memory_data_dict.get("source_type", "unknown"),
+                timeout=timeout
+            )
+            
+            # For now, return a simplified response
+            # The detailed component scores could be added later if needed
+            return {
+                "significance_score": significance_score,
+                "component_scores": {
+                    "overall": significance_score
+                },
+                "evaluation_method": "metrics",
+                "error": None
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Memory significance evaluation failed: {e}")
+            return {
+                "significance_score": 0.5,
+                "component_scores": {},
+                "evaluation_method": "error_fallback", 
+                "error": str(e)
+            }
+        
+    async def _delegate_to_memory_system_evaluation(
+        self,
+        generated_content: str,
+        current_context: Dict[str, Any],
+        source_type: str,
+        timeout: float
+    ) -> float:
+        """
+        Delegate to memory system for actual significance evaluation.
+        Now uses the dedicated evaluate_memory_significance method.
+        
+        Args:
+            generated_content: LLM-generated memory content
+            current_context: Current memory/cognitive context  
+            source_type: Type of memory source (for logging)
+            timeout: Maximum evaluation time
+            
+        Returns:
+            float: Significance score between 0.0 and 1.0
+        """
+        try:
+            # Use the new dedicated significance evaluation method
+            significance_score = await self.memory_system.evaluate_memory_significance(
+                generated_content=generated_content,
+                context=current_context,
+                source_type=source_type,
+                timeout=timeout
+            )
+            
+            self.logger.debug(f"Memory system significance evaluation: {significance_score:.3f} for {source_type}")
+            return significance_score
+            
+        except Exception as e:
+            self.logger.error(f"Memory system significance evaluation error for {source_type}: {e}")
+            return 0.5  # Neutral score on error
+
+    async def _send_significance_response(
+        self,
+        request_id: str,
+        significance_score: float,
+        component_scores: Dict[str, float],
+        evaluation_method: str,
+        error: Optional[str] = None
+    ) -> None:
+        """
+        Send significance evaluation response back to SignificanceAnalyzer.
+        
+        Args:
+            request_id: Unique identifier matching the original request
+            significance_score: Overall significance score (0.0 - 1.0)
+            component_scores: Breakdown by component (semantic, emotional, etc.)
+            evaluation_method: How the evaluation was performed
+            error: Error message if evaluation failed
+        """
+        try:
+            response_data = {
+                "request_id": request_id,
+                "significance_score": significance_score,
+                "component_scores": component_scores,
+                "evaluation_method": evaluation_method
+            }
+            
+            if error:
+                response_data["error"] = error
+                
+            global_event_dispatcher.dispatch_event(Event(
+                "significance:metrics_evaluation_response",
+                response_data
+            ))
+            
+            self.logger.debug(f"Sent significance response for {request_id}: {significance_score:.3f}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to send significance response for {request_id}: {e}")

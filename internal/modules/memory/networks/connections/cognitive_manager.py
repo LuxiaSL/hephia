@@ -143,7 +143,7 @@ class CognitiveConnectionManager(BaseConnectionManager[CognitiveMemoryNode]):
                                 node_b_raw_state.get("emotional_vectors", [])
                             )
                         ),
-                        timeout=0.5
+                        timeout=1
                     )
                     emotional_ba = await asyncio.wait_for(
                         asyncio.to_thread(
@@ -152,7 +152,7 @@ class CognitiveConnectionManager(BaseConnectionManager[CognitiveMemoryNode]):
                                 node_a_raw_state.get("emotional_vectors", [])
                             )
                         ),
-                        timeout=0.5
+                        timeout=1
                     )
                     emotional_sim = (emotional_ab + emotional_ba) / 2
                 except asyncio.TimeoutError:

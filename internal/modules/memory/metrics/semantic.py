@@ -20,61 +20,17 @@ import concurrent.futures as cf
 import asyncio
 import hashlib
 
-# Attempt to import NLTK and its components; if unavailable, define fallbacks.
 try:
-    import nltk
-    from nltk import pos_tag, word_tokenize, ne_chunk
-    from nltk.tree import Tree
+    import spacy
+    # Load the model once and reuse it. This is more efficient.
+    # Note: Loading large models can take time and memory.
+    NLP = spacy.load("en_core_web_sm") 
 except ImportError:
-    # Log a warning (you might want to integrate with your logger here)
-    print("Warning: NLTK not available, using basic fallbacks.")
-    nltk = None
-
-    def word_tokenize(text: str) -> List[str]:
-        # Fallback: very naive whitespace tokenization.
-        return text.split()
-
-    def pos_tag(tokens: List[str]) -> List[tuple]:
-        # Fallback: assign a default tag.
-        return [(token, "NN") for token in tokens]
-
-    def ne_chunk(pos_tags: List[tuple]) -> Any:
-        # Fallback: return an empty list indicating no named entities.
-        return []
-
-    Tree = list  # Dummy alias
-
-# Even if NLTK is importable, ensure required resources are available.
-def safe_word_tokenize(text: str) -> List[str]:
-    try:
-        tokens = word_tokenize(text)
-        return tokens
-    except LookupError:
-        try:
-            if nltk is not None:
-                nltk.download("punkt")
-                return word_tokenize(text)
-        except Exception as e:
-            print(f"Error downloading 'punkt': {e}")
-        # Fallback to basic split.
-        return text.split()
-    except Exception as e:
-        print(f"Unexpected error in word_tokenize: {e}")
-        return text.split()
-
-def safe_pos_tag(tokens: List[str]) -> List[tuple]:
-    try:
-        return pos_tag(tokens)
-    except Exception as e:
-        print(f"Error in pos_tag, using fallback: {e}")
-        return [(token, "NN") for token in tokens]
-
-def safe_ne_chunk(pos_tags: List[tuple]) -> Any:
-    try:
-        return ne_chunk(pos_tags)
-    except Exception as e:
-        print(f"Error in ne_chunk, returning empty list: {e}")
-        return []
+    print("Warning: SpaCy not available. NE Density will be 0.")
+    NLP = None
+except OSError:
+    print("Warning: SpaCy model 'en_core_web_sm' not found. NE Density will be 0.")
+    NLP = None
 
 # Import internal modules
 from internal.modules.memory.async_lru_cache import async_lru_cache
@@ -235,16 +191,11 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
     @async_lru_cache(maxsize=1000, ttl=7200)
     async def _calculate_semantic_density(self, text: str) -> float:
         """
-        Optimized semantic density calculation with tiered processing and parallelization.
+        Optimized semantic density calculation
         """
         try:
-            # Fast path for empty or very short text
             if not text or len(text.strip()) < 10:
                 return 0.0
-            
-            # Medium texts get simplified calculation
-            if len(text) < 100:
-                return await self._calculate_simple_density(text)
             
             # For longer texts, use full parallelized approach
             return await self._calculate_full_density(text)
@@ -302,30 +253,78 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         
         # Combine metrics with weights
         weights = {
-            'semantic_cohesion': 0.3,
-            'lexical_diversity': 0.2,
-            'syntactic_complexity': 0.15,
-            'ne_density': 0.15,
-            'content_ratio': 0.2
+            'semantic_cohesion': 0.25,       # How connected are ideas
+            'ne_density': 0.25,              # Specific entities mentioned
+            'abstraction_level': 0.20,       # Abstract vs concrete reasoning
+            'logical_complexity': 0.15,      # Logical structure complexity
+            'conceptual_bridging': 0.10,     # Connecting disparate ideas
+            'information_density': 0.05      # Factual information density
         }
         
         # Extract features with defaults
-        unique_ratio = nlp_features.get('lexical_diversity', 0.5)
-        syntactic_complexity = nlp_features.get('syntactic_complexity', 0.3)
-        ne_density = nlp_features.get('ne_density', 0.1)
-        content_ratio = nlp_features.get('content_ratio', 0.5)
+        ne_density = nlp_features.get('ne_density', 0.0)
+        abstraction_level = nlp_features.get('abstraction_level', 0.5)
+        logical_complexity = nlp_features.get('logical_complexity', 0.0)
+        conceptual_bridging = nlp_features.get('conceptual_bridging', 0.0)
+        information_density = nlp_features.get('information_density', 0.0)
         
         # Calculate final score
         density_score = (
             semantic_cohesion * weights['semantic_cohesion'] +
-            unique_ratio * weights['lexical_diversity'] +
-            syntactic_complexity * weights['syntactic_complexity'] +
             ne_density * weights['ne_density'] +
-            content_ratio * weights['content_ratio']
+            abstraction_level * weights['abstraction_level'] +
+            logical_complexity * weights['logical_complexity'] +
+            conceptual_bridging * weights['conceptual_bridging'] +
+            information_density * weights['information_density']
         )
+
+        raw_density = min(1.0, max(0.0, density_score))
+
+        # Log raw density for analysis
+        self.logger.debug(f"[DENSITY_DEBUG] Raw density before transformation: {raw_density:.3f}")
+        # and log the density scores
+        self.logger.debug(f"[DENSITY_DEBUG] Semantic Cohesion: {semantic_cohesion:.3f}, "
+                    f"NE Density: {ne_density:.3f}, "
+                    f"Abstraction Level: {abstraction_level:.3f}, "
+                    f"Logical Complexity: {logical_complexity:.3f}, "
+                    f"Conceptual Bridging: {conceptual_bridging:.3f}, "
+                    f"Information Density: {information_density:.3f}")
         
-        return min(1.0, max(0.0, density_score))
+        # Apply exponential transformation
+        smushed_density = self._apply_exponential_density_transform(raw_density, text)
+
+        self.logger.debug(f"[DENSITY_DEBUG] Density after transformation: {smushed_density:.3f}")
+
+        return smushed_density
     
+    def _apply_exponential_density_transform(self, raw_density: float, text: str) -> float:
+        """
+        Apply exponential transformation to enhance semantic density discrimination.
+        """
+        try:
+            # Method 1: Power law transformation (more aggressive for high density)
+            if raw_density < 0.35:
+                enhanced = (raw_density / 0.35) ** 4.0 * 0.2  # Compress low end more
+            elif raw_density < 0.45:
+                enhanced = 0.2 + (raw_density - 0.35) * 5.0   # Steep middle
+            else:
+                enhanced = 0.7 + (1.0 - (0.5 ** ((raw_density - 0.45) * 15))) * 0.3
+            
+            # Ensure bounds
+            enhanced = max(0.05, min(0.95, enhanced))
+            
+            # Log transformation details for analysis
+            self.logger.debug(f"[DENSITY_TRANSFORM] Raw: {raw_density:.3f} → Enhanced: {enhanced:.3f}")
+            
+            return enhanced
+            
+        except Exception as e:
+            self.logger.log_error(f"Density transformation failed: {e}")
+            # Fallback to more aggressive sigmoid
+            import math
+            shifted = (raw_density - 0.35) * 16
+            return 1 / (1 + math.exp(-shifted))
+
     async def _calculate_semantic_cohesion(self, sentences: List[str]) -> float:
         """Calculate semantic cohesion with parallel embedding generation."""
         if len(sentences) <= 1:
@@ -354,105 +353,383 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         return np.mean(similarities) if similarities else 0.5
 
     async def _process_nlp_features(self, text: str) -> Dict[str, float]:
-        """Process NLP features with parallel execution."""
-        loop = asyncio.get_event_loop()
-        
-        # Start tokenization (required for other processes)
-        tokens_future = loop.run_in_executor(None, safe_word_tokenize, text.lower())
-        tokens = await tokens_future
-        
-        if not tokens:
+        """
+        Process NLP features using enhanced semantic discriminators.
+        """
+        if not text or not NLP:
             return {
-                'lexical_diversity': 0.0,
-                'syntactic_complexity': 0.0,
+                'semantic_cohesion_base': 0.0,
                 'ne_density': 0.0,
-                'content_ratio': 0.0
+                'abstraction_level': 0.0,
+                'logical_complexity': 0.0,
+                'conceptual_bridging': 0.0,
+                'information_density': 0.0
+            }
+
+        try:
+            doc = NLP(text)
+            
+            if not doc:
+                return {
+                    'semantic_cohesion_base': 0.0,
+                    'ne_density': 0.0,
+                    'abstraction_level': 0.0,
+                    'logical_complexity': 0.0,
+                    'conceptual_bridging': 0.0,
+                    'information_density': 0.0
+                }
+
+            # Calculate all discriminators from the single SpaCy doc
+            ne_density = self._calculate_named_entity_density(doc)
+            abstraction_level = self._calculate_abstraction_level(doc)
+            logical_complexity = self._calculate_logical_complexity(doc)
+            conceptual_bridging = self._calculate_conceptual_bridging(doc)
+            information_density = self._calculate_information_density(doc)
+
+            return {
+                'semantic_cohesion_base': 0.5,  # Placeholder - calculated separately
+                'ne_density': ne_density,
+                'abstraction_level': abstraction_level,
+                'logical_complexity': logical_complexity,
+                'conceptual_bridging': conceptual_bridging,
+                'information_density': information_density
+            }
+        except Exception as e:
+            self.logger.log_error(f"Enhanced SpaCy processing failed: {e}")
+            return {
+                'semantic_cohesion_base': 0.5,
+                'ne_density': 0.0,
+                'abstraction_level': 0.5,
+                'logical_complexity': 0.5,
+                'conceptual_bridging': 0.5,
+                'information_density': 0.5
             }
         
-        # Calculate lexical diversity immediately (fast)
-        lexical_diversity = len(set(tokens)) / len(tokens)
-        
-        # Start POS tagging (required for other processes)
-        pos_tags_future = loop.run_in_executor(None, safe_pos_tag, tokens)
-        pos_tags = await pos_tags_future
-        
-        # Now run three parallel operations that all need pos_tags
-        with cf.ThreadPoolExecutor() as executor:
-            # Submit three tasks to thread pool
-            complexity_future = loop.run_in_executor(
-                executor,
-                self._calculate_syntactic_complexity,
-                pos_tags
-            )
-            
-            entity_future = loop.run_in_executor(
-                executor,
-                self._calculate_named_entity_density,
-                pos_tags,
-                tokens
-            )
-            
-            content_future = loop.run_in_executor(
-                executor,
-                self._calculate_content_ratio,
-                pos_tags
-            )
-            
-            # Wait for all to complete
-            syntactic_complexity, ne_density, content_ratio = await asyncio.gather(
-                complexity_future,
-                entity_future,
-                content_future
-            )
-        
-        return {
-            'lexical_diversity': lexical_diversity,
-            'syntactic_complexity': syntactic_complexity,
-            'ne_density': ne_density,
-            'content_ratio': content_ratio
-        }
-    
-    def _calculate_syntactic_complexity(self, pos_tags):
-        """Calculate syntactic complexity (thread-safe)."""
-        if not pos_tags:
-            return 0.0
-        
-        complex_tags = {'IN', 'WDT', 'WP', 'WRB'}
-        return len([t for _, t in pos_tags if t in complex_tags]) / len(pos_tags)
+    def _calculate_abstraction_level(self, doc) -> float:
+        """
+        Calculate abstraction level using domain-specific patterns instead of word frequency.
+        Optimized for AI agent memory formation content.
+        """
+        if not doc:
+            return 0.5
 
-    def _calculate_named_entity_density(self, pos_tags, tokens):
-        """Calculate named entity density (thread-safe)."""
-        if not pos_tags or not tokens:
+        abstract_score = 0.0
+        concrete_score = 0.0
+        total_scored = 0
+
+        for token in doc:
+            if token.pos_ not in ['NOUN', 'VERB', 'ADJ'] or token.is_stop:
+                continue
+
+            lemma = token.lemma_.lower()
+            scored = False
+
+            # Concrete patterns - specific to agent memory domain
+            if token.ent_type_ or token.like_num:
+                concrete_score += 3.0
+                scored = True
+            elif lemma in {'execute', 'run', 'process', 'create', 'update', 'delete', 'fix', 'install', 'query', 'database', 'file', 'system', 'command', 'code', 'error', 'result'}:
+                concrete_score += 2.0
+                scored = True
+            elif token.pos_ == 'VERB' and len(token.text) <= 5:
+                concrete_score += 1.5  # Short action verbs
+                scored = True
+
+            # Abstract patterns - reasoning and conceptual words
+            elif lemma in {'understanding', 'realization', 'insight', 'concept', 'approach', 'strategy', 'pattern', 'relationship', 'significance', 'complexity', 'abstraction'}:
+                abstract_score += 2.5
+                scored = True
+            elif lemma in {'learn', 'understand', 'realize', 'recognize', 'develop', 'improve', 'analyze', 'evaluate', 'consider', 'determine'}:
+                abstract_score += 2.0
+                scored = True
+            elif token.pos_ == 'ADJ' and len(token.text) >= 8:
+                abstract_score += 1.5  # Long descriptive adjectives
+                scored = True
+
+            # Default patterns for unscored tokens
+            elif not scored:
+                if len(token.text) <= 4:
+                    concrete_score += 1.0
+                elif len(token.text) >= 10:
+                    abstract_score += 1.0
+
+            total_scored += 1
+
+        if total_scored == 0:
+            return 0.5
+
+        # Calculate ratio
+        total_points = abstract_score + concrete_score
+        if total_points == 0:
+            return 0.5
+
+        abstraction_ratio = abstract_score / total_points
+        
+        # Map to realistic 0.2-0.8 range instead of 0.15-0.85
+        final_score = 0.2 + (abstraction_ratio * 0.6)
+        
+        return min(0.95, max(0.05, final_score))
+    
+    def _calculate_logical_complexity(self, doc) -> float:
+        """
+        Calculate logical complexity using a hybrid of syntactic and semantic analysis.
+        This combines robust grammatical structure analysis with domain-specific reasoning patterns.
+        """
+        if not doc or not len(doc):
             return 0.0
         
-        try:
-            ne_tree = safe_ne_chunk(pos_tags)
-            
-            if isinstance(ne_tree, Tree):
-                named_entities = len([
-                    subtree for subtree in ne_tree 
-                    if isinstance(subtree, Tree)
-                ])
-            else:
-                named_entities = 0
+        sentence_count = len(list(doc.sents))
+        if sentence_count == 0:
+            return 0.0
+        
+        # 1. Analyze grammatical structure (dependency parsing)
+        dependency_score = self._analyze_dependency_complexity(doc)
+        
+        # 2. Analyze simple structural markers (POS tags)
+        pos_score = self._analyze_pos_complexity(doc)
+        
+        # 3. Analyze semantic and reasoning patterns
+        semantic_score = self._analyze_semantic_complexity(doc)
+        
+        # Combine scores and normalize by sentence count
+        total_complexity = dependency_score + pos_score + semantic_score
+        complexity_per_sentence = total_complexity / sentence_count
+        
+        # Map to a 0.05-0.95 range. The divisor is tuned for the higher potential score.
+        return max(0.05, min(0.95, complexity_per_sentence / 8.0))
+
+    def _analyze_dependency_complexity(self, doc) -> float:
+        """Analyze syntactic complexity using dependency parsing."""
+        complexity = 0.0
+        for token in doc:
+            # Subordinate clauses indicate high complexity
+            if token.dep_ in ['advcl', 'acl', 'ccomp', 'xcomp']:
+                complexity += 1.5
+            # Relative clauses are also complex
+            elif token.dep_ == 'relcl':
+                complexity += 1.8
+            # Coordination adds moderate complexity
+            elif token.dep_ == 'conj':
+                complexity += 1.0
+            # Conditional markers introduce logical branching
+            elif token.dep_ == 'mark' and token.head.pos_ == 'VERB':
+                complexity += 1.2
+        return complexity
+
+    def _analyze_pos_complexity(self, doc) -> float:
+        """Analyze complexity using POS tag patterns as simple heuristics."""
+        complexity = 0.0
+        # Count conjunctions as a simple measure of clause combination
+        pos_tags = [token.pos_ for token in doc]
+        complexity += pos_tags.count('SCONJ') * 1.5  # Subordinating
+        complexity += pos_tags.count('CCONJ') * 1.0  # Coordinating
+        return complexity
+
+    def _analyze_semantic_complexity(self, doc) -> float:
+        """Analyze complexity using semantic and reasoning patterns."""
+        complexity = 0.0
+        
+        # Define lemmas for different reasoning categories
+        causal_verbs = {'cause', 'result', 'lead', 'make', 'force', 'imply', 'indicate'}
+        realization_verbs = {'realize', 'notice', 'understand', 'recognize', 'discover', 'learn'}
+        pattern_nouns = {'pattern', 'trend', 'similarity', 'connection', 'relationship', 'theme'}
+        
+        for token in doc:
+            # Causal and reasoning verbs
+            if token.pos_ == 'VERB' and token.lemma_ in causal_verbs:
+                complexity += 1.8
                 
-            return named_entities / len(tokens)
-        except Exception:
+            # Meta-cognitive / realization verbs
+            elif token.pos_ == 'VERB' and token.lemma_ in realization_verbs:
+                complexity += 1.5
+                
+            # Pattern recognition nouns
+            elif token.pos_ == 'NOUN' and token.lemma_ in pattern_nouns:
+                complexity += 2.0
+                
+            # Uncertainty reasoning (modal verbs)
+            elif token.tag_ == 'MD':
+                if token.lemma_ in ['must', 'will']:
+                    complexity += 0.8  # Certainty
+                elif token.lemma_ in ['might', 'could', 'may', 'should']:
+                    complexity += 1.2  # Uncertainty/possibility is complex
+                    
+            # Comparative analysis
+            elif token.pos_ == 'ADP' and token.text.lower() in {'than', 'like', 'unlike'}:
+                complexity += 1.0
+                
+        return complexity
+    
+    def _calculate_conceptual_bridging(self, doc) -> float:
+        """
+        Measures conceptual bridging using a hybrid of syntactic and semantic analysis.
+        """
+        if not doc or not len(doc):
             return 0.0
 
-    def _calculate_content_ratio(self, pos_tags):
-        """Calculate content word ratio (thread-safe)."""
-        if not pos_tags:
+        bridging_score = 0.0
+
+        for token in doc:
+            # Calculate bridging score from different linguistic facets
+            bridging_score += self._get_syntactic_bridge_score(token) * 2.0
+            bridging_score += self._get_semantic_bridge_score(token) * 2.0
+
+        entity_count = len(doc.ents)
+        if entity_count >= 2:
+            bridging_score += min(entity_count * 0.8, 3.0)
+        
+        # Normalize by the number of tokens
+        density = bridging_score / len(doc)
+        
+        # Scale the final score
+        return max(0.05, min(0.95, density / 0.5))
+
+    def _get_syntactic_bridge_score(self, token) -> float:
+        """Analyzes grammatical markers that create bridges."""
+        # Demonstrative determiners and pronouns pointing to concepts
+        if token.pos_ in ['DET', 'PRON'] and token.lemma_ in {'this', 'that', 'these', 'those'}:
+            return 1.5
+        # Personal pronouns indicating a shared social context
+        elif token.pos_ == 'PRON' and token.lemma_ in {'we', 'they', 'our', 'their'}:
+            return 1.0
+        # Subordinating conjunctions linking clauses
+        elif token.pos_ == 'SCONJ' and token.lemma_ in {'as', 'like', 'while', 'since', 'because'}:
+            return 1.2
+            
+        return 0.0
+
+    def _get_semantic_bridge_score(self, token) -> float:
+        """Analyzes word meanings that imply conceptual bridges."""
+        # Verbs of comparison or relation
+        if token.pos_ == 'VERB' and token.lemma_ in {'compare', 'relate', 'connect', 'remind', 'associate'}:
+            return 2.0
+            
+        # Adjectives of comparison or relation
+        elif token.pos_ == 'ADJ' and token.lemma_ in {'similar', 'different', 'related', 'typical'}:
+            return 1.8
+            
+        # Adverbs implying temporal or logical sequence
+        elif token.pos_ == 'ADV' and token.lemma_ in {'previously', 'earlier', 'consequently', 'therefore', 'however'}:
+            return 1.5
+            
+        # Nouns that explicitly name patterns or relationships
+        elif token.pos_ == 'NOUN' and token.lemma_ in {'pattern', 'trend', 'similarity', 'connection', 'relationship'}:
+            return 2.5 # Highest score for explicit pattern recognition
+            
+        return 0.0
+    
+    def _calculate_information_density(self, doc) -> float:
+        """
+        Calculate information density using linguistic features rather than exact vocabulary.
+        More robust and generalizable approach.
+        """
+        if not doc or not len(doc):
             return 0.0
         
-        content_tags = {
-            'NN', 'NNS', 'NNP', 'NNPS', 
-            'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ',
-            'JJ', 'JJR', 'JJS'
-        }
+        total_score = 0.0
         
-        return len([t for _, t in pos_tags if t in content_tags]) / len(pos_tags)
+        for token in doc:
+            # Use separate scoring functions for different information types
+            total_score += self._get_technical_info_score(token)
+            total_score += self._get_social_info_score(token)
+            total_score += self._get_factual_info_score(token)
+        
+        # Normalize by document length
+        density = total_score / len(doc)
+        
+        # Map to 0.05-0.95 range
+        return max(0.05, min(0.95, density / 2.0))
+
+    def _get_technical_info_score(self, token) -> float:
+        """Score technical information using linguistic features."""
+        score = 0.0
+        
+        # More aggressive scoring for high-value information
+        if token.like_num:
+            score += 4.0
+        elif token.ent_type_ in ['DATE', 'TIME', 'MONEY', 'PERCENT', 'QUANTITY']:
+            score += 3.5
+        elif token.ent_type_ in ['ORG', 'PRODUCT', 'EVENT']:
+            score += 3.0 
+        elif token.pos_ in ['NOUN', 'VERB'] and not token.is_stop:
+            if len(token.text) >= 8:
+                score += 2.0
+            elif any(suffix in token.text.lower() for suffix in ['tion', 'ment', 'ness', 'ity', 'ize', 'ise']):
+                score += 1.5
+            elif '_' in token.text or (token.text.islower() and any(c.isupper() for c in token.text)):
+                score += 2.0
+
+        return score
+
+    def _get_social_info_score(self, token) -> float:
+        """Score social information using linguistic features."""
+        score = 0.0
+        
+        if token.ent_type_ == 'PERSON':
+            score += 2.5
+        elif token.ent_type_ in ['GPE', 'LOC']:
+            score += 1.5 
+        elif token.pos_ == 'ADJ':
+            if len(token.text) >= 6:
+                score += 1.3
+            elif token.tag_ in ['JJR', 'JJS']:
+                score += 1.5
+        elif token.pos_ == 'VERB' and token.lemma_ in {
+            'say', 'tell', 'ask', 'reply', 'respond', 'talk', 'discuss', 
+            'explain', 'suggest', 'recommend', 'help', 'support'
+        }:
+            score += 2.0
+        elif token.pos_ == 'PRON' and token.text.lower() in ['i', 'you', 'we', 'they']:
+            score += 0.8
+        
+        return score
+
+    def _get_factual_info_score(self, token) -> float:
+        """Score factual information using linguistic features."""
+        score = 0.0
+        
+        # Proper nouns generally carry factual information
+        if token.pos_ == 'PROPN' and not token.ent_type_:
+            score += 1.6
+        
+        # Cardinal numbers (ONE, TWO, etc.) are factual
+        elif token.pos_ == 'NUM':
+            score += 1.8
+        
+        # Specific determiners that indicate concrete reference
+        elif token.pos_ == 'DET' and token.text.lower() in ['this', 'that', 'these', 'those']:
+            score += 0.8
+        
+        # Modal verbs can indicate uncertainty vs certainty
+        elif token.pos_ == 'VERB' and token.tag_ == 'MD':
+            if token.text.lower() in ['must', 'will', 'did']:
+                score += 1.0  # Certainty
+            else:
+                score += 0.5  # Uncertainty
+        
+        return score
     
+    def _calculate_named_entity_density(self, doc) -> float:
+        """Calculate and amplify named entity density from the SpaCy doc."""
+        if not doc:
+            return 0.0
+        
+        # Extract tokens from the SpaCy doc
+        tokens = [token for token in doc if not token.is_space]
+        
+        if not tokens:
+            return 0.0
+        
+        raw_density = len(doc.ents) / len(tokens)
+        
+        # Amplify the raw score. We'll set a "high water mark" where a raw density
+        # of 0.1 or greater gets a full score of 1.0. This makes the metric
+        # much more sensitive to the presence of even a few entities.
+        amplification_factor = 10.0  # (since 1.0 / 0.1 = 10)
+        amplified_score = min(1.0, raw_density * amplification_factor)
+        
+        return amplified_score
+
     async def _analyze_cluster_semantics_async(
         self,
         center_embedding: List[float],
@@ -464,7 +741,7 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         
         metrics = {}
         
-        # Get all embeddings in parallel
+        # Get all embeddings
         valid_nodes = [node for node in cluster_nodes if hasattr(node, 'embedding')]
         if not valid_nodes:
             return {}

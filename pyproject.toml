@@ -31,7 +31,8 @@ dependencies = [
     "psutil",
     "windows-curses; sys_platform == 'win32'",
     "sortedcontainers",
-    "aiorwlock"
+    "aiorwlock",
+    "spacy"
 ]
 
 [tool.setuptools.packages.find]

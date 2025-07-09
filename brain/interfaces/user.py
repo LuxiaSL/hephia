@@ -45,7 +45,7 @@ class UserInterface(CognitiveInterface):
             brain_trace.interaction.context("Getting cognitive context")
             # Get cognitive context including state and recent activity
             context_parts = {}
-            async for key, value in self.get_cognitive_context():
+            async for key, value in self.get_cognitive_context(content):
                 context_parts[key] = value
             
             # Build final context string from parts

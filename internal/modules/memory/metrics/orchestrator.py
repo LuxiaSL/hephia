@@ -386,8 +386,8 @@ class RetrievalMetricsOrchestrator:
             if not hasattr(node, 'text_content') or node.text_content is None:
                 return {
                     'embedding_similarity': 0.0,
-                    'text_similarity': 0.0,
-                    'combined_similarity': 0.0
+                    'text_relevance': 0.0,
+                    'semantic_density': 0.0
                 }
                 
             calculator = self.calculators[MetricComponent.SEMANTIC]
@@ -598,17 +598,19 @@ class RetrievalMetricsOrchestrator:
         # For pairwise, we pass empty query info. The idea is that the node's own data
         # and the other node's stored state (e.g., raw_state) will drive the comparison.
         # For semantic comparison, use the other node's embedding
+
+        # maybe disregard? see how it affects results
         metricsA = await self.calculate_metrics(
             target_node=nodeA,
             comparison_state=getattr(nodeB, 'raw_state', {}),
-            query_text="",
+            query_text=getattr(nodeB, 'text_content', ""),
             query_embedding=get_safe_embedding(nodeB, target_dim),
             override_config=config
         )
         metricsB = await self.calculate_metrics(
             target_node=nodeB,
             comparison_state=getattr(nodeA, 'raw_state', {}),
-            query_text="",
+            query_text= getattr(nodeA, 'text_content', ""),
             query_embedding=get_safe_embedding(nodeA, target_dim),
             override_config=config
         )

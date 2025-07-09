@@ -84,6 +84,7 @@ uv pip install .
 
 # download required language data
 python -c "import nltk; nltk.download('punkt_tab'); nltk.download('maxent_ne_chunker'); nltk.download('maxent_ne_chunker_tab'); nltk.download('averaged_perceptron_tagger_eng'); nltk.download('words')"
+python -m spacy download en_core_web_sm
 
 # run main server
 python main.py

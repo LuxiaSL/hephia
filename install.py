@@ -467,6 +467,12 @@ def main():
         return
     print_status("NLTK data downloaded successfully", "success")
 
+    print_status("Downloading SpaCy NLP model (en_core_web_sm)...")
+    if not run_command([python_path, "-m", "spacy", "download", "en_core_web_sm"],
+                     "Failed to download SpaCy model"):
+        return
+    print_status("SpaCy model downloaded successfully", "success")
+
     # Create .env file if it doesn't exist
     if not os.path.exists(".env"):
         print_status("Creating .env file from template...")
