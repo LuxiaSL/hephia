@@ -417,7 +417,6 @@ class EchoManager:
         Construct temporary node for ghost evaluation.
         Enhanced to handle missing cognitive fields gracefully.
         """
-        # FIX: Provide defaults for missing cognitive fields
         text_content = ghost_info.get('text_content', '')
         if not text_content:
             # Try to extract from raw_state or processed_state as fallback
@@ -433,10 +432,10 @@ class EchoManager:
                 embedding = await self.metrics_orchestrator.embedding_manager.encode(text_content)
             except Exception as e:
                 self.logger.warning(f"Failed to generate embedding for ghost node: {e}")
-                embedding = [0.0] * 384  # Zero vector fallback
+                embedding = [0.0] * self.metrics_orchestrator.embedding_manager._embedding_dims  # Zero vector fallback
         elif not embedding:
-            embedding = [0.0] * 384  # Zero vector fallback
-        
+            embedding = [0.0] * self.metrics_orchestrator.embedding_manager._embedding_dims  # Zero vector fallback
+
         return CognitiveMemoryNode(
             node_id=ghost_info.get('node_id'),
             text_content=text_content,

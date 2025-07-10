@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import time
+import torch
 
 from typing import List, Optional, Any
 
@@ -25,6 +26,7 @@ class EmbeddingManager:
         self._sentence_transformer = None  # For lazy loading
         self._embedding_cache = {} 
         self._cache_size = 1000
+        self._embedding_dims = 1024
         
         if self.use_local:
             # Don't load immediately - wait for first use
@@ -56,26 +58,47 @@ class EmbeddingManager:
 
     @property
     def sentence_transformer(self) -> Optional[Any]:
-        """Lazy load the sentence transformer model."""
+        """Lazy load the Stella 400 M embedder."""
         if self._sentence_transformer is None and self.use_local:
+            gpu_available = torch.cuda.is_available()
+            fast_kernel   = False
+
+            if gpu_available:
+                try:
+                    import xformers            # optional speed-up
+                    fast_kernel = True
+                except ImportError:
+                    MemoryLogger.warning("xformers not found; falling back to standard attention.")
+
+            MemoryLogger.info(
+                f"Loading Stella 400 M embedder on {'GPU' if gpu_available else 'CPU'} "
+                f"{'with xformers' if fast_kernel else 'without xformers'}"
+            )
+
+            config_kwargs = {
+                "use_memory_efficient_attention": fast_kernel,
+                "unpad_inputs": fast_kernel,
+                "attn_implementation": "eager",
+            }
+
             try:
-                # Lazy import
                 from sentence_transformers import SentenceTransformer
-                self._sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
-                MemoryLogger.info("Successfully loaded sentence-transformers")
-            except ImportError as e:
-                MemoryLogger.warning(
-                    f"Could not import sentence-transformers: {e}. "
-                    "Will use API fallback for embeddings."
+                self._sentence_transformer = SentenceTransformer(
+                    "dunzhang/stella_en_400M_v5",
+                    device="cuda" if gpu_available else "cpu",
+                    trust_remote_code=True,
+                    config_kwargs=config_kwargs
                 )
+                MemoryLogger.info("Loaded Stella 400 M successfully.")
+            except ImportError as e:
+                MemoryLogger.warning(f"sentence-transformers missing: {e}. API fallback engaged.")
                 self.use_local = False
             except Exception as e:
-                MemoryLogger.warning(
-                    f"Failed to initialize sentence-transformers: {e}. "
-                    "Will use API fallback for embeddings."
-                )
+                MemoryLogger.warning(f"Stella init failed: {e}. API fallback engaged.")
                 self.use_local = False
+
         return self._sentence_transformer
+
             
     def preprocess_text(self, text: str, max_length: int = 512) -> str:
         """
@@ -124,7 +147,7 @@ class EmbeddingManager:
             normalize_embeddings: Whether to L2-normalize embeddings
             
         Returns:
-            List[float]: 384-dimensional embedding vector
+            List[float]: n-dimensional embedding vector
         """
         return list(await self._cached_internal_encode(text, convert_to_tensor, normalize_embeddings))
 
@@ -137,7 +160,7 @@ class EmbeddingManager:
     ) -> tuple:
         """Cached internal implementation that returns tuple for hashability."""
         if not text:
-            return tuple([0.0] * 384)
+            return tuple([0.0] * self._embedding_dims)
             
         try:
             text = self.preprocess_text(text)
@@ -171,11 +194,11 @@ class EmbeddingManager:
             MemoryLogger.warning(
                 "All embedding methods failed - returning zero vector"
             )
-            return tuple([0.0] * 384)
+            return tuple([0.0] * self._embedding_dims)
                 
         except Exception as e:
             MemoryLogger.error(f"Embedding generation failed: {str(e)}")
-            return tuple([0.0] * 384)
+            return tuple([0.0] * self._embedding_dims)
 
     async def _get_api_embedding(self, text: str) -> List[float]:
         """Get embedding via API with retry logic."""

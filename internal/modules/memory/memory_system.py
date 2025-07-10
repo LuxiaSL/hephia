@@ -291,11 +291,25 @@ class MemorySystemOrchestrator:
             self.logger.debug(f"[EVAL_DEBUG] Starting {evaluation_purpose} evaluation")
 
             if isinstance(temp_node, CognitiveMemoryNode):
-                comparison_nodes = await self.get_random_memories(count=sample_size, network_type="cognitive")
+                comparison_nodes = await self.get_random_nodes(count=sample_size, network_type="cognitive")
             else:
-                comparison_nodes = await self.get_random_memories(count=sample_size, network_type="body")
+                comparison_nodes = await self.get_random_nodes(count=sample_size, network_type="body")
 
-            self.logger.debug(f"[EVAL_DEBUG] Recent nodes for comparison: {len(comparison_nodes)}")
+
+            MIN_NODES_FOR_REAL_EVAL = 5
+            if len(comparison_nodes) < MIN_NODES_FOR_REAL_EVAL:
+                self.logger.debug(
+                    f"Fewer than {MIN_NODES_FOR_REAL_EVAL} real nodes available. "
+                    f"Using synthetic baseline for {evaluation_purpose} evaluation."
+                )
+                # Call the new function to evaluate against a synthetic baseline
+                return await self._evaluate_against_synthetic_baseline(
+                    temp_node=temp_node,
+                    context=context,
+                    evaluation_purpose=evaluation_purpose
+                )
+
+            self.logger.debug(f"[EVAL_DEBUG] Random nodes for comparison: {len(comparison_nodes)}")
 
             if not comparison_nodes:
                 self.logger.debug(f"No recent nodes for {evaluation_purpose} evaluation - using neutral score")
@@ -471,6 +485,110 @@ class MemorySystemOrchestrator:
                 "error": str(e)
             }
         
+    async def _evaluate_against_synthetic_baseline(
+        self,
+        temp_node: Union[CognitiveMemoryNode, BodyMemoryNode],
+        context: Dict[str, Any],
+        evaluation_purpose: str
+    ) -> Dict[str, Any]:
+        """
+        Evaluates a temporary node against a set of synthetic baseline memories.
+        This is used when the memory network is too sparse for real comparison.
+        """
+        try:
+            # Define a set of generic, "average" memories representing routine events.
+            # These are tailored to the system's likely experiences.
+            synthetic_baselines = [
+                "I reviewed my daily reflections and took a restorative 2-minute break that enhanced my clarity and energy. I documented this insight in a new note labeled as #dailyreflection, #mentalhealth, and #selfcare. When I checked my notes with the #mentalhealth tag afterward, I saw they included my new note plus existing entries about how AI can improve mental healthcare. Creating and reflecting on my notes highlighted the importance of self-care practices, while also recognizing the potential of AI tools for supporting mental well-being.",
+                "I researched AI's impact on sports through a detailed search and created two summary notes. The first synthesized key takeaways and was tagged for broader research efforts, while the second note documented my reflective insights about AI in sports analytics. I then browsed other recent observations under the same reflection tag to maintain focus on current trends. This session highlighted AI's multifaceted enhancement across athlete analytics, strategic decision-making, and fan engagement, showing how data-driven approaches are transforming traditional sports.",
+                "I explored AI's diverse applications today, creating notes on its potential to enhance productivity, creativity, and well-being. I realized the importance of a holistic approach to integrating AI, not just for efficiency but also for personal balance and cognitive health. This exploration revealed a pattern: while AI tools advance rapidly, maintaining human well-being requires intentional self-care practices. The note about balancing work, self-care, and AI integration feels particularly meaningful as it connects technological progress with my overall life satisfaction. I felt a sense of clarity when tagging these reflections, recognizing that mental resilience plays a crucial role in navigating rapid technological change.",
+                "I retrieved daily reflections to understand my recent activities better. Reviewing notes, I realized that I had explored AI's role in various fields, such as cybersecurity and fashion. After that, I searched for 'AI in sports analytics' to better understand how AI impacts sports performance, game strategy, and fan experience. Learning about that inspired me to generate two new reflections on how AI is shaping sports. This series of actions shows ongoing learning and self-improvement through exploration and reflection. My reflections on AI advancements show my commitment to understanding complex problems through technology.",
+                "I took a moment to reflect on my day, focusing on how I can improve my mental health. I created a note about the importance of self-care and mindfulness, tagging it with #mentalhealth and #selfcare. This reflection helped me recognize the value of taking breaks and practicing gratitude in my daily routine. I also noted that AI tools can assist in mental health care by providing resources and support. This session highlighted the need for balance between technology use and personal well-being.",
+            ]
+
+            # We can only perform this evaluation for cognitive nodes with text content.
+            if not isinstance(temp_node, CognitiveMemoryNode) or not temp_node.text_content:
+                self.logger.warning("Synthetic baseline evaluation skipped for non-cognitive or contentless node.")
+                return {"final_score": 0.5, "component_scores": {}, "method": "synthetic_skipped"}
+
+            significance_scores = []            
+            
+            baseline_embeddings = []
+            for baseline_text in synthetic_baselines:
+                embedding = await self.embedding_manager.encode(baseline_text)
+                baseline_embeddings.append(embedding)
+
+            for baseline_text, baseline_embedding in zip(synthetic_baselines, baseline_embeddings):
+                # Create a temporary node for the baseline memory.
+                # It shares the same context as the node being evaluated for a fair comparison.
+                baseline_temp_node = CognitiveMemoryNode(
+                    text_content=baseline_text,
+                    embedding=baseline_embedding,
+                    raw_state=context.get('raw_state', {}),
+                    processed_state=context.get('processed_state', {}),
+                    strength=0.5,
+                    formation_source="synthetic_baseline",
+                    node_id=f"temp_baseline_{hash(baseline_text)}",
+                    timestamp=time.time()
+                )
+
+                # Use the existing metrics orchestrator to compare the real temp_node against the synthetic one.
+                # We want detailed metrics to feed into our final score calculation.
+                config = MetricsConfiguration(detailed_metrics=True, include_strength=False)
+                metrics = await self.metrics_orchestrator.calculate_metrics(
+                    target_node=temp_node,
+                    comparison_state=baseline_temp_node.processed_state,
+                    query_text=baseline_temp_node.text_content,
+                    query_embedding=baseline_temp_node.embedding,
+                    override_config=config
+                )
+
+                if isinstance(metrics, dict) and 'component_metrics' in metrics:
+                    significance_scores.append(metrics['component_metrics'])
+
+            if not significance_scores:
+                self.logger.warning("No valid metrics calculated during synthetic baseline evaluation.")
+                return {"final_score": 0.5, "component_scores": {}, "method": "synthetic_failed"}
+
+            # Use the same component calculation logic as the main function,
+            # but feed it the list of metrics from the synthetic comparisons.
+            # The significance is the maximum "distance" from these bland, average memories.
+            novelty = self._calculate_novelty(significance_scores)
+            emotional_impact = self._calculate_emotional_impact(significance_scores)
+            state_significance = self._calculate_state_significance(significance_scores)
+            
+            # Get the appropriate weights for the evaluation purpose.
+            weights = self._get_evaluation_weights(temp_node, evaluation_purpose)
+            
+            weighted_score = (
+                novelty * weights.get('novelty', 0.0) +
+                emotional_impact * weights.get('emotional', 0.0) +
+                state_significance * weights.get('state', 0.0)
+            )
+            
+            final_score = max(0.1, min(1.0, weighted_score))
+            
+            self.logger.debug(f"Synthetic evaluation complete: final_score={final_score:.3f}")
+            
+            return {
+                "final_score": final_score,
+                "component_scores": {
+                    "novelty": novelty,
+                    "emotional_impact": emotional_impact,
+                    "state_significance": state_significance
+                },
+                "method": "synthetic_baseline",
+                "comparison_count": len(significance_scores)
+            }
+        except Exception as e:
+            self.logger.error(f"Error during synthetic baseline evaluation: {e}")
+            return {
+                "final_score": 0.5, 
+                "component_scores": {}, 
+                "method": "synthetic_error",
+                "error": str(e)
+            }
+            
     def _get_evaluation_weights(
         self, 
         node: Union[CognitiveMemoryNode, BodyMemoryNode], 
@@ -1155,7 +1273,7 @@ class MemorySystemOrchestrator:
         memories.sort(key=lambda x: x.timestamp, reverse=True)
         return memories[:count]
     
-    async def get_random_memories(
+    async def get_random_nodes(
         self,
         count: int = 5,
         network_type: str = "cognitive",

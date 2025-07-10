@@ -578,7 +578,7 @@ class RetrievalMetricsOrchestrator:
                     return len(node.embedding)
                 elif hasattr(node.embedding, 'shape'):
                     return node.embedding.shape[0]  # For numpy arrays
-            return 384  # Default embedding dimension
+            return self.embedding_manager._embedding_dims
         
         # Helper function to get safe embedding
         def get_safe_embedding(node: Union[CognitiveMemoryNode, BodyMemoryNode], target_dim: int) -> List[float]:
@@ -593,7 +593,7 @@ class RetrievalMetricsOrchestrator:
         dim_a = get_embedding_dim(nodeA)
         dim_b = get_embedding_dim(nodeB)
 
-        target_dim = max(dim_a, dim_b, 384)  # Ensure at least 384 (standard embedding size)
+        target_dim = max(dim_a, dim_b, self.embedding_manager._embedding_dims)
 
         # For pairwise, we pass empty query info. The idea is that the node's own data
         # and the other node's stored state (e.g., raw_state) will drive the comparison.
@@ -670,7 +670,7 @@ class RetrievalMetricsOrchestrator:
         try:
             if embedding is None:
                 self.logger.warning(f"Node {node_id} has None embedding, using zero vector")
-                return [0.0] * 384
+                return [0.0] * self.embedding_manager._embedding_dims
                 
             if isinstance(embedding, list):
                 # Ensure all elements are floats
@@ -686,11 +686,11 @@ class RetrievalMetricsOrchestrator:
                 
             else:
                 self.logger.error(f"Node {node_id} has invalid embedding type: {type(embedding)}")
-                return [0.0] * 384
+                return [0.0] * self.embedding_manager._embedding_dims
                 
         except Exception as e:
             self.logger.error(f"Failed to validate embedding for node {node_id}: {e}")
-            return [0.0] * 384
+            return [0.0] * self.embedding_manager._embedding_dims
 
     def update_configuration(
         self,

@@ -51,6 +51,9 @@ Thumbs.db
 # Storage
 data/
 *.log
+tools/semantic_pipeline/dbs/
+tools/semantic_pipeline/test*/
+tools/semantic_pipeline/quick_*/
 
 # PyTest
 .pytest_cache/

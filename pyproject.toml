@@ -26,6 +26,7 @@ dependencies = [
     "pydantic",
     "numpy",
     "sentence-transformers",
+    "xformers",
     "discord.py",
     "aiosqlite",
     "psutil",
