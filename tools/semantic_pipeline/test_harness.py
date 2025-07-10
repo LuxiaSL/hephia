@@ -35,7 +35,7 @@ PARAMETERIZED_CALCULATOR_AVAILABLE = True
 from embedding_providers import EmbeddingProvider
 
 
-def progress_bar(iterable, desc="Processing", disable=False):
+def progress_bar(iterable, desc="Processing", disable=True):
     """Create progress bar if tqdm available, otherwise return plain iterable."""
     if TQDM_AVAILABLE and not disable:
         return tqdm(iterable, desc=desc, unit="items")
@@ -280,7 +280,7 @@ class SemanticTestHarness:
         # Load all databases with progress
         print("Loading databases...")
         databases = {}
-        for db_path in progress_bar(self.config.database_paths, desc="Loading DBs", disable=False):
+        for db_path in progress_bar(self.config.database_paths, desc="Loading DBs", disable=True):
             loader = DatabaseLoader(db_path)
             nodes = loader.load_memory_nodes()
             databases[loader.db_name] = {
@@ -329,7 +329,7 @@ class SemanticTestHarness:
         for db_name, provider_alias, calc_config in progress_bar(
             config_combinations, 
             desc="Configurations", 
-            disable=False
+            disable=True
         ):
             print(f"\n--- Testing {db_name} | {provider_alias} | {calc_config} ---")
             
@@ -376,7 +376,7 @@ class SemanticTestHarness:
         for provider_alias in progress_bar(
             self.config.embedding_providers, 
             desc="Loading models", 
-            disable=False
+            disable=True
         ):
             print(f"  Loading {provider_alias}...")
             try:
@@ -471,7 +471,7 @@ class SemanticTestHarness:
         for i, sample_node in enumerate(progress_bar(
             sample_nodes, 
             desc=f"  Samples ({provider_alias})", 
-            disable=False
+            disable=True
         )):
             # Run comparisons against the SAME set of comparison nodes
             for comp_node in comparison_nodes:
@@ -552,15 +552,9 @@ class SemanticTestHarness:
         return random.sample(nodes, sample_size)
     
     def _create_embedding_provider(self, provider_alias: str) -> EmbeddingProvider:
-        """Create embedding provider by alias (cached version)."""
-        if provider_alias in self._provider_cache:
-            return self._provider_cache[provider_alias]
-        
-        # Import here to avoid circular dependencies
-        from embedding_providers import create_provider_by_alias
-        provider = create_provider_by_alias(provider_alias)
-        self._provider_cache[provider_alias] = provider
-        return provider
+        """Create embedding provider using global cache."""
+        from embedding_cache import get_cached_provider
+        return get_cached_provider(provider_alias)
     
     def _create_calculator(self, calc_config: str, embedding_provider: EmbeddingProvider) -> ParameterizedSemanticCalculator:
         """Create semantic calculator by configuration name."""

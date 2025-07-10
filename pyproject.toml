@@ -33,7 +33,8 @@ dependencies = [
     "windows-curses; sys_platform == 'win32'",
     "sortedcontainers",
     "aiorwlock",
-    "spacy"
+    "spacy",
+    "scikit-optimize",
 ]
 
 [tool.setuptools.packages.find]

@@ -92,15 +92,23 @@ class TransformationParams:
     max_output: float = 0.95         # Maximum output value
     
     def __post_init__(self):
-        """Validate transformation parameters."""
+        """Validate and auto-fix transformation parameters."""
+        # Auto-fix threshold ordering
+        if self.mid_threshold < self.low_threshold:
+            print(f"  ⚠️ Auto-fixing threshold order: mid={self.mid_threshold:.3f} < low={self.low_threshold:.3f}")
+            self.mid_threshold = self.low_threshold + 0.05
+        
+        # Auto-fix output bounds
+        if self.min_output >= self.max_output:
+            print(f"  ⚠️ Auto-fixing output bounds: min={self.min_output:.3f} >= max={self.max_output:.3f}")
+            self.min_output = 0.05
+            self.max_output = 0.95
+        
+        # Validate final values
         if not (0.0 <= self.low_threshold <= 1.0):
             raise ValueError(f"low_threshold must be in [0,1], got {self.low_threshold}")
-        if not (self.low_threshold <= self.mid_threshold <= 1.0):
-            raise ValueError(f"mid_threshold must be >= low_threshold, got {self.mid_threshold}")
         if self.low_power <= 0:
             raise ValueError(f"low_power must be positive, got {self.low_power}")
-        if not (0.0 <= self.min_output < self.max_output <= 1.0):
-            raise ValueError(f"Invalid output bounds: [{self.min_output}, {self.max_output}]")
 
 
 @dataclass
@@ -233,7 +241,13 @@ class CalculatorConfiguration:
         for name in asdict(config.component_weights).keys():
             weights_dict[name] = float(vector[idx])
             idx += 1
-        config.component_weights = ComponentWeights(**weights_dict).normalize()
+        # CRITICAL FIX: Normalize weights manually before creating ComponentWeights
+        total = sum(weights_dict.values())
+        if total > 0:
+            for key in weights_dict:
+                weights_dict[key] = weights_dict[key] / total
+        
+        config.component_weights = ComponentWeights(**weights_dict)  # Now weights sum to 1.0
         
         # Reconstruct transformation params (9 values) 
         transform_dict = {}
@@ -1258,10 +1272,20 @@ class ParameterizedSemanticCalculator:
         """Calculate similarity metrics using configured providers."""
         metrics = {}
         
-        if query_embedding is not None and self.embedding_provider:
-            metrics['embedding_similarity'] = self.embedding_provider.calculate_similarity(
-                embedding, query_embedding
-            )
+        # Calculate embedding similarity directly if we have both embeddings
+        if query_embedding is not None and embedding is not None:
+            if self.embedding_provider:
+                # Use the calculator's embedding provider
+                metrics['embedding_similarity'] = self.embedding_provider.calculate_similarity(
+                    embedding, query_embedding
+                )
+            else:
+                # Fallback: calculate cosine similarity directly
+                metrics['embedding_similarity'] = self._calculate_cosine_similarity(
+                    embedding, query_embedding
+                )
+        else:
+            metrics['embedding_similarity'] = 0.0
         
         if query_text:
             metrics['text_relevance'] = self._calculate_text_relevance_internal(
@@ -1269,6 +1293,25 @@ class ParameterizedSemanticCalculator:
             )
         
         return metrics
+    
+    def _calculate_cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Calculate cosine similarity directly (fallback method)."""
+        try:
+            if not vec1 or not vec2 or len(vec1) != len(vec2):
+                return 0.0
+                
+            dot_product = sum(a * b for a, b in zip(vec1, vec2))
+            norm1 = sum(a * a for a in vec1) ** 0.5
+            norm2 = sum(b * b for b in vec2) ** 0.5
+            
+            if norm1 <= 0 or norm2 <= 0:
+                return 0.0
+                
+            return dot_product / (norm1 * norm2)
+            
+        except Exception as e:
+            print(f"Warning: Cosine similarity calculation failed: {e}")
+            return 0.0
     
     def _calculate_text_relevance_internal(self, text: str, query: str) -> float:
         """Calculate text relevance using keyword overlap."""
