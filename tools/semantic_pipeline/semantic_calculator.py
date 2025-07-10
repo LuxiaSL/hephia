@@ -570,15 +570,13 @@ class ParameterizedSemanticCalculator:
         # Component 3: Narrative Structure Surprise - unusual story/argument progression
         structure_surprise = self._analyze_narrative_structure_surprise(sentences) * config.structure_surprise_weight
         
-        # Combine surprise signals - following ne_density pattern exactly
+        # Combine surprise signals and apply soft bounds pattern like successful components
         raw_surprise = topic_discontinuity + density_surprise + structure_surprise
         
-        # Apply amplification directly to raw signal (like ne_density)
-        # Meaningful topic surprise levels: ~0.1-0.3 raw = significant disruption for memory
-        # Start with conservative 3x amplification to test the pattern
-        amplified_surprise = min(1.0, raw_surprise * config.topic_surprise_amplification)
-        
-        return amplified_surprise
+        # Use soft bounds pattern - prevents saturation that destroyed discrimination  
+        # Meaningful topic surprise: 0.2-0.6 combined = significant disruption for memory
+        # Use normalization instead of amplification to avoid saturation
+        return max(0.05, min(0.95, raw_surprise / config.topic_surprise_amplification))
     
     def _process_nlp_features_sync(self, text: str) -> Dict[str, float]:
         """Process NLP features synchronously with parameterized calculations."""
@@ -806,13 +804,13 @@ class ParameterizedSemanticCalculator:
             total_score += self._get_social_info_score_parameterized(token) * config.social_info_weight
             total_score += self._get_factual_info_score_parameterized(token) * config.factual_info_weight
         
-        # Apply amplification directly to raw signal (following ne_density pattern exactly)
-        # Meaningful info density: ~0.2-0.5 raw score per token = high information content  
-        # Start with conservative 2x amplification to test the pattern
+        # Apply soft bounds pattern like successful components (conceptual_bridging, logical_complexity)
+        # Scale down the inflated scoring: typical values 2-8 per token → normalize to meaningful range
         raw_density = total_score / len(doc)
-        amplified_density = min(1.0, raw_density * config.info_density_amplification)
         
-        return amplified_density
+        # Use soft bounds like all successful components - prevents saturation
+        # Normalization factor chosen based on typical scoring range (2-6 per token)
+        return max(0.05, min(0.95, raw_density / config.info_density_amplification))
     
     def _get_technical_info_score_parameterized(self, token) -> float:
         """Get technical info score with parameterized weights."""
