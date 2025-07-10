@@ -41,28 +41,28 @@ class CalculatorFactory:
         # Experimental weight distributions
         "density_focused": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                semantic_cohesion=0.15, ne_density=0.35, abstraction_level=0.25,
+                topic_surprise=0.15, ne_density=0.35, conceptual_surprise=0.25,
                 logical_complexity=0.10, conceptual_bridging=0.10, information_density=0.05
             )
         ),
         
         "cohesion_focused": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                semantic_cohesion=0.40, ne_density=0.20, abstraction_level=0.15,
+                topic_surprise=0.40, ne_density=0.20, conceptual_surprise=0.15,
                 logical_complexity=0.10, conceptual_bridging=0.10, information_density=0.05
             )
         ),
         
         "balanced": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                semantic_cohesion=0.20, ne_density=0.20, abstraction_level=0.20,
+                topic_surprise=0.20, ne_density=0.20, conceptual_surprise=0.20,
                 logical_complexity=0.20, conceptual_bridging=0.15, information_density=0.05
             )
         ),
         
         "complexity_focused": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                semantic_cohesion=0.15, ne_density=0.15, abstraction_level=0.15,
+                topic_surprise=0.15, ne_density=0.15, conceptual_surprise=0.15,
                 logical_complexity=0.35, conceptual_bridging=0.15, information_density=0.05
             )
         ),
@@ -162,9 +162,9 @@ class CalculatorFactory:
         """
         return {
             # Component weights (will be normalized, so bounds are flexible)
-            'semantic_cohesion_weight': (0.05, 0.50),
+            'topic_surprise_weight': (0.05, 0.50),
             'ne_density_weight': (0.05, 0.50),
-            'abstraction_level_weight': (0.05, 0.40),
+            'conceptual_surprise_weight': (0.05, 0.40),
             'logical_complexity_weight': (0.05, 0.40),
             'conceptual_bridging_weight': (0.05, 0.30),
             'information_density_weight': (0.01, 0.20),
@@ -198,7 +198,20 @@ class CalculatorFactory:
             'factual_info_weight': (0.5, 2.0),
             'info_normalization': (1.0, 4.0),
             'cohesion_fallback_similarity': (0.3, 0.7),
-            'min_sentences_for_cohesion': (1, 3)
+            'min_sentences_for_cohesion': (1, 3),
+            
+            # Conceptual Surprise parameters
+            'syntactic_surprise_weight': (0.5, 2.0),
+            'semantic_role_surprise_weight': (0.5, 2.0),
+            'discourse_surprise_weight': (0.5, 2.0),
+            'concept_surprise_normalization': (2.0, 5.0),
+            
+            # Topic Surprise parameters
+            'topic_discontinuity_weight': (0.5, 2.0),
+            'density_surprise_weight': (0.5, 2.0),
+            'structure_surprise_weight': (0.5, 2.0),
+            'topic_surprise_normalization': (2.0, 5.0),
+            'min_sentences_for_topic_surprise': (1, 3)
         }
     
     @classmethod

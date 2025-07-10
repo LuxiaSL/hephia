@@ -41,9 +41,9 @@ except ImportError:
 @dataclass
 class ComponentWeights:
     """Component weight configuration with validation."""
-    semantic_cohesion: float = 0.25
+    topic_surprise: float = 0.25         # Replaces semantic_cohesion
     ne_density: float = 0.25  
-    abstraction_level: float = 0.20
+    conceptual_surprise: float = 0.20     # Replaces abstraction_level
     logical_complexity: float = 0.15
     conceptual_bridging: float = 0.10
     information_density: float = 0.05
@@ -66,9 +66,9 @@ class ComponentWeights:
         
         factor = 1.0 / total
         return ComponentWeights(
-            semantic_cohesion=self.semantic_cohesion * factor,
+            topic_surprise=self.topic_surprise * factor,
             ne_density=self.ne_density * factor,
-            abstraction_level=self.abstraction_level * factor,
+            conceptual_surprise=self.conceptual_surprise * factor,
             logical_complexity=self.logical_complexity * factor,
             conceptual_bridging=self.conceptual_bridging * factor,
             information_density=self.information_density * factor
@@ -135,6 +135,19 @@ class DiscriminatorConfig:
     # Semantic Cohesion (embedding-based)
     cohesion_fallback_similarity: float = 0.5  # Fallback similarity value
     min_sentences_for_cohesion: int = 2      # Minimum sentences needed
+    
+    # Conceptual Surprise (replaces abstraction_level)
+    syntactic_surprise_weight: float = 1.0      # Weight for syntactic pattern unusualness
+    semantic_role_surprise_weight: float = 1.0  # Weight for semantic role unusualness
+    discourse_surprise_weight: float = 1.0      # Weight for discourse pattern unusualness
+    concept_surprise_normalization: float = 3.0 # Normalization factor for conceptual surprise
+    
+    # Topic Surprise (replaces semantic_cohesion) 
+    topic_discontinuity_weight: float = 1.0     # Weight for topic jump detection
+    density_surprise_weight: float = 1.0        # Weight for information density surprise
+    structure_surprise_weight: float = 1.0      # Weight for narrative structure surprise
+    topic_surprise_normalization: float = 3.0   # Normalization factor for topic surprise
+    min_sentences_for_topic_surprise: int = 2   # Minimum sentences needed for topic analysis
 
 
 @dataclass
@@ -368,11 +381,11 @@ class ParameterizedSemanticCalculator:
         # Split into sentences for cohesion calculation
         sentences = [s.strip() for s in text_content.split('.') if s.strip()]
         
-        # Calculate semantic cohesion (async/parallel if enabled)
+        # Calculate topic surprise (replaces semantic cohesion)
         if self.config.enable_parallel_processing and self._executor and len(sentences) > 1:
-            semantic_cohesion = self._calculate_cohesion_parallel(sentences)
+            topic_surprise = self._calculate_topic_surprise_parallel(sentences, text_content)
         else:
-            semantic_cohesion = self._calculate_cohesion_sync(sentences)
+            topic_surprise = self._calculate_topic_surprise_sync(sentences, text_content)
         
         # Calculate other components (potentially in parallel)
         if self.config.enable_parallel_processing and self._executor:
@@ -382,9 +395,9 @@ class ParameterizedSemanticCalculator:
         
         # Extract component scores
         components = {
-            'semantic_cohesion': semantic_cohesion,
+            'topic_surprise': topic_surprise,
             'ne_density': nlp_features.get('ne_density', 0.0),
-            'abstraction_level': nlp_features.get('abstraction_level', 0.5),
+            'conceptual_surprise': nlp_features.get('conceptual_surprise', 0.5),
             'logical_complexity': nlp_features.get('logical_complexity', 0.0),
             'conceptual_bridging': nlp_features.get('conceptual_bridging', 0.0),
             'information_density': nlp_features.get('information_density', 0.0)
@@ -521,6 +534,46 @@ class ParameterizedSemanticCalculator:
         
         return statistics.mean(similarities) if similarities else self.config.discriminator_config.cohesion_fallback_similarity
     
+    def _calculate_topic_surprise_sync(self, sentences: List[str], full_text: str) -> float:
+        """Calculate topic surprise synchronously - how unpredictable is the information flow?"""
+        if len(sentences) < self.config.discriminator_config.min_sentences_for_topic_surprise:
+            return 0.5  # Default moderate surprise for single sentences
+        
+        cache_key = self._cache_key(full_text, f"topic_surprise_{self.config.discriminator_config.topic_discontinuity_weight}")
+        
+        def compute():
+            return self._calculate_topic_surprise_internal(sentences, full_text)
+        
+        return self._get_cached_or_compute(self._cohesion_cache, cache_key, compute)
+    
+    def _calculate_topic_surprise_parallel(self, sentences: List[str], full_text: str) -> float:
+        """Calculate topic surprise with parallel processing where possible."""
+        # For now, topic surprise calculation is primarily sequential due to dependencies
+        # Future enhancement: parallelize sentence-level analysis
+        return self._calculate_topic_surprise_sync(sentences, full_text)
+    
+    def _calculate_topic_surprise_internal(self, sentences: List[str], full_text: str) -> float:
+        """
+        Internal topic surprise calculation with parameterized components.
+        Measures how unpredictable the information sequencing is.
+        """
+        config = self.config.discriminator_config
+        
+        # Component 1: Topic Discontinuity - sudden changes in semantic space without bridging
+        topic_discontinuity = self._analyze_topic_discontinuity(sentences) * config.topic_discontinuity_weight
+        
+        # Component 2: Information Density Surprise - unusual packing of information 
+        density_surprise = self._analyze_information_density_surprise(full_text) * config.density_surprise_weight
+        
+        # Component 3: Narrative Structure Surprise - unusual story/argument progression
+        structure_surprise = self._analyze_narrative_structure_surprise(sentences) * config.structure_surprise_weight
+        
+        # Combine and normalize
+        total_surprise = topic_discontinuity + density_surprise + structure_surprise
+        normalized = max(0.05, min(0.95, total_surprise / config.topic_surprise_normalization))
+        
+        return normalized
+    
     def _process_nlp_features_sync(self, text: str) -> Dict[str, float]:
         """Process NLP features synchronously with parameterized calculations."""
         if not text:
@@ -553,7 +606,7 @@ class ParameterizedSemanticCalculator:
             
             return {
                 'ne_density': self._calculate_ne_density_parameterized(doc),
-                'abstraction_level': self._calculate_abstraction_level_parameterized(doc),
+                'conceptual_surprise': self._calculate_conceptual_surprise_parameterized(doc),
                 'logical_complexity': self._calculate_logical_complexity_parameterized(doc),
                 'conceptual_bridging': self._calculate_conceptual_bridging_parameterized(doc),
                 'information_density': self._calculate_information_density_parameterized(doc)
@@ -570,7 +623,7 @@ class ParameterizedSemanticCalculator:
         
         return {
             'ne_density': self._heuristic_ne_density(words),
-            'abstraction_level': self._heuristic_abstraction_level(words),
+            'conceptual_surprise': self._heuristic_conceptual_surprise(words, text),
             'logical_complexity': self._heuristic_logical_complexity(text),
             'conceptual_bridging': self._heuristic_conceptual_bridging(words),
             'information_density': self._heuristic_information_density(words)
@@ -591,66 +644,30 @@ class ParameterizedSemanticCalculator:
         
         return amplified
     
-    def _calculate_abstraction_level_parameterized(self, doc) -> float:
-        """Calculate abstraction level with parameterized boosts."""
+    def _calculate_conceptual_surprise_parameterized(self, doc) -> float:
+        """
+        Calculate conceptual surprise - how linguistically unexpected are the patterns in this text?
+        Measures deviation from typical language patterns across multiple axes.
+        """
         if not doc:
             return 0.5
         
-        abstract_score = 0.0
-        concrete_score = 0.0
-        total_scored = 0
-        
         config = self.config.discriminator_config
         
-        for token in doc:
-            if token.pos_ not in ['NOUN', 'VERB', 'ADJ'] or token.is_stop:
-                continue
-            
-            lemma = token.lemma_.lower()
-            scored = False
-            
-            # Concrete patterns with parameterized scoring
-            if token.ent_type_ or token.like_num:
-                concrete_score += 3.0 * config.concrete_boost
-                scored = True
-            elif lemma in {'execute', 'run', 'process', 'create', 'update', 'delete', 'fix', 'install', 'query', 'database', 'file', 'system', 'command', 'code', 'error', 'result'}:
-                concrete_score += 2.0 * config.concrete_boost
-                scored = True
-            elif token.pos_ == 'VERB' and len(token.text) <= 5:
-                concrete_score += 1.5 * config.concrete_boost
-                scored = True
-            
-            # Abstract patterns with parameterized scoring  
-            elif lemma in {'understanding', 'realization', 'insight', 'concept', 'approach', 'strategy', 'pattern', 'relationship', 'significance', 'complexity', 'abstraction'}:
-                abstract_score += 2.5 * config.abstract_boost
-                scored = True
-            elif lemma in {'learn', 'understand', 'realize', 'recognize', 'develop', 'improve', 'analyze', 'evaluate', 'consider', 'determine'}:
-                abstract_score += 2.0 * config.abstract_boost
-                scored = True
-            elif token.pos_ == 'ADJ' and len(token.text) >= 8:
-                abstract_score += 1.5 * config.abstract_boost
-                scored = True
-            
-            # Length-based heuristics with parameterized weighting
-            elif not scored:
-                if len(token.text) <= 4:
-                    concrete_score += 1.0 * config.length_weight
-                elif len(token.text) >= 10:
-                    abstract_score += 1.0 * config.length_weight
-            
-            total_scored += 1
+        # Component 1: Syntactic Surprise - unusual dependency structures and POS patterns
+        syntactic_surprise = self._analyze_syntactic_surprise(doc) * config.syntactic_surprise_weight
         
-        if total_scored == 0:
-            return 0.5
+        # Component 2: Semantic Role Surprise - unexpected agent-action-object combinations  
+        semantic_role_surprise = self._analyze_semantic_role_surprise(doc) * config.semantic_role_surprise_weight
         
-        total_points = abstract_score + concrete_score
-        if total_points == 0:
-            return 0.5
+        # Component 3: Discourse Surprise - unusual information packaging and emphasis
+        discourse_surprise = self._analyze_discourse_surprise(doc) * config.discourse_surprise_weight
         
-        abstraction_ratio = abstract_score / total_points
-        final_score = 0.2 + (abstraction_ratio * 0.6)
+        # Combine and normalize
+        total_surprise = syntactic_surprise + semantic_role_surprise + discourse_surprise
+        normalized = max(0.05, min(0.95, total_surprise / config.concept_surprise_normalization))
         
-        return max(0.05, min(0.95, final_score))
+        return normalized
     
     def _calculate_logical_complexity_parameterized(self, doc) -> float:
         """Calculate logical complexity with parameterized method selection."""
@@ -847,6 +864,242 @@ class ParameterizedSemanticCalculator:
         
         return score
     
+    # Surprise-based component helper methods
+    def _analyze_syntactic_surprise(self, doc) -> float:
+        """
+        Analyze syntactic surprise - unusual dependency structures and POS patterns.
+        Returns surprise score from 0 (expected) to 1 (highly unexpected).
+        """
+        if not doc:
+            return 0.0
+        
+        surprise_score = 0.0
+        total_tokens = len([token for token in doc if not token.is_space])
+        
+        if total_tokens == 0:
+            return 0.0
+        
+        # Detect unusual dependency patterns
+        rare_dependencies = {'advcl', 'acl:relcl', 'ccomp', 'xcomp', 'csubj', 'csubjpass'}
+        complex_dependencies = 0
+        
+        for token in doc:
+            # Count rare/complex dependency relations
+            if token.dep_ in rare_dependencies:
+                complex_dependencies += 1
+            
+            # Detect unusual POS sequences (simplified heuristic)
+            if token.pos_ == 'ADV' and token.head.pos_ == 'ADJ':
+                surprise_score += 0.1  # Adverb modifying adjective (somewhat unusual)
+            elif token.pos_ == 'VERB' and len([child for child in token.children if child.pos_ == 'VERB']) >= 2:
+                surprise_score += 0.2  # Verb with multiple verb children (unusual)
+        
+        # Normalize by text length
+        dependency_surprise = min(1.0, complex_dependencies / max(1, total_tokens * 0.1))
+        pattern_surprise = min(1.0, surprise_score / max(1, total_tokens * 0.05))
+        
+        return (dependency_surprise + pattern_surprise) / 2.0
+    
+    def _analyze_semantic_role_surprise(self, doc) -> float:
+        """
+        Analyze semantic role surprise - unexpected agent-action-object combinations.
+        Returns surprise score from 0 (expected) to 1 (highly unexpected).
+        """
+        if not doc:
+            return 0.0
+        
+        surprise_score = 0.0
+        verb_count = 0
+        
+        for token in doc:
+            if token.pos_ == 'VERB' and not token.is_stop:
+                verb_count += 1
+                
+                # Find subjects and objects
+                subjects = [child for child in token.children if child.dep_ in ['nsubj', 'nsubjpass']]
+                objects = [child for child in token.children if child.dep_ in ['dobj', 'pobj', 'iobj']]
+                
+                # Detect unusual combinations (simplified heuristics)
+                for subj in subjects:
+                    if subj.ent_type_ == 'PERSON' and token.lemma_ in ['compile', 'execute', 'process']:
+                        surprise_score += 0.1  # Person doing technical actions (slightly unusual)
+                    elif subj.ent_type_ in ['ORG', 'PRODUCT'] and token.lemma_ in ['think', 'feel', 'believe']:
+                        surprise_score += 0.3  # Organizations having emotions (more unusual)
+                
+                # Abstract subjects with concrete actions
+                for subj in subjects:
+                    if subj.pos_ == 'NOUN' and subj.lemma_ in ['idea', 'concept', 'thought'] and token.lemma_ in ['run', 'move', 'break']:
+                        surprise_score += 0.2  # Abstract concepts doing physical actions
+        
+        return min(1.0, surprise_score / max(1, verb_count * 0.2)) if verb_count > 0 else 0.0
+    
+    def _analyze_discourse_surprise(self, doc) -> float:
+        """
+        Analyze discourse surprise - unusual information packaging and emphasis.
+        Returns surprise score from 0 (expected) to 1 (highly unexpected).
+        """
+        if not doc:
+            return 0.0
+        
+        surprise_score = 0.0
+        sentence_count = len(list(doc.sents))
+        
+        if sentence_count == 0:
+            return 0.0
+        
+        for sent in doc.sents:
+            sent_tokens = [token for token in sent if not token.is_space]
+            if not sent_tokens:
+                continue
+            
+            # Detect unusual emphasis patterns
+            caps_count = sum(1 for token in sent_tokens if token.text.isupper() and len(token.text) > 1)
+            if caps_count > len(sent_tokens) * 0.3:  # More than 30% caps
+                surprise_score += 0.3
+            
+            # Detect unusual sentence structures
+            # Very short sentences with complex punctuation
+            if len(sent_tokens) <= 3 and any(token.text in ['!', '?', '...'] for token in sent_tokens):
+                surprise_score += 0.2
+            
+            # Very long sentences (potential run-ons)
+            if len(sent_tokens) > 30:
+                surprise_score += 0.2
+            
+            # Detect fronted elements (simplified)
+            if sent_tokens and sent_tokens[0].pos_ in ['ADV', 'SCONJ'] and sent_tokens[0].dep_ == 'advmod':
+                surprise_score += 0.1  # Fronted adverbials
+        
+        return min(1.0, surprise_score / max(1, sentence_count * 0.3))
+    
+    def _analyze_topic_discontinuity(self, sentences: List[str]) -> float:
+        """
+        Analyze topic discontinuity - sudden changes in semantic space without bridging.
+        Returns discontinuity score from 0 (smooth flow) to 1 (highly discontinuous).
+        """
+        if len(sentences) < 2:
+            return 0.0
+        
+        discontinuity_score = 0.0
+        
+        for i in range(len(sentences) - 1):
+            curr_words = set(sentences[i].lower().split())
+            next_words = set(sentences[i + 1].lower().split())
+            
+            # Remove stop words (simplified)
+            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can'}
+            curr_content = curr_words - stop_words
+            next_content = next_words - stop_words
+            
+            if not curr_content or not next_content:
+                continue
+            
+            # Calculate word overlap
+            overlap = len(curr_content.intersection(next_content))
+            total_unique = len(curr_content.union(next_content))
+            
+            if total_unique > 0:
+                overlap_ratio = overlap / total_unique
+                # Low overlap = high discontinuity
+                discontinuity_score += (1.0 - overlap_ratio)
+        
+        return min(1.0, discontinuity_score / max(1, len(sentences) - 1))
+    
+    def _analyze_information_density_surprise(self, text: str) -> float:
+        """
+        Analyze information density surprise - unusual packing of information.
+        Returns surprise score from 0 (expected density) to 1 (highly unexpected density).
+        """
+        if not text:
+            return 0.0
+        
+        words = text.split()
+        if not words:
+            return 0.0
+        
+        # Calculate various density metrics
+        numbers = sum(1 for word in words if any(c.isdigit() for c in word))
+        capitals = sum(1 for word in words if word and word[0].isupper())
+        long_words = sum(1 for word in words if len(word) >= 8)
+        punctuation = sum(1 for char in text if char in '.,;:!?()[]{}')
+        
+        # Detect unusual density patterns
+        surprise_score = 0.0
+        
+        # Very high number density (more than 20% numbers)
+        number_density = numbers / len(words)
+        if number_density > 0.2:
+            surprise_score += min(0.4, number_density)
+        
+        # Very high capitalization (more than 30% capitals, excluding start of sentences)
+        capital_density = capitals / len(words)
+        if capital_density > 0.3:
+            surprise_score += min(0.3, capital_density - 0.3)
+        
+        # Unusual punctuation density
+        punct_density = punctuation / len(text)
+        if punct_density > 0.1:  # More than 10% punctuation
+            surprise_score += min(0.3, punct_density)
+        
+        # Very sparse information (mostly short common words)
+        if long_words == 0 and len(words) > 5:
+            surprise_score += 0.2
+        
+        return min(1.0, surprise_score)
+    
+    def _analyze_narrative_structure_surprise(self, sentences: List[str]) -> float:
+        """
+        Analyze narrative structure surprise - unusual story/argument progression.
+        Returns surprise score from 0 (expected structure) to 1 (highly unexpected structure).
+        """
+        if len(sentences) < 2:
+            return 0.0
+        
+        surprise_score = 0.0
+        
+        # Detect temporal inconsistencies (simplified)
+        time_markers = {
+            'past': ['yesterday', 'before', 'earlier', 'previously', 'then', 'after'],
+            'present': ['now', 'currently', 'today', 'this'],
+            'future': ['tomorrow', 'later', 'next', 'will', 'going to', 'plan to']
+        }
+        
+        sentence_times = []
+        for sentence in sentences:
+            sentence_lower = sentence.lower()
+            time_score = {'past': 0, 'present': 0, 'future': 0}
+            
+            for time_type, markers in time_markers.items():
+                for marker in markers:
+                    if marker in sentence_lower:
+                        time_score[time_type] += 1
+            
+            # Determine dominant time frame
+            if sum(time_score.values()) > 0:
+                dominant_time = max(time_score.items(), key=lambda x: x[1])[0]
+                sentence_times.append(dominant_time)
+            else:
+                sentence_times.append('neutral')
+        
+        # Detect non-linear time progression
+        if len(sentence_times) >= 3:
+            for i in range(len(sentence_times) - 2):
+                # Look for past->future->past or future->past->future patterns
+                if sentence_times[i] == 'past' and sentence_times[i+1] == 'future' and sentence_times[i+2] == 'past':
+                    surprise_score += 0.3
+                elif sentence_times[i] == 'future' and sentence_times[i+1] == 'past' and sentence_times[i+2] == 'future':
+                    surprise_score += 0.3
+        
+        # Detect abrupt topic changes (simplified by sentence length variation)
+        lengths = [len(sentence.split()) for sentence in sentences]
+        if len(lengths) >= 3:
+            length_variance = statistics.stdev(lengths) if len(lengths) > 1 else 0
+            avg_length = statistics.mean(lengths)
+            if avg_length > 0 and length_variance / avg_length > 1.0:  # High variation in sentence length
+                surprise_score += 0.2
+        
+        return min(1.0, surprise_score)
+    
     # Heuristic methods for fallback
     def _heuristic_ne_density(self, words: List[str]) -> float:
         """Heuristic NE density calculation.""" 
@@ -857,22 +1110,46 @@ class ParameterizedSemanticCalculator:
         capitalized = sum(1 for word in words if word and word[0].isupper())
         return min(1.0, (capitalized / len(words)) * self.config.discriminator_config.ne_amplification_factor)
     
-    def _heuristic_abstraction_level(self, words: List[str]) -> float:
-        """Heuristic abstraction level calculation."""
+    def _heuristic_conceptual_surprise(self, words: List[str], text: str) -> float:
+        """
+        Heuristic conceptual surprise calculation for when SpaCy is unavailable.
+        Simplified pattern-based surprise detection.
+        """
         if not words:
             return 0.5
         
-        abstract_words = {'understanding', 'concept', 'idea', 'pattern', 'relationship', 'analyze', 'evaluate'}
-        concrete_words = {'run', 'create', 'file', 'system', 'process', 'execute', 'install'}
+        surprise_score = 0.0
         
-        abstract_count = sum(1 for word in words if word.lower() in abstract_words)
-        concrete_count = sum(1 for word in words if word.lower() in concrete_words)
+        # Pattern 1: Unusual word combinations (simplified)
+        unusual_pairs = {
+            ('thought', 'ran'), ('idea', 'jumped'), ('concept', 'fell'),  # Abstract + physical verbs
+            ('organization', 'felt'), ('company', 'believed'),  # Org + emotion verbs
+            ('system', 'hoped'), ('process', 'dreamed')  # Technical + mental verbs
+        }
         
-        if abstract_count + concrete_count == 0:
-            return 0.5
+        word_list = [w.lower() for w in words]
+        for i in range(len(word_list) - 1):
+            if (word_list[i], word_list[i+1]) in unusual_pairs:
+                surprise_score += 0.3
         
-        ratio = abstract_count / (abstract_count + concrete_count)
-        return 0.2 + (ratio * 0.6)
+        # Pattern 2: Unusual punctuation patterns
+        unusual_punct_count = text.count('!!!') + text.count('???') + text.count('...')
+        if unusual_punct_count > 0:
+            surprise_score += min(0.2, unusual_punct_count * 0.1)
+        
+        # Pattern 3: Mixed case patterns (simplified)
+        mixed_case_words = sum(1 for word in words if any(c.isupper() for c in word) and any(c.islower() for c in word))
+        if mixed_case_words > 0:
+            surprise_score += min(0.2, mixed_case_words / len(words))
+        
+        # Pattern 4: Very short or very long words in unusual contexts
+        very_short = sum(1 for word in words if len(word) <= 2 and word.isalpha())
+        very_long = sum(1 for word in words if len(word) >= 15)
+        unusual_length_ratio = (very_short + very_long) / len(words)
+        if unusual_length_ratio > 0.1:
+            surprise_score += min(0.3, unusual_length_ratio)
+        
+        return min(0.95, max(0.05, surprise_score))
     
     def _heuristic_logical_complexity(self, text: str) -> float:
         """Heuristic logical complexity calculation."""
@@ -940,9 +1217,9 @@ class ParameterizedSemanticCalculator:
         """Return zero density result structure."""
         return {
             'components': {
-                'semantic_cohesion': 0.0,
+                'topic_surprise': 0.0,
                 'ne_density': 0.0,
-                'abstraction_level': 0.0,
+                'conceptual_surprise': 0.0,
                 'logical_complexity': 0.0,
                 'conceptual_bridging': 0.0,
                 'information_density': 0.0
@@ -956,7 +1233,7 @@ class ParameterizedSemanticCalculator:
         """Return zero NLP features."""
         return {
             'ne_density': 0.0,
-            'abstraction_level': 0.5,
+            'conceptual_surprise': 0.5,
             'logical_complexity': 0.0,
             'conceptual_bridging': 0.0,
             'information_density': 0.0

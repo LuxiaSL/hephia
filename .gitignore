@@ -52,7 +52,7 @@ Thumbs.db
 data/
 *.log
 tools/semantic_pipeline/dbs/
-tools/semantic_pipeline/test*/
+tools/semantic_pipeline/full_*/
 tools/semantic_pipeline/quick_*/
 
 # PyTest
@@ -60,3 +60,7 @@ tools/semantic_pipeline/quick_*/
 
 # i should probably know what this is but i dont but i assume it's chill
 .coverage
+
+tools/semantic_pipeline/CLAUDE.md
+tools/semantic_pipeline/analyze_results.py
+tools/semantic_pipeline/comparative_analysis.py
