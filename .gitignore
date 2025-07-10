@@ -64,3 +64,6 @@ tools/semantic_pipeline/quick_*/
 tools/semantic_pipeline/CLAUDE.md
 tools/semantic_pipeline/analyze_results.py
 tools/semantic_pipeline/comparative_analysis.py
+tools/semantic_pipeline/deep_component_analysis.py
+tools/semantic_pipeline/surprise_analysis.py
+tools/semantic_pipeline/surprise_interpretation.py

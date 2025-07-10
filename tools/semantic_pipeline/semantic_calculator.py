@@ -130,7 +130,8 @@ class DiscriminatorConfig:
     technical_info_weight: float = 1.0       # Weight for technical information
     social_info_weight: float = 1.0          # Weight for social information
     factual_info_weight: float = 1.0         # Weight for factual information
-    info_normalization: float = 2.0          # Normalization factor
+    info_density_amplification: float = 3.0  # Amplification factor (like ne_density insight)
+    info_normalization: float = 2.0          # Base normalization factor
     
     # Semantic Cohesion (embedding-based)
     cohesion_fallback_similarity: float = 0.5  # Fallback similarity value
@@ -146,7 +147,8 @@ class DiscriminatorConfig:
     topic_discontinuity_weight: float = 1.0     # Weight for topic jump detection
     density_surprise_weight: float = 1.0        # Weight for information density surprise
     structure_surprise_weight: float = 1.0      # Weight for narrative structure surprise
-    topic_surprise_normalization: float = 3.0   # Normalization factor for topic surprise
+    topic_surprise_amplification: float = 8.0   # Amplification factor (like ne_density insight)
+    topic_surprise_normalization: float = 3.0   # Base normalization factor
     min_sentences_for_topic_surprise: int = 2   # Minimum sentences needed for topic analysis
 
 
@@ -568,9 +570,12 @@ class ParameterizedSemanticCalculator:
         # Component 3: Narrative Structure Surprise - unusual story/argument progression
         structure_surprise = self._analyze_narrative_structure_surprise(sentences) * config.structure_surprise_weight
         
-        # Combine and normalize
-        total_surprise = topic_discontinuity + density_surprise + structure_surprise
-        normalized = max(0.05, min(0.95, total_surprise / config.topic_surprise_normalization))
+        # Combine and amplify meaningful surprise signals
+        raw_surprise = topic_discontinuity + density_surprise + structure_surprise
+        # Apply amplification insight: meaningful topic surprises need to be emphasized
+        # Similar to ne_density: amplify the surprise signals that actually matter for memory
+        amplified_surprise = min(1.0, raw_surprise * config.topic_surprise_amplification)
+        normalized = max(0.05, min(0.95, amplified_surprise / config.topic_surprise_normalization))
         
         return normalized
     
@@ -800,8 +805,12 @@ class ParameterizedSemanticCalculator:
             total_score += self._get_social_info_score_parameterized(token) * config.social_info_weight
             total_score += self._get_factual_info_score_parameterized(token) * config.factual_info_weight
         
-        density = total_score / len(doc)
-        return max(0.05, min(0.95, density / config.info_normalization))
+        raw_density = total_score / len(doc)
+        # Apply amplification insight: meaningful information density matters more
+        # Similar to ne_density: amplify the meaningful ranges to fill 0-1 space
+        amplified_density = min(1.0, raw_density * config.info_density_amplification)
+        normalized = max(0.05, min(0.95, amplified_density / config.info_normalization))
+        return normalized
     
     def _get_technical_info_score_parameterized(self, token) -> float:
         """Get technical info score with parameterized weights."""
