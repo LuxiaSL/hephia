@@ -570,14 +570,15 @@ class ParameterizedSemanticCalculator:
         # Component 3: Narrative Structure Surprise - unusual story/argument progression
         structure_surprise = self._analyze_narrative_structure_surprise(sentences) * config.structure_surprise_weight
         
-        # Combine and amplify meaningful surprise signals
+        # Combine surprise signals - following ne_density pattern exactly
         raw_surprise = topic_discontinuity + density_surprise + structure_surprise
-        # Apply amplification insight: meaningful topic surprises need to be emphasized
-        # Similar to ne_density: amplify the surprise signals that actually matter for memory
-        amplified_surprise = min(1.0, raw_surprise * config.topic_surprise_amplification)
-        normalized = max(0.05, min(0.95, amplified_surprise / config.topic_surprise_normalization))
         
-        return normalized
+        # Apply amplification directly to raw signal (like ne_density)
+        # Meaningful topic surprise levels: ~0.1-0.3 raw = significant disruption for memory
+        # Start with conservative 3x amplification to test the pattern
+        amplified_surprise = min(1.0, raw_surprise * config.topic_surprise_amplification)
+        
+        return amplified_surprise
     
     def _process_nlp_features_sync(self, text: str) -> Dict[str, float]:
         """Process NLP features synchronously with parameterized calculations."""
@@ -805,12 +806,13 @@ class ParameterizedSemanticCalculator:
             total_score += self._get_social_info_score_parameterized(token) * config.social_info_weight
             total_score += self._get_factual_info_score_parameterized(token) * config.factual_info_weight
         
+        # Apply amplification directly to raw signal (following ne_density pattern exactly)
+        # Meaningful info density: ~0.2-0.5 raw score per token = high information content  
+        # Start with conservative 2x amplification to test the pattern
         raw_density = total_score / len(doc)
-        # Apply amplification insight: meaningful information density matters more
-        # Similar to ne_density: amplify the meaningful ranges to fill 0-1 space
         amplified_density = min(1.0, raw_density * config.info_density_amplification)
-        normalized = max(0.05, min(0.95, amplified_density / config.info_normalization))
-        return normalized
+        
+        return amplified_density
     
     def _get_technical_info_score_parameterized(self, token) -> float:
         """Get technical info score with parameterized weights."""

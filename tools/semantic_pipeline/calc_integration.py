@@ -196,8 +196,7 @@ class CalculatorFactory:
             'technical_info_weight': (0.5, 2.0),
             'social_info_weight': (0.5, 2.0),
             'factual_info_weight': (0.5, 2.0),
-            'info_density_amplification': (1.5, 6.0),  # Amplification factor for information density
-            'info_normalization': (1.0, 4.0),
+            'info_density_amplification': (1.5, 4.0),  # Conservative amplification for information density
             'cohesion_fallback_similarity': (0.3, 0.7),
             'min_sentences_for_cohesion': (1, 3),
             
@@ -211,8 +210,7 @@ class CalculatorFactory:
             'topic_discontinuity_weight': (0.5, 2.0),
             'density_surprise_weight': (0.5, 2.0),
             'structure_surprise_weight': (0.5, 2.0),
-            'topic_surprise_amplification': (4.0, 15.0),  # Amplification factor for topic surprise
-            'topic_surprise_normalization': (2.0, 5.0),
+            'topic_surprise_amplification': (2.0, 6.0),  # Conservative amplification for topic surprise
             'min_sentences_for_topic_surprise': (1, 3)
         }
     
