@@ -39,9 +39,9 @@ except ImportError as e:
 def _get_config_description(config_name: str) -> str:
     """Get human-readable description of calculator configuration."""
     descriptions = {
-        "baseline": "Original implementation (25% cohesion, 25% NE density)",
+        "baseline": "Balanced implementation (25% topic surprise, 25% NE density)",
         "density_focused": "Boost NE density to 35% (entity-heavy content)",
-        "cohesion_focused": "Boost semantic cohesion to 40% (narrative content)",
+        "cohesion_focused": "Boost topic surprise to 40% (narrative content)",
         "balanced": "Equal 20% distribution across components",
         "complexity_focused": "Boost logical complexity to 35% (reasoning content)",
         "gentle_transform": "Softer discrimination curves (less aggressive)",

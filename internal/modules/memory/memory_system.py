@@ -1021,7 +1021,7 @@ class MemorySystemOrchestrator:
             if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
                 result[key] = (val1 + val2) / 2
                 
-            # Handle nested dictionaries (NEW: recursive averaging)
+            # Handle nested dictionaries
             elif isinstance(val1, dict) and isinstance(val2, dict):
                 result[key] = self._average_metric_components(val1, val2)
                 

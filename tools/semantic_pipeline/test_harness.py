@@ -412,9 +412,9 @@ class SemanticTestHarness:
             print(f"Warning: Failed to compute semantic density on demand: {e}")
             return {
                 'components': {
-                    'semantic_cohesion': 0.0,
+                    'topic_surprise': 0.0,
                     'ne_density': 0.0,
-                    'abstraction_level': 0.0,
+                    'conceptual_surprise': 0.0,
                     'logical_complexity': 0.0,
                     'conceptual_bridging': 0.0,
                     'information_density': 0.0
@@ -680,7 +680,7 @@ class SemanticTestHarness:
         component_analysis = {}
         
         # Analyze each component across all results
-        component_names = ['semantic_cohesion', 'ne_density', 'abstraction_level', 
+        component_names = ['topic_surprise', 'ne_density', 'conceptual_surprise', 
                           'logical_complexity', 'conceptual_bridging', 'information_density']
         
         for comp_name in component_names:
@@ -794,9 +794,9 @@ class SemanticTestHarness:
         with open(density_log_file, 'w') as f:
             for result in self.results:
                 # Mimic your density log format
-                f.write(f"[{result.timestamp}] [DENSITY_DEBUG] Semantic Cohesion: {result.sample_components['semantic_cohesion']:.3f}, "
+                f.write(f"[{result.timestamp}] [DENSITY_DEBUG] Topic Surprise: {result.sample_components['topic_surprise']:.3f}, "
                        f"NE Density: {result.sample_components['ne_density']:.3f}, "
-                       f"Abstraction Level: {result.sample_components['abstraction_level']:.3f}, "
+                       f"Conceptual Surprise: {result.sample_components['conceptual_surprise']:.3f}, "
                        f"Logical Complexity: {result.sample_components['logical_complexity']:.3f}, "
                        f"Conceptual Bridging: {result.sample_components['conceptual_bridging']:.3f}, "
                        f"Information Density: {result.sample_components['information_density']:.3f}\n")
