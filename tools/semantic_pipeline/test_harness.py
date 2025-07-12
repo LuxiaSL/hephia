@@ -1,11 +1,8 @@
 """
 testing/test_harness.py
 
-Test harness for systematic memory semantic analysis.
-Samples nodes from existing databases and generates comparison metrics
-identical to what collect_*.py scripts analyze.
-
-Updated to support parameterized calculators for neural optimization.
+Clean test harness for systematic memory semantic analysis.
+Updated to support dependency injection and permanent embedding cache.
 """
 
 import asyncio
@@ -27,6 +24,7 @@ except ImportError:
     TQDM_AVAILABLE = False
     print("Warning: tqdm not available - no progress bars. Install with: pip install tqdm")
 
+from embedding_cache import get_cached_provider
 
 from calc_integration import CalculatorFactory, create_calculator_for_testing
 from semantic_calculator import ParameterizedSemanticCalculator
@@ -229,10 +227,7 @@ class DatabaseLoader:
 
 class SemanticTestHarness:
     """
-    Main test harness for systematic memory semantic analysis.
-    Replicates the comparison flow and generates metrics identical to collect_*.py.
-    
-    Optimized with aggressive caching to avoid recomputing embeddings and reloading models.
+    Clean test harness with dependency injection support.
     """
     
     def __init__(self, config: TestConfiguration):
@@ -251,13 +246,13 @@ class SemanticTestHarness:
         self._provider_cache: Dict[str, EmbeddingProvider] = {}
         self._embedding_cache: Dict[str, List[float]] = {}  # text -> embedding
         self._calculator_cache: Dict[str, ParameterizedSemanticCalculator] = {}
-        
         self._semantic_density_cache: Dict[str, Dict[str, float]] = {}  # text -> density_result
         
-        print(f"Initialized test harness with {config.sample_size} samples, "
+        # CLEAN DEPENDENCY INJECTION SUPPORT
+        self.injected_calculator: Optional[ParameterizedSemanticCalculator] = None
+        
+        print(f"Initialized clean test harness with {config.sample_size} samples, "
               f"{config.comparisons_per_sample} comparisons each")
-        print("✓ Smart on-demand caching enabled (embeddings + semantic densities)")
-        print("✓ Only computes what's needed for sampled nodes")
     
     def run_full_experiment(self) -> Dict[str, Any]:
         """
@@ -265,7 +260,7 @@ class SemanticTestHarness:
         Returns comprehensive analysis results.
         """
         print("=" * 80)
-        print("STARTING COMPREHENSIVE SEMANTIC ANALYSIS EXPERIMENT")
+        print("STARTING CLEAN SEMANTIC ANALYSIS EXPERIMENT")
         print("=" * 80)
         
         start_time = time.time()
@@ -289,7 +284,7 @@ class SemanticTestHarness:
             }
             experiment_results['database_stats'][loader.db_name] = databases[loader.db_name]['stats']
         
-        # OPTIMIZATION: Pre-initialize all providers and calculators
+        # Initialize all providers and calculators (PERMANENT CACHE)
         print("Initializing embedding providers...")
         self._initialize_providers_and_calculators()
         
@@ -307,7 +302,7 @@ class SemanticTestHarness:
         
         # Calculate actual unique texts needed (much smaller with stable comparison sets)
         max_unique_texts_needed = total_configurations * (
-            self.config.sample_size + self.config.comparisons_per_sample  # No overlap since comparison set is stable
+            self.config.sample_size + self.config.comparisons_per_sample
         )
         
         print(f"Will run {total_configurations} configurations with {total_comparisons:,} total comparisons")
@@ -360,7 +355,7 @@ class SemanticTestHarness:
         self._save_experiment_results(experiment_results)
         
         print(f"\n" + "=" * 80)
-        print(f"EXPERIMENT COMPLETE")
+        print(f"CLEAN EXPERIMENT COMPLETE")
         print(f"Total comparisons: {len(self.results):,}")
         print(f"Duration: {experiment_results['timing']['total_duration']:.1f}s")
         print(f"Rate: {experiment_results['timing']['comparisons_per_second']:.1f} comparisons/sec")
@@ -371,7 +366,7 @@ class SemanticTestHarness:
         return experiment_results
     
     def _initialize_providers_and_calculators(self) -> None:
-        """Pre-initialize all providers and calculators to avoid repeated loading."""
+        """Pre-initialize all providers and calculators using permanent cache."""
         
         for provider_alias in progress_bar(
             self.config.embedding_providers, 
@@ -380,20 +375,47 @@ class SemanticTestHarness:
         ):
             print(f"  Loading {provider_alias}...")
             try:
-                provider = self._create_embedding_provider(provider_alias)
+                provider = get_cached_provider(provider_alias)
                 self._provider_cache[provider_alias] = provider
                 
                 # Pre-initialize calculators for this provider
                 for calc_config in self.config.calculator_configs:
                     calc_key = f"{provider_alias}_{calc_config}"
-                    calculator = self._create_calculator(calc_config, provider)
+                    
+                    if self.injected_calculator:
+                        # Use injected calculator for optimization (same instance for all configs)
+                        calculator = self.injected_calculator
+                    else:
+                        # Use standard calculator creation for normal experiments
+                        calculator = self._create_calculator_clean(calc_config, provider)
+                    
                     self._calculator_cache[calc_key] = calculator
                     
-                print(f"  ✓ {provider_alias} loaded ({provider.model_name})")
+                print(f"  ✅ {provider_alias} loaded ({provider.model_name})")
                 
             except Exception as e:
                 print(f"  ✗ Failed to load {provider_alias}: {e}")
                 raise
+    
+    def _create_calculator_clean(self, calc_config: str, embedding_provider: EmbeddingProvider) -> ParameterizedSemanticCalculator:
+        """
+        Clean calculator creation with dependency injection.
+        """
+        
+        if PARAMETERIZED_CALCULATOR_AVAILABLE:
+            try:
+                calculator = create_calculator_for_testing(calc_config, embedding_provider)
+                return calculator
+            except Exception as e:
+                print(f"  ⚠ Parameterized calculator failed for {calc_config}: {e}")
+        
+        # Fallback error
+        available_configs = self._get_available_calculator_configs()
+        raise ValueError(
+            f"Failed to create calculator '{calc_config}'. "
+            f"Available: {available_configs}. "
+            f"Parameterized system available: {PARAMETERIZED_CALCULATOR_AVAILABLE}. "
+        )
     
     def _get_cached_semantic_density(self, text: str) -> Dict[str, float]:
         """Get cached semantic density or compute if not cached."""
@@ -458,8 +480,7 @@ class SemanticTestHarness:
         # Sample nodes for testing
         sample_nodes = self._sample_nodes(nodes, self.config.sample_size)
         
-        # OPTIMIZATION: Sample comparison nodes ONCE for the entire batch (not per sample)
-        # This massively improves cache efficiency and reduces redundant processing
+        # OPTIMIZATION: Sample comparison nodes ONCE for the entire batch
         comparison_candidates = [n for n in nodes if n.id not in {s.id for s in sample_nodes}]
         comparison_nodes = self._sample_nodes(comparison_candidates, self.config.comparisons_per_sample)
         
@@ -505,7 +526,6 @@ class SemanticTestHarness:
     ) -> ComparisonResult:
         """
         Optimized node comparison using on-demand caching.
-        Only computes what we need, when we need it.
         """
         
         # Get embeddings on-demand (cached if already computed)
@@ -551,40 +571,6 @@ class SemanticTestHarness:
             return nodes.copy()
         return random.sample(nodes, sample_size)
     
-    def _create_embedding_provider(self, provider_alias: str) -> EmbeddingProvider:
-        """Create embedding provider using global cache."""
-        from embedding_cache import get_cached_provider
-        return get_cached_provider(provider_alias)
-    
-    def _create_calculator(self, calc_config: str, embedding_provider: EmbeddingProvider) -> ParameterizedSemanticCalculator:
-        """Create semantic calculator by configuration name."""
-        calc_key = f"{embedding_provider.model_name}_{calc_config}"
-        if calc_key in self._calculator_cache:
-            return self._calculator_cache[calc_key]
-        
-        calculator = None
-        
-        # Try parameterized calculator system first
-        if PARAMETERIZED_CALCULATOR_AVAILABLE:
-            try:
-                calculator = create_calculator_for_testing(calc_config, embedding_provider)
-                print(f"  ✓ Created parameterized calculator: {calc_config}")
-            except Exception as e:
-                print(f"  ⚠ Parameterized calculator failed for {calc_config}: {e}")
-                calculator = None
-        
-        # Final fallback
-        if calculator is None:
-            available_configs = self._get_available_calculator_configs()
-            raise ValueError(
-                f"Failed to create calculator '{calc_config}'. "
-                f"Available: {available_configs}. "
-                f"Parameterized system available: {PARAMETERIZED_CALCULATOR_AVAILABLE}. "
-            )
-        
-        self._calculator_cache[calc_key] = calculator
-        return calculator
-    
     def _get_available_calculator_configs(self) -> List[str]:
         """Get list of available calculator configurations."""
         available = []
@@ -598,9 +584,7 @@ class SemanticTestHarness:
         return available if available else ["none_available"]
     
     def _generate_analysis_summary(self) -> Dict[str, Any]:
-        """
-        Generate analysis summary matching collect_*.py output format.
-        """
+        """Generate analysis summary matching collect_*.py output format."""
         summary = {
             'total_comparisons': len(self.results)  # Always include this field
         }

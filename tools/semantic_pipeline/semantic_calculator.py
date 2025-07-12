@@ -152,12 +152,12 @@ class DiscriminatorConfig:
     concept_surprise_normalization: float = 3.0 # Normalization factor for conceptual surprise
     
     # Topic Surprise (replaces semantic_cohesion) 
-    topic_discontinuity_weight: float = 1.0     # Weight for topic jump detection
-    density_surprise_weight: float = 1.0        # Weight for information density surprise
-    structure_surprise_weight: float = 1.0      # Weight for narrative structure surprise
-    topic_surprise_amplification: float = 8.0   # Amplification factor (like ne_density insight)
-    topic_surprise_normalization: float = 3.0   # Base normalization factor
-    min_sentences_for_topic_surprise: int = 2   # Minimum sentences needed for topic analysis
+    topic_discontinuity_weight: float = 1.39     # Weight for topic jump detection
+    density_surprise_weight: float = 1.35        # Weight for information density surprise
+    structure_surprise_weight: float = 0.95      # Weight for narrative structure surprise
+    topic_surprise_amplification: float = 1.06   # Amplification factor (like ne_density insight)
+    topic_surprise_normalization: float = 2.0    # Base normalization factor
+    min_sentences_for_topic_surprise: int = 1    # Minimum sentences needed for topic analysis
 
 
 @dataclass
@@ -241,7 +241,6 @@ class CalculatorConfiguration:
         for name in asdict(config.component_weights).keys():
             weights_dict[name] = float(vector[idx])
             idx += 1
-        # CRITICAL FIX: Normalize weights manually before creating ComponentWeights
         total = sum(weights_dict.values())
         if total > 0:
             for key in weights_dict:
@@ -552,9 +551,9 @@ class ParameterizedSemanticCalculator:
     
     def _calculate_topic_surprise_sync(self, sentences: List[str], full_text: str) -> float:
         """Calculate topic surprise synchronously - how unpredictable is the information flow?"""
-        if len(sentences) < self.config.discriminator_config.min_sentences_for_topic_surprise:
-            return 0.5  # Default moderate surprise for single sentences
-        
+        if len(sentences) < 1:  # Only require 1 sentence, not 2+
+            return 0.4  # Return moderate surprise instead of 0.5 for single sentences
+     
         cache_key = self._cache_key(full_text, f"topic_surprise_{self.config.discriminator_config.topic_discontinuity_weight}")
         
         def compute():
@@ -586,11 +585,13 @@ class ParameterizedSemanticCalculator:
         
         # Combine surprise signals and apply soft bounds pattern like successful components
         raw_surprise = topic_discontinuity + density_surprise + structure_surprise
+        amplified_surprise = raw_surprise * config.topic_surprise_amplification
+        normalized_surprise = amplified_surprise / config.topic_surprise_normalization
         
         # Use soft bounds pattern - prevents saturation that destroyed discrimination  
         # Meaningful topic surprise: 0.2-0.6 combined = significant disruption for memory
         # Use normalization instead of amplification to avoid saturation
-        return max(0.05, min(0.95, raw_surprise / config.topic_surprise_amplification))
+        return max(0.1, min(0.9, normalized_surprise))
     
     def _process_nlp_features_sync(self, text: str) -> Dict[str, float]:
         """Process NLP features synchronously with parameterized calculations."""
@@ -1001,7 +1002,7 @@ class ParameterizedSemanticCalculator:
         Returns discontinuity score from 0 (smooth flow) to 1 (highly discontinuous).
         """
         if len(sentences) < 2:
-            return 0.0
+            return 0.3  # Moderate discontinuity for single sentences
         
         discontinuity_score = 0.0
         
@@ -1009,10 +1010,9 @@ class ParameterizedSemanticCalculator:
             curr_words = set(sentences[i].lower().split())
             next_words = set(sentences[i + 1].lower().split())
             
-            # Remove stop words (simplified)
-            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can'}
-            curr_content = curr_words - stop_words
-            next_content = next_words - stop_words
+            important_stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+            curr_content = curr_words - important_stop_words
+            next_content = next_words - important_stop_words
             
             if not curr_content or not next_content:
                 continue
@@ -1024,9 +1024,9 @@ class ParameterizedSemanticCalculator:
             if total_unique > 0:
                 overlap_ratio = overlap / total_unique
                 # Low overlap = high discontinuity
-                discontinuity_score += (1.0 - overlap_ratio)
+                discontinuity_score += (1.0 - overlap_ratio) ** 0.7 
         
-        return min(1.0, discontinuity_score / max(1, len(sentences) - 1))
+        return min(0.8, discontinuity_score / max(1, len(sentences) - 1))
     
     def _analyze_information_density_surprise(self, text: str) -> float:
         """
@@ -1076,7 +1076,7 @@ class ParameterizedSemanticCalculator:
         Returns surprise score from 0 (expected structure) to 1 (highly unexpected structure).
         """
         if len(sentences) < 2:
-            return 0.0
+            return 0.2
         
         surprise_score = 0.0
         

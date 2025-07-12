@@ -1,8 +1,8 @@
 """
 testing/calculator_integration.py
 
-Integration layer for parameterized calculators with test harness.
-Provides factory system and configuration management for neural optimization.
+Enhanced integration layer for parameterized calculators with test harness.
+Updated to support performance optimization and parameter classification.
 """
 
 import json
@@ -10,7 +10,7 @@ import time
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Union
-from dataclasses import asdict
+from dataclasses import dataclass, asdict
 
 from semantic_calculator import (
     ParameterizedSemanticCalculator, 
@@ -28,8 +28,8 @@ from embedding_providers import EmbeddingProvider
 
 class CalculatorFactory:
     """
-    Factory for creating and managing different calculator configurations.
-    Designed for easy integration with neural optimization systems.
+    Enhanced factory for creating and managing different calculator configurations.
+    Now includes parameter classification and performance optimization support.
     """
     
     # Predefined configurations for testing and optimization
@@ -155,10 +155,10 @@ class CalculatorFactory:
     @classmethod
     def get_parameter_bounds(cls) -> Dict[str, Tuple[float, float]]:
         """
-        Get parameter bounds for neural optimization.
+        Get parameter bounds for neural optimization with enhanced classification.
         
         Returns:
-            Dictionary mapping parameter names to (min, max) bounds
+            Dictionary mapping parameter names to (min, max) bounds with type metadata
         """
         return {
             # Component weights (will be normalized, so bounds are flexible)
@@ -196,7 +196,8 @@ class CalculatorFactory:
             'technical_info_weight': (0.5, 2.0),
             'social_info_weight': (0.5, 2.0),
             'factual_info_weight': (0.5, 2.0),
-            'info_density_amplification': (3.0, 8.0),  # Normalization factor for information density (typical range 2-8 per token)
+            'info_density_amplification': (1.0, 8.0),
+            'info_normalization': (1.0, 4.0),
             'cohesion_fallback_similarity': (0.3, 0.7),
             'min_sentences_for_cohesion': (1, 3),
             
@@ -207,12 +208,144 @@ class CalculatorFactory:
             'concept_surprise_normalization': (2.0, 5.0),
             
             # Topic Surprise parameters
-            'topic_discontinuity_weight': (0.5, 2.0),
-            'density_surprise_weight': (0.5, 2.0),
-            'structure_surprise_weight': (0.5, 2.0),
-            'topic_surprise_amplification': (0.5, 2.0),  # Normalization factor for topic surprise (typical range 0.1-0.8 combined)
-            'min_sentences_for_topic_surprise': (1, 3)
+            'topic_discontinuity_weight': (1.0, 1.8),
+            'density_surprise_weight': (0.9, 1.8),
+            'structure_surprise_weight': (0.6, 1.3),
+            'topic_surprise_amplification': (0.8, 1.5),
+            'topic_surprise_normalization': (1.5, 3.0),
+            'min_sentences_for_topic_surprise': (1, 2)
         }
+    
+    @classmethod
+    def get_parameter_metadata(cls) -> Dict[str, Dict[str, Any]]:
+        """
+        Get enhanced parameter metadata including type and dependency classification.
+        
+        Returns:
+            Dictionary with parameter type and dependency information
+        """
+        bounds = cls.get_parameter_bounds()
+        
+        # Classify parameters by embedding dependency
+        embedding_independent = {
+            # Amplification factors (raw signal scaling)
+            'ne_amplification_factor', 'info_density_amplification',
+            'concept_surprise_normalization', 'complexity_normalization',
+            'topic_surprise_amplification', 'topic_surprise_normalization',
+            
+            # Discriminator weights (spacy-based features)
+            'dependency_weight', 'pos_weight', 'semantic_reasoning_weight',
+            'technical_info_weight', 'social_info_weight', 'factual_info_weight',
+            'syntactic_bridge_weight', 'semantic_bridge_weight', 'entity_bridge_weight',
+            'syntactic_surprise_weight', 'semantic_role_surprise_weight', 'discourse_surprise_weight',
+            'topic_discontinuity_weight', 'density_surprise_weight', 'structure_surprise_weight',
+            
+            # Transformation parameters (curve shaping)
+            'low_power', 'high_scale', 'mid_slope', 'low_threshold', 'mid_threshold',
+            'low_scale', 'high_base', 'min_output', 'max_output',
+            
+            # Normalization factors
+            'bridge_normalization', 'info_normalization',
+            
+            # Configuration parameters
+            'abstract_boost', 'concrete_boost', 'length_weight',
+            'min_sentences_for_cohesion', 'min_sentences_for_topic_surprise',
+        }
+        
+        embedding_dependent = {
+            # Component weights (need rebalancing per provider)
+            'topic_surprise_weight', 'ne_density_weight', 'conceptual_surprise_weight',
+            'logical_complexity_weight', 'conceptual_bridging_weight', 'information_density_weight',
+            
+            # Embedding-specific thresholds (only if using embedding_similarity method)
+            'cohesion_fallback_similarity',
+        }
+        
+        # Determine integer parameters
+        integer_params = {
+            'min_sentences_for_cohesion', 'min_sentences_for_topic_surprise'
+        }
+        
+        metadata = {}
+        for param_name, bounds_tuple in bounds.items():
+            metadata[param_name] = {
+                'bounds': bounds_tuple,
+                'type': 'integer' if param_name in integer_params else 'real',
+                'embedding_dependency': (
+                    'independent' if param_name in embedding_independent else
+                    'dependent' if param_name in embedding_dependent else
+                    'unknown'
+                ),
+                'component_mapping': cls._get_component_mapping(param_name)
+            }
+        
+        return metadata
+    
+    @classmethod
+    def _get_component_mapping(cls, param_name: str) -> Optional[str]:
+        """Map parameter to its primary component."""
+        component_mapping = {
+            # Topic surprise
+            'topic_surprise_weight': 'topic_surprise',
+            'topic_discontinuity_weight': 'topic_surprise',
+            'density_surprise_weight': 'topic_surprise',
+            'structure_surprise_weight': 'topic_surprise',
+            'topic_surprise_amplification': 'topic_surprise',
+            'topic_surprise_normalization': 'topic_surprise',
+            'min_sentences_for_topic_surprise': 'topic_surprise',
+            
+            # NE density
+            'ne_density_weight': 'ne_density',
+            'ne_amplification_factor': 'ne_density',
+            
+            # Conceptual surprise
+            'conceptual_surprise_weight': 'conceptual_surprise',
+            'syntactic_surprise_weight': 'conceptual_surprise',
+            'semantic_role_surprise_weight': 'conceptual_surprise',
+            'discourse_surprise_weight': 'conceptual_surprise',
+            'concept_surprise_normalization': 'conceptual_surprise',
+            
+            # Logical complexity
+            'logical_complexity_weight': 'logical_complexity',
+            'dependency_weight': 'logical_complexity',
+            'pos_weight': 'logical_complexity',
+            'semantic_reasoning_weight': 'logical_complexity',
+            'complexity_normalization': 'logical_complexity',
+            
+            # Conceptual bridging
+            'conceptual_bridging_weight': 'conceptual_bridging',
+            'syntactic_bridge_weight': 'conceptual_bridging',
+            'semantic_bridge_weight': 'conceptual_bridging',
+            'entity_bridge_weight': 'conceptual_bridging',
+            'bridge_normalization': 'conceptual_bridging',
+            
+            # Information density
+            'information_density_weight': 'information_density',
+            'technical_info_weight': 'information_density',
+            'social_info_weight': 'information_density',
+            'factual_info_weight': 'information_density',
+            'info_density_amplification': 'information_density',
+            'info_normalization': 'information_density',
+        }
+        
+        return component_mapping.get(param_name)
+    
+    @classmethod
+    def get_focused_parameter_bounds(cls) -> Dict[str, Tuple[float, float]]:
+        """
+        Get focused parameter bounds for performance optimization.
+        Prioritizes embedding-independent parameters.
+        """
+        metadata = cls.get_parameter_metadata()
+        
+        # Focus on embedding-independent parameters + component weights
+        focused_bounds = {}
+        
+        for param_name, meta in metadata.items():
+            if meta['embedding_dependency'] in ['independent', 'dependent']:
+                focused_bounds[param_name] = meta['bounds']
+        
+        return focused_bounds
     
     @classmethod
     def get_optimization_space_size(cls) -> int:
@@ -278,8 +411,8 @@ class CalculatorFactory:
 
 class ConfigurationManager:
     """
-    Manager for handling multiple calculator configurations and experiments.
-    Designed for neural optimization workflows.
+    Enhanced manager for handling multiple calculator configurations and experiments.
+    Now includes parameter analysis and hybrid seeding support.
     """
     
     def __init__(self, experiment_dir: str = "calculator_experiments"):
@@ -349,6 +482,68 @@ class ConfigurationManager:
         # Register and return
         self.register_configuration(name, base)
         return base
+    
+    def analyze_parameter_transferability(
+        self, 
+        results1: Dict[str, Any], 
+        results2: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Analyze which parameters can be transferred between optimization runs.
+        
+        Args:
+            results1: Results from first optimization run
+            results2: Results from second optimization run
+            
+        Returns:
+            Analysis of transferable parameters
+        """
+        metadata = CalculatorFactory.get_parameter_metadata()
+        
+        # Extract best configurations from both runs
+        best1 = max(results1.get('results', []), key=lambda x: x.get('reward', 0))
+        best2 = max(results2.get('results', []), key=lambda x: x.get('reward', 0))
+        
+        if not best1 or not best2:
+            return {'error': 'Insufficient data for analysis'}
+        
+        param_names = results1.get('parameter_names', [])
+        params1 = dict(zip(param_names, best1.get('parameter_vector', [])))
+        params2 = dict(zip(param_names, best2.get('parameter_vector', [])))
+        
+        analysis = {
+            'embedding_independent_params': {},
+            'embedding_dependent_params': {},
+            'component_analysis': {},
+            'transferability_score': 0.0
+        }
+        
+        # Analyze embedding-independent parameters
+        for param_name, meta in metadata.items():
+            if param_name in params1 and param_name in params2:
+                if meta['embedding_dependency'] == 'independent':
+                    analysis['embedding_independent_params'][param_name] = {
+                        'run1_value': params1[param_name],
+                        'run2_value': params2[param_name],
+                        'difference': abs(params1[param_name] - params2[param_name]),
+                        'component': meta['component_mapping']
+                    }
+                elif meta['embedding_dependency'] == 'dependent':
+                    analysis['embedding_dependent_params'][param_name] = {
+                        'run1_value': params1[param_name],
+                        'run2_value': params2[param_name],
+                        'difference': abs(params1[param_name] - params2[param_name]),
+                        'component': meta['component_mapping']
+                    }
+        
+        # Calculate transferability score
+        if analysis['embedding_independent_params']:
+            avg_difference = np.mean([
+                data['difference'] for data in analysis['embedding_independent_params'].values()
+            ])
+            analysis['transferability_score'] = max(0.0, 1.0 - avg_difference)
+        
+        return analysis
     
     def record_experiment_result(
         self,
@@ -464,48 +659,6 @@ class ConfigurationManager:
                 comparison[config_name][metric] = value
         
         return comparison
-    
-    def generate_optimization_candidates(
-        self,
-        base_config: str = "baseline",
-        num_candidates: int = 10,
-        randomization_strength: float = 0.1
-    ) -> List[CalculatorConfiguration]:
-        """
-        Generate random configurations for optimization starting points.
-        
-        Args:
-            base_config: Base configuration to start from
-            num_candidates: Number of candidates to generate
-            randomization_strength: How much to randomize (0-1)
-            
-        Returns:
-            List of candidate configurations
-        """
-        base = CalculatorFactory.PRESET_CONFIGS[base_config]()
-        candidates = []
-        
-        for i in range(num_candidates):
-            # Get base optimization vector
-            base_vector = base.to_optimization_vector()
-            
-            # Add random noise
-            noise = np.random.normal(0, randomization_strength, size=base_vector.shape)
-            modified_vector = base_vector + noise
-            
-            # Ensure bounds (simple clipping for now)
-            modified_vector = np.clip(modified_vector, 0.01, 2.0)
-            
-            # Create configuration from modified vector
-            try:
-                candidate_config = CalculatorConfiguration.from_optimization_vector(modified_vector, base)
-                candidates.append(candidate_config)
-            except Exception as e:
-                # Skip invalid configurations
-                print(f"Warning: Failed to create candidate {i}: {e}")
-                continue
-        
-        return candidates
 
 
 # Integration with test harness
