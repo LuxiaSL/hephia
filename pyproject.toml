@@ -35,6 +35,7 @@ dependencies = [
     "aiorwlock",
     "spacy",
     "scikit-optimize",
+    "pandas",
 ]
 
 [tool.setuptools.packages.find]

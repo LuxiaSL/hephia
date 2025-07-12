@@ -69,7 +69,17 @@ tools/semantic_pipeline/deep_component_analysis.py
 tools/semantic_pipeline/surprise_analysis.py
 tools/semantic_pipeline/surprise_interpretation.py
 tools/semantic_pipeline/comprehensive_analyzer.py
+tools/semantic_pipeline/hybrid_seeding_analysis.py
+tools/semantic_pipeline/meta_optimization_analyzer.py
+tools/semantic_pipeline/quick_meta_analysis.py
+tools/semantic_pipeline/deep_statistical_analyzer.py
 tools/semantic_pipeline/outputs/
 tools/semantic_pipeline/.claude
 tools/semantic_pipeline/optimization_results/
 tools/semantic_pipeline/optimization_logs/
+tools/semantic_pipeline/auto_hybrid_seed.json
+tools/semantic_pipeline/deep_analysis_results.json
+tools/semantic_pipeline/deep_explorer.py
+tools/semantic_pipeline/detective.py
+tools/semantic_pipeline/statistical_evidence_report.json
+tools/semantic_pipeline/optimization_insights_report.json

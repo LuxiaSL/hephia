@@ -282,14 +282,14 @@ def create_production_optimizer_config(
     
     config = {
         'n_calls': n_calls,
-        'sample_size': 6 if enable_all_optimizations else 8,
-        'comparisons_per_sample': 12 if enable_all_optimizations else 15,
+        'sample_size': 8 if enable_all_optimizations else 10,
+        'comparisons_per_sample': 16 if enable_all_optimizations else 20,
         
         # Performance optimizations
         'enable_multi_fidelity': enable_all_optimizations,
         'enable_early_stopping': enable_all_optimizations,  
         'enable_parallel_evaluation': enable_all_optimizations,
-        'max_parallel_workers': 2 if enable_all_optimizations else 1,
+        'max_parallel_workers': 4 if enable_all_optimizations else 1,
     }
     
     if enable_all_optimizations:
