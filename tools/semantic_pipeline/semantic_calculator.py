@@ -41,12 +41,11 @@ except ImportError:
 @dataclass
 class ComponentWeights:
     """Component weight configuration with validation."""
-    topic_surprise: float = 0.25         # Replaces semantic_cohesion
-    ne_density: float = 0.25  
-    conceptual_surprise: float = 0.20     # Replaces abstraction_level
-    logical_complexity: float = 0.15
-    conceptual_bridging: float = 0.10
-    information_density: float = 0.05
+    ne_density: float = 0.25 
+    conceptual_surprise: float = 0.25
+    logical_complexity: float = 0.20
+    conceptual_bridging: float = 0.20
+    information_density: float = 0.10
     
     def __post_init__(self):
         """Validate weights sum to 1.0 and are non-negative."""
@@ -66,7 +65,6 @@ class ComponentWeights:
         
         factor = 1.0 / total
         return ComponentWeights(
-            topic_surprise=self.topic_surprise * factor,
             ne_density=self.ne_density * factor,
             conceptual_surprise=self.conceptual_surprise * factor,
             logical_complexity=self.logical_complexity * factor,
@@ -150,14 +148,6 @@ class DiscriminatorConfig:
     semantic_role_surprise_weight: float = 1.0  # Weight for semantic role unusualness
     discourse_surprise_weight: float = 1.0      # Weight for discourse pattern unusualness
     concept_surprise_normalization: float = 3.0 # Normalization factor for conceptual surprise
-    
-    # Topic Surprise (replaces semantic_cohesion) 
-    topic_discontinuity_weight: float = 1.39     # Weight for topic jump detection
-    density_surprise_weight: float = 1.35        # Weight for information density surprise
-    structure_surprise_weight: float = 0.95      # Weight for narrative structure surprise
-    topic_surprise_amplification: float = 1.06   # Amplification factor (like ne_density insight)
-    topic_surprise_normalization: float = 2.0    # Base normalization factor
-    min_sentences_for_topic_surprise: int = 1    # Minimum sentences needed for topic analysis
 
 
 @dataclass
@@ -167,6 +157,28 @@ class CalculatorConfiguration:
     component_weights: ComponentWeights = field(default_factory=ComponentWeights)
     transformation_params: TransformationParams = field(default_factory=TransformationParams)
     discriminator_config: DiscriminatorConfig = field(default_factory=DiscriminatorConfig)
+
+    # Define explicit parameter orders to prevent hybrid seed mismatches
+    _COMPONENT_WEIGHT_ORDER = [
+        'ne_density', 'conceptual_surprise', 'logical_complexity', 
+        'conceptual_bridging', 'information_density'
+    ]
+    
+    _TRANSFORM_PARAM_ORDER = [
+        'low_threshold', 'mid_threshold', 'low_power', 'low_scale', 
+        'mid_slope', 'high_base', 'high_scale', 'min_output', 'max_output'
+    ]
+    
+    _DISCRIMINATOR_PARAM_ORDER = [
+        'ne_amplification_factor', 'abstract_boost', 'concrete_boost', 'length_weight',
+        'dependency_weight', 'pos_weight', 'semantic_reasoning_weight', 'complexity_normalization',
+        'syntactic_bridge_weight', 'semantic_bridge_weight', 'entity_bridge_weight', 'bridge_normalization',
+        'technical_info_weight', 'social_info_weight', 'factual_info_weight', 
+        'info_density_amplification', 'info_normalization',
+        'cohesion_fallback_similarity', 'min_sentences_for_cohesion',
+        'syntactic_surprise_weight', 'semantic_role_surprise_weight', 'discourse_surprise_weight', 
+        'concept_surprise_normalization'
+    ]
     
     # Performance configuration
     enable_caching: bool = True
@@ -214,54 +226,112 @@ class CalculatorConfiguration:
                 print(f"Warning: Configuration validation failed: {e}")
     
     def to_optimization_vector(self) -> np.ndarray:
-        """Convert configuration to optimization vector for neural optimization."""
-        weights = asdict(self.component_weights)
-        transform = asdict(self.transformation_params)
-        discriminator = asdict(self.discriminator_config)
-        
-        # Flatten all numerical parameters
+        """Convert configuration to optimization vector with DETERMINISTIC ordering."""
         vector = []
-        vector.extend(weights.values())
-        vector.extend(transform.values())
-        vector.extend(discriminator.values())
+        
+        # Component weights in fixed order
+        weights_dict = asdict(self.component_weights)
+        for param_name in self._COMPONENT_WEIGHT_ORDER:
+            if param_name in weights_dict:
+                vector.append(weights_dict[param_name])
+            else:
+                raise ValueError(f"Missing component weight: {param_name}")
+        
+        # Transform params in fixed order  
+        transform_dict = asdict(self.transformation_params)
+        for param_name in self._TRANSFORM_PARAM_ORDER:
+            if param_name in transform_dict:
+                vector.append(transform_dict[param_name])
+            else:
+                raise ValueError(f"Missing transform parameter: {param_name}")
+        
+        # Discriminator params in fixed order
+        discriminator_dict = asdict(self.discriminator_config)
+        for param_name in self._DISCRIMINATOR_PARAM_ORDER:
+            if param_name in discriminator_dict:
+                vector.append(discriminator_dict[param_name])
+            else:
+                raise ValueError(f"Missing discriminator parameter: {param_name}")
         
         return np.array(vector)
     
     @classmethod
     def from_optimization_vector(cls, vector: np.ndarray, base_config: Optional['CalculatorConfiguration'] = None) -> 'CalculatorConfiguration':
-        """Create configuration from optimization vector."""
+        """Create configuration from optimization vector with ROBUST error handling."""
         if base_config is None:
             base_config = cls()
         
         config = copy.deepcopy(base_config)
+        
+        # Validate vector length
+        expected_length = len(cls._COMPONENT_WEIGHT_ORDER) + len(cls._TRANSFORM_PARAM_ORDER) + len(cls._DISCRIMINATOR_PARAM_ORDER)
+        if len(vector) != expected_length:
+            raise ValueError(f"Vector length {len(vector)} doesn't match expected {expected_length}")
+        
         idx = 0
         
-        # Reconstruct component weights (6 values)
+        # Reconstruct component weights with PRESERVED RATIOS
         weights_dict = {}
-        for name in asdict(config.component_weights).keys():
-            weights_dict[name] = float(vector[idx])
+        for param_name in cls._COMPONENT_WEIGHT_ORDER:
+            weights_dict[param_name] = float(vector[idx])
             idx += 1
+        
+        # Normalize weights ONLY if total is reasonable (not if they're extreme/broken)
         total = sum(weights_dict.values())
-        if total > 0:
+        if 0.1 <= total <= 10.0:  # Reasonable range - normalize
             for key in weights_dict:
                 weights_dict[key] = weights_dict[key] / total
+        else:  # Broken values - fall back to defaults
+            print(f"Warning: Extreme weight total {total:.3f}, falling back to defaults")
+            weights_dict = asdict(ComponentWeights())
         
-        config.component_weights = ComponentWeights(**weights_dict)  # Now weights sum to 1.0
+        try:
+            config.component_weights = ComponentWeights(**weights_dict)
+        except ValueError as e:
+            print(f"Warning: Component weight creation failed: {e}, using defaults")
+            config.component_weights = ComponentWeights()
         
-        # Reconstruct transformation params (9 values) 
+        # Reconstruct transform params with bounds checking
         transform_dict = {}
-        for name in asdict(config.transformation_params).keys():
-            transform_dict[name] = float(vector[idx])
-            idx += 1
-        config.transformation_params = TransformationParams(**transform_dict)
-        
-        # Reconstruct discriminator config (remaining values)
-        discriminator_dict = {}
-        for name in asdict(config.discriminator_config).keys():
+        for param_name in cls._TRANSFORM_PARAM_ORDER:
             if idx < len(vector):
-                discriminator_dict[name] = float(vector[idx])
+                value = float(vector[idx])
+                # Apply reasonable bounds to prevent explosion
+                if param_name == 'low_power' and value < 0.1:
+                    value = 0.1
+                elif param_name in ['low_scale', 'high_scale'] and value < 0.01:
+                    value = 0.01
+                elif param_name in ['min_output', 'max_output'] and not (0.0 <= value <= 1.0):
+                    value = max(0.0, min(1.0, value))
+                
+                transform_dict[param_name] = value
                 idx += 1
-        config.discriminator_config = DiscriminatorConfig(**discriminator_dict)
+        
+        try:
+            config.transformation_params = TransformationParams(**transform_dict)
+        except ValueError as e:
+            print(f"Warning: Transform params creation failed: {e}, using defaults")
+            config.transformation_params = TransformationParams()
+        
+        # Reconstruct discriminator config with bounds checking
+        discriminator_dict = {}
+        for param_name in cls._DISCRIMINATOR_PARAM_ORDER:
+            if idx < len(vector):
+                value = float(vector[idx])
+                # Apply reasonable bounds to critical parameters
+                if param_name == 'ne_amplification_factor' and value < 1.0:
+                    value = 1.0
+                elif param_name in ['complexity_normalization', 'info_normalization'] and value < 0.1:
+                    value = 0.1
+                
+                discriminator_dict[param_name] = value
+                idx += 1
+        
+        try:
+            config.discriminator_config = DiscriminatorConfig(**discriminator_dict)
+        except ValueError as e:
+            print(f"Warning: Discriminator config creation failed: {e}, using defaults")
+            config.discriminator_config = DiscriminatorConfig()
         
         return config
 
@@ -393,16 +463,7 @@ class ParameterizedSemanticCalculator:
     
     def _calculate_density_internal(self, text_content: str) -> Dict[str, float]:
         """Internal density calculation with parameterized components."""
-        # Split into sentences for cohesion calculation
-        sentences = [s.strip() for s in text_content.split('.') if s.strip()]
-        
-        # Calculate topic surprise (replaces semantic cohesion)
-        if self.config.enable_parallel_processing and self._executor and len(sentences) > 1:
-            topic_surprise = self._calculate_topic_surprise_parallel(sentences, text_content)
-        else:
-            topic_surprise = self._calculate_topic_surprise_sync(sentences, text_content)
-        
-        # Calculate other components (potentially in parallel)
+        # Calculate components (potentially in parallel)
         if self.config.enable_parallel_processing and self._executor:
             nlp_features = self._process_nlp_features_parallel(text_content)
         else:
@@ -410,7 +471,6 @@ class ParameterizedSemanticCalculator:
         
         # Extract component scores
         components = {
-            'topic_surprise': topic_surprise,
             'ne_density': nlp_features.get('ne_density', 0.0),
             'conceptual_surprise': nlp_features.get('conceptual_surprise', 0.5),
             'logical_complexity': nlp_features.get('logical_complexity', 0.0),
@@ -549,49 +609,6 @@ class ParameterizedSemanticCalculator:
         
         return statistics.mean(similarities) if similarities else self.config.discriminator_config.cohesion_fallback_similarity
     
-    def _calculate_topic_surprise_sync(self, sentences: List[str], full_text: str) -> float:
-        """Calculate topic surprise synchronously - how unpredictable is the information flow?"""
-        if len(sentences) < 1:  # Only require 1 sentence, not 2+
-            return 0.4  # Return moderate surprise instead of 0.5 for single sentences
-     
-        cache_key = self._cache_key(full_text, f"topic_surprise_{self.config.discriminator_config.topic_discontinuity_weight}")
-        
-        def compute():
-            return self._calculate_topic_surprise_internal(sentences, full_text)
-        
-        return self._get_cached_or_compute(self._cohesion_cache, cache_key, compute)
-    
-    def _calculate_topic_surprise_parallel(self, sentences: List[str], full_text: str) -> float:
-        """Calculate topic surprise with parallel processing where possible."""
-        # For now, topic surprise calculation is primarily sequential due to dependencies
-        # Future enhancement: parallelize sentence-level analysis
-        return self._calculate_topic_surprise_sync(sentences, full_text)
-    
-    def _calculate_topic_surprise_internal(self, sentences: List[str], full_text: str) -> float:
-        """
-        Internal topic surprise calculation with parameterized components.
-        Measures how unpredictable the information sequencing is.
-        """
-        config = self.config.discriminator_config
-        
-        # Component 1: Topic Discontinuity - sudden changes in semantic space without bridging
-        topic_discontinuity = self._analyze_topic_discontinuity(sentences) * config.topic_discontinuity_weight
-        
-        # Component 2: Information Density Surprise - unusual packing of information 
-        density_surprise = self._analyze_information_density_surprise(full_text) * config.density_surprise_weight
-        
-        # Component 3: Narrative Structure Surprise - unusual story/argument progression
-        structure_surprise = self._analyze_narrative_structure_surprise(sentences) * config.structure_surprise_weight
-        
-        # Combine surprise signals and apply soft bounds pattern like successful components
-        raw_surprise = topic_discontinuity + density_surprise + structure_surprise
-        amplified_surprise = raw_surprise * config.topic_surprise_amplification
-        normalized_surprise = amplified_surprise / config.topic_surprise_normalization
-        
-        # Use soft bounds pattern - prevents saturation that destroyed discrimination  
-        # Meaningful topic surprise: 0.2-0.6 combined = significant disruption for memory
-        # Use normalization instead of amplification to avoid saturation
-        return max(0.1, min(0.9, normalized_surprise))
     
     def _process_nlp_features_sync(self, text: str) -> Dict[str, float]:
         """Process NLP features synchronously with parameterized calculations."""
@@ -996,133 +1013,6 @@ class ParameterizedSemanticCalculator:
         
         return min(1.0, surprise_score / max(1, sentence_count * 0.3))
     
-    def _analyze_topic_discontinuity(self, sentences: List[str]) -> float:
-        """
-        Analyze topic discontinuity - sudden changes in semantic space without bridging.
-        Returns discontinuity score from 0 (smooth flow) to 1 (highly discontinuous).
-        """
-        if len(sentences) < 2:
-            return 0.3  # Moderate discontinuity for single sentences
-        
-        discontinuity_score = 0.0
-        
-        for i in range(len(sentences) - 1):
-            curr_words = set(sentences[i].lower().split())
-            next_words = set(sentences[i + 1].lower().split())
-            
-            important_stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-            curr_content = curr_words - important_stop_words
-            next_content = next_words - important_stop_words
-            
-            if not curr_content or not next_content:
-                continue
-            
-            # Calculate word overlap
-            overlap = len(curr_content.intersection(next_content))
-            total_unique = len(curr_content.union(next_content))
-            
-            if total_unique > 0:
-                overlap_ratio = overlap / total_unique
-                # Low overlap = high discontinuity
-                discontinuity_score += (1.0 - overlap_ratio) ** 0.7 
-        
-        return min(0.8, discontinuity_score / max(1, len(sentences) - 1))
-    
-    def _analyze_information_density_surprise(self, text: str) -> float:
-        """
-        Analyze information density surprise - unusual packing of information.
-        Returns surprise score from 0 (expected density) to 1 (highly unexpected density).
-        """
-        if not text:
-            return 0.0
-        
-        words = text.split()
-        if not words:
-            return 0.0
-        
-        # Calculate various density metrics
-        numbers = sum(1 for word in words if any(c.isdigit() for c in word))
-        capitals = sum(1 for word in words if word and word[0].isupper())
-        long_words = sum(1 for word in words if len(word) >= 8)
-        punctuation = sum(1 for char in text if char in '.,;:!?()[]{}')
-        
-        # Detect unusual density patterns
-        surprise_score = 0.0
-        
-        # Very high number density (more than 20% numbers)
-        number_density = numbers / len(words)
-        if number_density > 0.2:
-            surprise_score += min(0.4, number_density)
-        
-        # Very high capitalization (more than 30% capitals, excluding start of sentences)
-        capital_density = capitals / len(words)
-        if capital_density > 0.3:
-            surprise_score += min(0.3, capital_density - 0.3)
-        
-        # Unusual punctuation density
-        punct_density = punctuation / len(text)
-        if punct_density > 0.1:  # More than 10% punctuation
-            surprise_score += min(0.3, punct_density)
-        
-        # Very sparse information (mostly short common words)
-        if long_words == 0 and len(words) > 5:
-            surprise_score += 0.2
-        
-        return min(1.0, surprise_score)
-    
-    def _analyze_narrative_structure_surprise(self, sentences: List[str]) -> float:
-        """
-        Analyze narrative structure surprise - unusual story/argument progression.
-        Returns surprise score from 0 (expected structure) to 1 (highly unexpected structure).
-        """
-        if len(sentences) < 2:
-            return 0.2
-        
-        surprise_score = 0.0
-        
-        # Detect temporal inconsistencies (simplified)
-        time_markers = {
-            'past': ['yesterday', 'before', 'earlier', 'previously', 'then', 'after'],
-            'present': ['now', 'currently', 'today', 'this'],
-            'future': ['tomorrow', 'later', 'next', 'will', 'going to', 'plan to']
-        }
-        
-        sentence_times = []
-        for sentence in sentences:
-            sentence_lower = sentence.lower()
-            time_score = {'past': 0, 'present': 0, 'future': 0}
-            
-            for time_type, markers in time_markers.items():
-                for marker in markers:
-                    if marker in sentence_lower:
-                        time_score[time_type] += 1
-            
-            # Determine dominant time frame
-            if sum(time_score.values()) > 0:
-                dominant_time = max(time_score.items(), key=lambda x: x[1])[0]
-                sentence_times.append(dominant_time)
-            else:
-                sentence_times.append('neutral')
-        
-        # Detect non-linear time progression
-        if len(sentence_times) >= 3:
-            for i in range(len(sentence_times) - 2):
-                # Look for past->future->past or future->past->future patterns
-                if sentence_times[i] == 'past' and sentence_times[i+1] == 'future' and sentence_times[i+2] == 'past':
-                    surprise_score += 0.3
-                elif sentence_times[i] == 'future' and sentence_times[i+1] == 'past' and sentence_times[i+2] == 'future':
-                    surprise_score += 0.3
-        
-        # Detect abrupt topic changes (simplified by sentence length variation)
-        lengths = [len(sentence.split()) for sentence in sentences]
-        if len(lengths) >= 3:
-            length_variance = statistics.stdev(lengths) if len(lengths) > 1 else 0
-            avg_length = statistics.mean(lengths)
-            if avg_length > 0 and length_variance / avg_length > 1.0:  # High variation in sentence length
-                surprise_score += 0.2
-        
-        return min(1.0, surprise_score)
-    
     # Heuristic methods for fallback
     def _heuristic_ne_density(self, words: List[str]) -> float:
         """Heuristic NE density calculation.""" 
@@ -1240,7 +1130,6 @@ class ParameterizedSemanticCalculator:
         """Return zero density result structure."""
         return {
             'components': {
-                'topic_surprise': 0.0,
                 'ne_density': 0.0,
                 'conceptual_surprise': 0.0,
                 'logical_complexity': 0.0,

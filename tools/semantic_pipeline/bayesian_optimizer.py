@@ -118,13 +118,14 @@ class CleanBayesianSemanticOptimizer:
     Includes multi-fidelity evaluation, hybrid seeding, and focused parameter optimization.
     """
     
-    def __init__(self, config: OptimizationConfig, performance_evaluator: Optional[Any] = None):
+    def __init__(self, config: OptimizationConfig, performance_evaluator: Optional[Any] = None, use_focused_bounds: bool = True):
         """
         Initialize clean Bayesian optimizer.
         
         Args:
             config: Optimization configuration
             performance_evaluator: Optional PerformanceOptimizedEvaluator for enhanced features
+            use_focused_bounds: Whether to use focused parameter bounds based on analysis
         """
         if not SKOPT_AVAILABLE:
             raise ImportError("scikit-optimize required. Install with: pip install scikit-optimize")
@@ -133,15 +134,27 @@ class CleanBayesianSemanticOptimizer:
         self.performance_evaluator = performance_evaluator
         self.reward_function = DiscriminationRewardFunction()
         
-        # Set up parameter space
+        # Set up parameter space with FOCUSED BOUNDS option
         if config.parameter_bounds:
             self.parameter_bounds = config.parameter_bounds
+        elif use_focused_bounds:
+            self.parameter_bounds = CalculatorFactory.get_focused_parameter_bounds()
+            if self.config.verbose:
+                print("🎯 Using focused parameter bounds based on statistical analysis")
         else:
             self.parameter_bounds = CalculatorFactory.get_parameter_bounds()
+            if self.config.verbose:
+                print("📊 Using standard parameter bounds")
             
         self.parameter_names = list(self.parameter_bounds.keys())
         self.search_space = self._create_search_space()
         
+        expected_param_count = 37
+        if len(self.parameter_names) != expected_param_count:
+            if self.config.verbose:
+                print(f"⚠️  Parameter count mismatch: got {len(self.parameter_names)}, expected {expected_param_count}")
+                print(f"    This might indicate missing or extra parameters in bounds")
+
         # Experiment tracking
         self.results: List[OptimizationResult] = []
         self.best_result: Optional[OptimizationResult] = None
@@ -297,6 +310,99 @@ class CleanBayesianSemanticOptimizer:
         
         return evaluate_parameter_vector
     
+    def _validate_and_load_hybrid_seed(self, hybrid_seed_config: Dict[str, Any]) -> Optional[np.ndarray]:
+        """
+        Robust hybrid seed validation and loading with comprehensive error handling.
+        
+        Returns:
+            Valid parameter vector or None if hybrid seed is invalid
+        """
+        if not hybrid_seed_config:
+            return None
+        
+        try:
+            # Check for required fields
+            if 'parameter_vector' not in hybrid_seed_config:
+                if self.config.verbose:
+                    print("⚠️  Hybrid seed missing 'parameter_vector', skipping")
+                return None
+            
+            raw_vector = hybrid_seed_config['parameter_vector']
+            
+            # Validate it's a list/array of numbers
+            if not isinstance(raw_vector, (list, np.ndarray)):
+                if self.config.verbose:
+                    print("⚠️  Hybrid seed parameter_vector is not a list/array, skipping")
+                return None
+            
+            # Convert to numpy array
+            try:
+                parameter_vector = np.array(raw_vector, dtype=float)
+            except (ValueError, TypeError):
+                if self.config.verbose:
+                    print("⚠️  Hybrid seed parameter_vector contains non-numeric values, skipping")
+                return None
+            
+            # Check vector length matches current parameter space
+            expected_length = len(self.parameter_names)
+            if len(parameter_vector) != expected_length:
+                if self.config.verbose:
+                    print(f"⚠️  Hybrid seed length {len(parameter_vector)} doesn't match current parameter space {expected_length}")
+                    print(f"    This usually means the component structure changed. Skipping hybrid seed.")
+                return None
+            
+            # Validate parameter bounds (but allow small violations)
+            bounds_violations = []
+            for i, (param_name, param_value) in enumerate(zip(self.parameter_names, parameter_vector)):
+                if param_name in self.parameter_bounds:
+                    min_val, max_val = self.parameter_bounds[param_name]
+                    violation_threshold = (max_val - min_val) * 0.1  # Allow 10% violation
+                    
+                    if param_value < (min_val - violation_threshold) or param_value > (max_val + violation_threshold):
+                        bounds_violations.append(f"{param_name}: {param_value:.3f} outside [{min_val:.3f}, {max_val:.3f}]")
+            
+            if bounds_violations and len(bounds_violations) > len(parameter_vector) * 0.3:  # If >30% parameters are badly out of bounds
+                if self.config.verbose:
+                    print(f"⚠️  Too many parameter bound violations ({len(bounds_violations)}/{len(parameter_vector)})")
+                    print(f"    This suggests incompatible parameter space. Skipping hybrid seed.")
+                return None
+            elif bounds_violations and self.config.verbose:
+                print(f"📋 Hybrid seed has {len(bounds_violations)} parameter bound violations (within tolerance)")
+                for violation in bounds_violations[:3]:  # Show first 3
+                    print(f"    {violation}")
+                if len(bounds_violations) > 3:
+                    print(f"    ... and {len(bounds_violations) - 3} more")
+            
+            # Test if we can actually create a calculator from this vector
+            try:
+                test_calculator = CalculatorFactory.create_from_vector(
+                    parameter_vector,
+                    embedding_provider=None,
+                    base_config_name="baseline"
+                )
+                if self.config.verbose:
+                    print("✅ Hybrid seed validation successful")
+                    
+                    # Show expected CVs if available
+                    if 'expected_cvs' in hybrid_seed_config:
+                        expected_cvs = hybrid_seed_config['expected_cvs']
+                        print(f"🎯 Expected performance:")
+                        for comp, cv in expected_cvs.items():
+                            if comp != 'topic_surprise':  # Skip the removed component
+                                print(f"     {comp}: CV≥{cv:.3f}")
+                
+                return parameter_vector
+                
+            except Exception as e:
+                if self.config.verbose:
+                    print(f"⚠️  Hybrid seed fails calculator creation: {e}")
+                return None
+        
+        except Exception as e:
+            if self.config.verbose:
+                print(f"⚠️  Hybrid seed validation failed: {e}")
+            return None
+    
     def optimize(self) -> OptimizationResult:
         """
         Run Bayesian optimization with clean architecture and performance features.
@@ -332,7 +438,7 @@ class CleanBayesianSemanticOptimizer:
             return self.best_result
     
     def _optimize_standard(self) -> OptimizationResult:
-        """Standard optimization without performance features."""
+        """Standard optimization with SAFE hybrid seed handling."""
         self._setup_signal_handlers()
         
         # Create objective function with named parameters
@@ -343,30 +449,50 @@ class CleanBayesianSemanticOptimizer:
             base_evaluator = self._create_base_evaluator()
             return -base_evaluator(parameter_vector)  # Minimize negative reward
         
-        # Prepare initial points from hybrid seed
+        # SAFE hybrid seed loading
         initial_points = []
-        if self.config.hybrid_seed_config and 'parameter_vector' in self.config.hybrid_seed_config:
-            hybrid_vector = self.config.hybrid_seed_config['parameter_vector']
-            if len(hybrid_vector) == len(self.parameter_names):
-                initial_points = [hybrid_vector]
+        if self.config.hybrid_seed_config:
+            hybrid_vector = self._validate_and_load_hybrid_seed(self.config.hybrid_seed_config)
+            if hybrid_vector is not None:
+                initial_points = [hybrid_vector.tolist()]  # Convert to list for scikit-optimize
                 if self.config.verbose:
-                    print(f"🎯 Starting optimization with hybrid seed")
-                    expected_cvs = self.config.hybrid_seed_config.get('expected_cvs', {})
-                    for comp, cv in expected_cvs.items():
-                        print(f"     Expected {comp}: CV≥{cv:.3f}")
+                    print(f"🎯 Starting optimization with validated hybrid seed")
+            else:
+                if self.config.verbose:
+                    print(f"🔄 Hybrid seed invalid, starting with random initialization")
         
         # Run Bayesian optimization
-        optimization_result = gp_minimize(
-            func=objective,
-            dimensions=self.search_space,
-            n_calls=self.config.n_calls,
-            n_initial_points=self.config.n_initial_points,
-            x0=initial_points if initial_points else None,  # Hybrid seed as initial point
-            acq_func=self.config.acquisition_function,
-            n_jobs=self.config.n_jobs,
-            random_state=self.config.random_state,
-            verbose=False  # We handle our own progress output
-        )
+        try:
+            optimization_result = gp_minimize(
+                func=objective,
+                dimensions=self.search_space,
+                n_calls=self.config.n_calls,
+                n_initial_points=self.config.n_initial_points,
+                x0=initial_points if initial_points else None,  # Safe hybrid seed usage
+                acq_func=self.config.acquisition_function,
+                n_jobs=self.config.n_jobs,
+                random_state=self.config.random_state,
+                verbose=False  # We handle our own progress output
+            )
+        except Exception as e:
+            if self.config.verbose:
+                print(f"❌ Optimization failed: {e}")
+                if initial_points:
+                    print(f"🔄 Retrying without hybrid seed...")
+                    # Retry without hybrid seed
+                    optimization_result = gp_minimize(
+                        func=objective,
+                        dimensions=self.search_space,
+                        n_calls=self.config.n_calls,
+                        n_initial_points=self.config.n_initial_points,
+                        x0=None,  # No hybrid seed
+                        acq_func=self.config.acquisition_function,
+                        n_jobs=self.config.n_jobs,
+                        random_state=self.config.random_state,
+                        verbose=False
+                    )
+                else:
+                    raise
         
         # Final save
         self._save_progress()
@@ -552,8 +678,6 @@ class CleanBayesianSemanticOptimizer:
         if hasattr(signal, 'SIGTERM'):  # Handle kill signals too
             signal.signal(signal.SIGTERM, signal_handler)
 
-
-# Convenience functions for clean usage
 def run_clean_optimization_experiment(
     experiment_name: str = "clean_neural_optimization",
     n_calls: int = 50,
@@ -576,7 +700,7 @@ def run_clean_optimization_experiment(
         comparisons_per_sample: Comparisons per sample
         enable_performance_features: Enable multi-fidelity and performance optimizations
         hybrid_seed_path: Path to hybrid seed configuration
-        focus_parameters: Use focused parameter space
+        focus_parameters: Use focused parameter bounds (NOW ACTUALLY USED!)
         verbose: Enable verbose logging
         
     Returns:
@@ -589,12 +713,14 @@ def run_clean_optimization_experiment(
         with open(hybrid_seed_path, 'r') as f:
             hybrid_seed_config = json.load(f)
     
-    # Get parameter bounds (focused or full)
     if focus_parameters:
-        from performance_optimizer import get_focused_parameter_bounds
-        parameter_bounds = get_focused_parameter_bounds()
+        parameter_bounds = CalculatorFactory.get_focused_parameter_bounds()
+        if verbose:
+            print("🎯 Using focused parameter bounds for high-impact parameters")
     else:
-        parameter_bounds = None  # Use default full parameter space
+        parameter_bounds = CalculatorFactory.get_parameter_bounds()
+        if verbose:
+            print("📊 Using standard parameter bounds")
     
     config = OptimizationConfig(
         experiment_name=experiment_name,
@@ -602,13 +728,12 @@ def run_clean_optimization_experiment(
         database_paths=database_paths,
         sample_size=sample_size,
         comparisons_per_sample=comparisons_per_sample,
-        n_initial_points=min(10, n_calls // 5),  # 20% random exploration
+        n_initial_points=min(10, n_calls // 5),
         parameter_bounds=parameter_bounds,
         hybrid_seed_config=hybrid_seed_config,
         verbose=verbose
     )
     
-    # Create performance evaluator if enabled
     performance_evaluator = None
     if enable_performance_features:
         from performance_optimizer import PerformanceOptimizedEvaluator, OptimizedConfig
@@ -622,9 +747,8 @@ def run_clean_optimization_experiment(
         
         performance_evaluator = PerformanceOptimizedEvaluator(perf_config, None)
     
-    optimizer = CleanBayesianSemanticOptimizer(config, performance_evaluator)
+    optimizer = CleanBayesianSemanticOptimizer(config, performance_evaluator, use_focused_bounds=focus_parameters)
     return optimizer.optimize()
-
 
 def quick_clean_optimization_test():
     """Run a quick optimization test with clean architecture."""

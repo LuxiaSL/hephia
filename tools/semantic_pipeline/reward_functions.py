@@ -286,8 +286,7 @@ class DiscriminationRewardFunction:
     def _extract_component_cvs_from_result(self, experiment_result: Dict[str, Any]) -> Dict[str, float]:
         """
         Extract component CV values from experiment result structure.
-        
-        Handles multiple possible result formats from test harness.
+        Updated for 5-component system - topic_surprise removed.
         
         Args:
             experiment_result: Result dictionary from semantic test harness
@@ -301,8 +300,15 @@ class DiscriminationRewardFunction:
         analysis_summary = experiment_result.get('analysis_summary', {})
         component_analysis = analysis_summary.get('component_discrimination_analysis', {})
         
+        # Expected 5 components (topic_surprise removed)
+        expected_components = {
+            'ne_density', 'conceptual_surprise', 'logical_complexity', 
+            'conceptual_bridging', 'information_density'
+        }
+        
         for comp_name, metrics in component_analysis.items():
-            if isinstance(metrics, dict) and 'coefficient_of_variation' in metrics:
+            # Only process expected components (filter out topic_surprise if it somehow appears)
+            if comp_name in expected_components and isinstance(metrics, dict) and 'coefficient_of_variation' in metrics:
                 component_cvs[comp_name] = metrics['coefficient_of_variation']
         
         # Fallback: try direct CV extraction from other locations
@@ -314,8 +320,16 @@ class DiscriminationRewardFunction:
                 if 'coefficient_of_variation' in dist:
                     component_cvs['semantic_density'] = dist['coefficient_of_variation']
         
+        # Validation: warn if we get unexpected components
+        unexpected_components = set(component_cvs.keys()) - expected_components
+        if unexpected_components:
+            print(f"⚠️  Unexpected components in CV extraction: {unexpected_components}")
+            # Remove unexpected components
+            for comp in unexpected_components:
+                if comp != 'semantic_density':  # Keep semantic_density as fallback
+                    del component_cvs[comp]
+        
         return component_cvs
-
 
 def create_evaluation_pipeline(calculator_factory_bounds: Dict[str, Tuple[float, float]], 
                               test_harness_config: Dict[str, Any]) -> Callable:
@@ -379,52 +393,49 @@ def create_evaluation_pipeline(calculator_factory_bounds: Dict[str, Tuple[float,
 
 def validate_reward_function_with_known_configs():
     """
-    Validation function to test reward function with known good/bad configurations.
-    
-    Tests the reward function behavior across different CV ranges and ensures
-    it correctly ranks configurations according to design philosophy.
+    Validation function updated for 5-component system.
     """
     reward_func = DiscriminationRewardFunction()
     
-    # Test cases with expected behavior
+    # Test cases with expected behavior (topic_surprise removed)
     test_cases = [
-        # Perfect configuration (all in sweet spot)
+        # Perfect configuration (all in sweet spot) - 5 components
         {
             'name': 'perfect_sweet_spot',
-            'cvs': {'ne_density': 0.6, 'conceptual_bridging': 0.5, 'conceptual_surprise': 0.6, 
-                   'logical_complexity': 0.5, 'topic_surprise': 0.6, 'information_density': 0.5},
+            'cvs': {'ne_density': 0.6, 'conceptual_surprise': 0.5, 'logical_complexity': 0.5, 
+                   'conceptual_bridging': 0.6, 'information_density': 0.5},
             'expected_rank': 1  # Should be highest
         },
         
-        # Good configuration (most in sweet spot)
+        # Good configuration (most in sweet spot) - 5 components
         {
-            'name': 'good_configuration',
-            'cvs': {'ne_density': 0.7, 'conceptual_bridging': 0.6, 'conceptual_surprise': 0.4, 
-                   'logical_complexity': 0.5, 'topic_surprise': 0.3, 'information_density': 0.4},
+            'name': 'good_configuration', 
+            'cvs': {'ne_density': 0.7, 'conceptual_surprise': 0.6, 'logical_complexity': 0.5, 
+                   'conceptual_bridging': 0.3, 'information_density': 0.4},
             'expected_rank': 2
         },
         
-        # Current real configuration (from analysis)
+        # Current real configuration (from analysis) - 5 components
         {
             'name': 'current_real',
-            'cvs': {'ne_density': 0.760, 'conceptual_bridging': 0.561, 'conceptual_surprise': 0.464, 
-                   'logical_complexity': 0.386, 'topic_surprise': 0.253, 'information_density': 0.214},
+            'cvs': {'ne_density': 0.866, 'conceptual_surprise': 0.592, 'logical_complexity': 0.475, 
+                   'conceptual_bridging': 0.608, 'information_density': 0.293},
             'expected_rank': 3
         },
         
-        # Poor configuration (some extremes)
+        # Poor configuration (some extremes) - 5 components
         {
             'name': 'poor_extremes',
-            'cvs': {'ne_density': 1.2, 'conceptual_bridging': 0.1, 'conceptual_surprise': 0.9, 
-                   'logical_complexity': 0.05, 'topic_surprise': 0.8, 'information_density': 1.5},
+            'cvs': {'ne_density': 1.2, 'conceptual_surprise': 0.1, 'logical_complexity': 0.9, 
+                   'conceptual_bridging': 0.05, 'information_density': 1.5},
             'expected_rank': 4
         },
         
-        # Broken configuration (all clustering)
+        # Broken configuration (all clustering) - 5 components
         {
             'name': 'broken_clustering',
-            'cvs': {'ne_density': 0.05, 'conceptual_bridging': 0.02, 'conceptual_surprise': 0.01, 
-                   'logical_complexity': 0.03, 'topic_surprise': 0.02, 'information_density': 0.01},
+            'cvs': {'ne_density': 0.05, 'conceptual_surprise': 0.02, 'logical_complexity': 0.03, 
+                   'conceptual_bridging': 0.02, 'information_density': 0.01},
             'expected_rank': 5  # Should be lowest
         }
     ]
@@ -435,9 +446,9 @@ def validate_reward_function_with_known_configs():
         discrimination_score, cv_penalties = reward_func.calculate_discrimination_reward(test_case['cvs'])
         balance_score, balance_variance, coverage_ratio = reward_func.calculate_balance_reward(test_case['cvs'])
         
-        # Dummy parameter vector for stability testing
-        dummy_params = np.random.random(10) * 0.5 + 0.25  # Middle range values
-        dummy_bounds = {f'param_{i}': (0.0, 1.0) for i in range(10)}
+        # Dummy parameter vector for stability testing (37 parameters now)
+        dummy_params = np.random.random(37) * 0.5 + 0.25  # Middle range values
+        dummy_bounds = {f'param_{i}': (0.0, 1.0) for i in range(37)}
         stability_score, _ = reward_func.calculate_stability_penalty(dummy_params, dummy_bounds)
         
         composite = (
@@ -459,7 +470,7 @@ def validate_reward_function_with_known_configs():
     # Sort by composite reward (highest first)
     results.sort(key=lambda x: x['composite_reward'], reverse=True)
     
-    print("🧪 REWARD FUNCTION VALIDATION")
+    print("🧪 REWARD FUNCTION VALIDATION (5 Components)")
     print("=" * 60)
     print(f"{'Rank':<6} {'Configuration':<20} {'Composite':<12} {'Discrimination':<14} {'Balance':<10}")
     print("-" * 75)
@@ -475,6 +486,7 @@ def validate_reward_function_with_known_configs():
     )
     
     print(f"\n✅ Ranking validation: {'PASSED' if ranking_correct else 'FAILED'}")
+    print(f"📊 Testing with {len(test_cases[0]['cvs'])} components (topic_surprise removed)")
     
     return results
 

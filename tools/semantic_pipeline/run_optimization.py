@@ -236,14 +236,7 @@ Examples:
   python run_optimization.py optimize --evaluations 50 --focus-parameters --max-workers 3
 
   # Optimization with hybrid seed
-  python run_optimization.py optimize --hybrid-seed hybrid_config.json --evaluations 75
-
-  # Performance analysis preview
-  python run_optimization.py analyze-performance --evaluations 100
-
-  # Analyze existing results
-  python run_optimization.py analyze optimization_results/clean_1234567890/
-        """
+  python run_optimization.py optimize --hybrid-seed hybrid_config.json --evaluations 75"""
     )
     
     subparsers = parser.add_subparsers(dest='command', help='Commands')
@@ -259,14 +252,6 @@ Examples:
     opt_parser.add_argument('--no-focus-parameters', action='store_true', help='Use full parameter space')
     opt_parser.add_argument('--max-workers', type=int, default=2, help='Maximum parallel workers')
     opt_parser.add_argument('--quiet', action='store_true', help='Quiet mode')
-    
-    # Performance analysis command
-    perf_parser = subparsers.add_parser('analyze-performance', help='Analyze performance improvements')
-    perf_parser.add_argument('--evaluations', type=int, default=100, help='Number of evaluations for analysis')
-    
-    # Results analysis command
-    analysis_parser = subparsers.add_parser('analyze', help='Analyze optimization results')
-    analysis_parser.add_argument('results_dir', help='Results directory to analyze')
     
     args = parser.parse_args()
     
@@ -289,22 +274,7 @@ Examples:
         else:
             print(f"\n❌ Optimization failed")
             sys.exit(1)
-    
-    elif args.command == 'analyze-performance':
-        print("🔥 PERFORMANCE OPTIMIZATION ANALYSIS")
-        print("=" * 50)
-        estimate_optimization_speedup(args.evaluations, True)
         
-        from performance_optimizer import get_focused_parameter_bounds
-        focused_bounds = get_focused_parameter_bounds()
-        
-    elif args.command == 'analyze':
-        # Import analysis tools
-        try:
-            from comprehensive_analyzer import analyze_optimization_results
-            analyze_optimization_results(args.results_dir)
-        except ImportError:
-            print("❌ Analysis tools not available. Create comprehensive_analyzer.py or use existing analysis scripts.")
     
     else:
         parser.print_help()

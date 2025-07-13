@@ -604,7 +604,7 @@ class SemanticTestHarness:
         summary.update({
             'embedding_similarity_analysis': self._analyze_embedding_similarities(),
             'semantic_density_analysis': self._analyze_semantic_densities(),
-            'component_discrimination_analysis': self._analyze_component_discrimination(),
+            'component_discrimination_analysis': self._analyze_component_discrimination([asdict(r) for r in self.results]),
             'provider_comparison': self._compare_providers(),
             'database_comparison': self._compare_databases()
         })
@@ -653,29 +653,56 @@ class SemanticTestHarness:
             }
         }
     
-    def _analyze_component_discrimination(self) -> Dict[str, Any]:
-        """Analyze discrimination power of each component."""
+    def _analyze_component_discrimination(self, comparison_results: List[Dict]) -> Dict[str, Any]:
+        """
+        Analyze discrimination patterns for each semantic component.
+        Updated for 5-component system (topic_surprise removed).
+        """
+        # Expected 5 components
+        expected_components = [
+            'ne_density', 'conceptual_surprise', 'logical_complexity', 
+            'conceptual_bridging', 'information_density'
+        ]
+        
         component_analysis = {}
         
-        # Analyze each component across all results
-        component_names = ['topic_surprise', 'ne_density', 'conceptual_surprise', 
-                          'logical_complexity', 'conceptual_bridging', 'information_density']
-        
-        for comp_name in component_names:
-            values = []
-            for result in self.results:
-                if comp_name in result.sample_components:
-                    values.append(result.sample_components[comp_name])
+        for component_name in expected_components:
+            component_values = []
             
-            if values:
-                mean_val = statistics.mean(values)
-                std_val = statistics.stdev(values) if len(values) > 1 else 0.0
-                component_analysis[comp_name] = {
+            # Extract component values from all comparisons
+            for result in comparison_results:
+                sample_components = result.get('sample_components', {})
+                comparison_components = result.get('comparison_components', {})
+                
+                if component_name in sample_components:
+                    component_values.append(sample_components[component_name])
+                if component_name in comparison_components:
+                    component_values.append(comparison_components[component_name])
+            
+            if component_values:
+                # Calculate CV and other statistics
+                mean_val = statistics.mean(component_values)
+                std_val = statistics.stdev(component_values) if len(component_values) > 1 else 0.0
+                cv = std_val / mean_val if mean_val > 0 else 0.0
+                
+                component_analysis[component_name] = {
                     'mean': mean_val,
-                    'std_dev': std_val,
-                    'range': max(values) - min(values),
-                    'coefficient_of_variation': std_val / mean_val if mean_val != 0 else 0.0,
-                    'sample_count': len(values)
+                    'std': std_val,
+                    'coefficient_of_variation': cv,
+                    'min': min(component_values),
+                    'max': max(component_values),
+                    'count': len(component_values)
+                }
+            else:
+                # Missing component data
+                component_analysis[component_name] = {
+                    'mean': 0.0,
+                    'std': 0.0,
+                    'coefficient_of_variation': 0.0,
+                    'min': 0.0,
+                    'max': 0.0,
+                    'count': 0,
+                    'error': 'No data found'
                 }
         
         return component_analysis

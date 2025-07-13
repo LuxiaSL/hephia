@@ -41,33 +41,83 @@ class CalculatorFactory:
         # Experimental weight distributions
         "density_focused": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                topic_surprise=0.15, ne_density=0.35, conceptual_surprise=0.25,
-                logical_complexity=0.10, conceptual_bridging=0.10, information_density=0.05
+                ne_density=0.50,
+                conceptual_surprise=0.25,
+                logical_complexity=0.10,
+                conceptual_bridging=0.10,
+                information_density=0.05
             )
         ),
         
         "cohesion_focused": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                topic_surprise=0.40, ne_density=0.20, conceptual_surprise=0.15,
-                logical_complexity=0.10, conceptual_bridging=0.10, information_density=0.05
+                ne_density=0.30,
+                conceptual_surprise=0.25,
+                logical_complexity=0.15,
+                conceptual_bridging=0.25,
+                information_density=0.05
             )
         ),
         
         "balanced": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                topic_surprise=0.20, ne_density=0.20, conceptual_surprise=0.20,
-                logical_complexity=0.20, conceptual_bridging=0.15, information_density=0.05
+                ne_density=0.24,
+                conceptual_surprise=0.24,
+                logical_complexity=0.24,
+                conceptual_bridging=0.19,
+                information_density=0.09
             )
         ),
         
         "complexity_focused": lambda: CalculatorConfiguration(
             component_weights=ComponentWeights(
-                topic_surprise=0.15, ne_density=0.15, conceptual_surprise=0.15,
-                logical_complexity=0.35, conceptual_bridging=0.15, information_density=0.05
+                ne_density=0.18,
+                conceptual_surprise=0.18,
+                logical_complexity=0.38,
+                conceptual_bridging=0.18,
+                information_density=0.08
             )
         ),
         
-        # Transformation experiments
+        "information_focused": lambda: CalculatorConfiguration(
+            component_weights=ComponentWeights(
+                ne_density=0.25,
+                conceptual_surprise=0.20,
+                logical_complexity=0.15,
+                conceptual_bridging=0.15,
+                information_density=0.25
+            ),
+            discriminator_config=DiscriminatorConfig(
+                info_normalization=2.594,
+                factual_info_weight=1.678,
+                technical_info_weight=0.942,
+                info_density_amplification=3.909,
+            )
+        ),
+        
+        "analysis_optimized": lambda: CalculatorConfiguration(
+            component_weights=ComponentWeights(
+                ne_density=0.30,
+                conceptual_surprise=0.25,
+                logical_complexity=0.20,
+                conceptual_bridging=0.15,
+                information_density=0.10
+            ),
+            discriminator_config=DiscriminatorConfig(
+                ne_amplification_factor=17.792,
+                concept_surprise_normalization=3.526,
+                info_normalization=2.594,
+                factual_info_weight=1.678,
+                semantic_reasoning_weight=0.991,
+                bridge_normalization=0.488,
+                technical_info_weight=0.942,
+            ),
+            transformation_params=TransformationParams(
+                max_output=0.927,
+                high_scale=15.390,
+            )
+        ),
+        
         "gentle_transform": lambda: CalculatorConfiguration(
             transformation_params=TransformationParams(
                 low_power=2.0, mid_slope=3.0, high_scale=8.0  # Gentler curves
@@ -80,7 +130,6 @@ class CalculatorFactory:
             )
         ),
         
-        # Performance variants
         "fast_heuristic": lambda: CalculatorConfiguration(
             cohesion_method="word_overlap",
             ne_detection_method="heuristic", 
@@ -131,26 +180,39 @@ class CalculatorFactory:
         return ParameterizedSemanticCalculator(config, embedding_provider)
     
     @classmethod
-    def create_from_vector(
-        cls,
-        optimization_vector: np.ndarray,
-        embedding_provider: Optional[EmbeddingProvider] = None,
-        base_config_name: str = "baseline"
-    ) -> ParameterizedSemanticCalculator:
+    def create_from_vector(cls, parameter_vector: np.ndarray, 
+                          embedding_provider: Optional[EmbeddingProvider] = None,
+                          base_config_name: str = "baseline") -> 'ParameterizedSemanticCalculator':
         """
-        Create calculator from optimization vector for neural optimization.
-        
-        Args:
-            optimization_vector: Parameter vector from neural optimizer
-            embedding_provider: Optional embedding provider
-            base_config_name: Base configuration for non-optimized parameters
+        Create calculator from parameter vector with ROBUST error handling.
+        Updated for 37-parameter system
+        """
+        try:
+            # Validate parameter vector length
+            expected_length = 37  # 5 + 9 + 23 = 37 parameters
+            if len(parameter_vector) != expected_length:
+                raise ValueError(f"Parameter vector length {len(parameter_vector)} != expected {expected_length}")
             
-        Returns:
-            Calculator configured with optimization vector
-        """
-        base_config = cls.PRESET_CONFIGS[base_config_name]()
-        config = CalculatorConfiguration.from_optimization_vector(optimization_vector, base_config)
-        return ParameterizedSemanticCalculator(config, embedding_provider)
+            # Get base configuration
+            if base_config_name in cls.PRESET_CONFIGS:
+                base_config = cls.PRESET_CONFIGS[base_config_name]()
+            else:
+                base_config = CalculatorConfiguration()
+            
+            # Create configuration from vector using DETERMINISTIC ordering
+            config = CalculatorConfiguration.from_optimization_vector(parameter_vector, base_config)
+            
+            # Create calculator
+            calculator = ParameterizedSemanticCalculator(config, embedding_provider)
+            
+            return calculator
+            
+        except Exception as e:
+            print(f"❌ Failed to create calculator from vector: {e}")
+            print(f"   Vector length: {len(parameter_vector)}, expected: {expected_length}")
+            # Fall back to baseline configuration
+            base_config = CalculatorConfiguration()
+            return ParameterizedSemanticCalculator(base_config, embedding_provider)
     
     @classmethod
     def get_parameter_bounds(cls) -> Dict[str, Tuple[float, float]]:
@@ -162,11 +224,10 @@ class CalculatorFactory:
         """
         return {
             # Component weights (will be normalized, so bounds are flexible)
-            'topic_surprise_weight': (0.05, 0.50),
             'ne_density_weight': (0.05, 0.50),
             'conceptual_surprise_weight': (0.05, 0.40),
             'logical_complexity_weight': (0.05, 0.40),
-            'conceptual_bridging_weight': (0.05, 0.30),
+            'conceptual_bridging_weight': (0.05, 0.40),
             'information_density_weight': (0.01, 0.20),
             
             # Transformation parameters
@@ -174,30 +235,35 @@ class CalculatorFactory:
             'mid_threshold': (0.35, 0.60),
             'low_power': (1.5, 8.0),
             'low_scale': (0.1, 0.4),
-            'mid_slope': (2.0, 10.0),
+            'mid_slope': (3.0, 10.0),
             'high_base': (0.3, 0.7),
             'high_scale': (5.0, 30.0),
             'min_output': (0.01, 0.10),
-            'max_output': (0.85, 0.99),
+            'max_output': (0.8, 0.99),
             
             # Discriminator parameters
-            'ne_amplification_factor': (5.0, 20.0),
+            'ne_amplification_factor': (5.0, 25.0),
+
             'abstract_boost': (0.5, 2.0),
             'concrete_boost': (0.5, 2.0),
             'length_weight': (0.5, 2.0),
+
             'dependency_weight': (0.5, 2.0),
             'pos_weight': (0.5, 2.0),
             'semantic_reasoning_weight': (0.5, 2.0),
-            'complexity_normalization': (4.0, 16.0),
+            'complexity_normalization': (5.0, 20.0),
+
             'syntactic_bridge_weight': (1.0, 4.0),
             'semantic_bridge_weight': (1.0, 4.0),
-            'entity_bridge_weight': (0.4, 2.0),
+            'entity_bridge_weight': (0.5, 2.0),
             'bridge_normalization': (0.2, 1.0),
+
             'technical_info_weight': (0.5, 2.0),
             'social_info_weight': (0.5, 2.0),
             'factual_info_weight': (0.5, 2.0),
-            'info_density_amplification': (1.0, 8.0),
-            'info_normalization': (1.0, 4.0),
+            'info_density_amplification': (2.0, 8.0),
+            'info_normalization': (1.0, 5.0),
+
             'cohesion_fallback_similarity': (0.3, 0.7),
             'min_sentences_for_cohesion': (1, 3),
             
@@ -206,14 +272,6 @@ class CalculatorFactory:
             'semantic_role_surprise_weight': (0.5, 2.0),
             'discourse_surprise_weight': (0.5, 2.0),
             'concept_surprise_normalization': (2.0, 5.0),
-            
-            # Topic Surprise parameters
-            'topic_discontinuity_weight': (1.0, 1.8),
-            'density_surprise_weight': (0.9, 1.8),
-            'structure_surprise_weight': (0.6, 1.3),
-            'topic_surprise_amplification': (0.8, 1.5),
-            'topic_surprise_normalization': (1.5, 3.0),
-            'min_sentences_for_topic_surprise': (1, 2)
         }
     
     @classmethod
@@ -230,15 +288,13 @@ class CalculatorFactory:
         embedding_independent = {
             # Amplification factors (raw signal scaling)
             'ne_amplification_factor', 'info_density_amplification',
-            'concept_surprise_normalization', 'complexity_normalization',
-            'topic_surprise_amplification', 'topic_surprise_normalization',
+            'concept_surprise_normalization', 'complexity_normalization'
             
             # Discriminator weights (spacy-based features)
             'dependency_weight', 'pos_weight', 'semantic_reasoning_weight',
             'technical_info_weight', 'social_info_weight', 'factual_info_weight',
             'syntactic_bridge_weight', 'semantic_bridge_weight', 'entity_bridge_weight',
             'syntactic_surprise_weight', 'semantic_role_surprise_weight', 'discourse_surprise_weight',
-            'topic_discontinuity_weight', 'density_surprise_weight', 'structure_surprise_weight',
             
             # Transformation parameters (curve shaping)
             'low_power', 'high_scale', 'mid_slope', 'low_threshold', 'mid_threshold',
@@ -249,12 +305,12 @@ class CalculatorFactory:
             
             # Configuration parameters
             'abstract_boost', 'concrete_boost', 'length_weight',
-            'min_sentences_for_cohesion', 'min_sentences_for_topic_surprise',
+            'min_sentences_for_cohesion',
         }
         
         embedding_dependent = {
             # Component weights (need rebalancing per provider)
-            'topic_surprise_weight', 'ne_density_weight', 'conceptual_surprise_weight',
+            'ne_density_weight', 'conceptual_surprise_weight',
             'logical_complexity_weight', 'conceptual_bridging_weight', 'information_density_weight',
             
             # Embedding-specific thresholds (only if using embedding_similarity method)
@@ -263,7 +319,7 @@ class CalculatorFactory:
         
         # Determine integer parameters
         integer_params = {
-            'min_sentences_for_cohesion', 'min_sentences_for_topic_surprise'
+            'min_sentences_for_cohesion'
         }
         
         metadata = {}
@@ -285,15 +341,6 @@ class CalculatorFactory:
     def _get_component_mapping(cls, param_name: str) -> Optional[str]:
         """Map parameter to its primary component."""
         component_mapping = {
-            # Topic surprise
-            'topic_surprise_weight': 'topic_surprise',
-            'topic_discontinuity_weight': 'topic_surprise',
-            'density_surprise_weight': 'topic_surprise',
-            'structure_surprise_weight': 'topic_surprise',
-            'topic_surprise_amplification': 'topic_surprise',
-            'topic_surprise_normalization': 'topic_surprise',
-            'min_sentences_for_topic_surprise': 'topic_surprise',
-            
             # NE density
             'ne_density_weight': 'ne_density',
             'ne_amplification_factor': 'ne_density',
@@ -330,22 +377,31 @@ class CalculatorFactory:
         
         return component_mapping.get(param_name)
     
-    @classmethod
-    def get_focused_parameter_bounds(cls) -> Dict[str, Tuple[float, float]]:
+    @staticmethod
+    def get_focused_parameter_bounds() -> Dict[str, Tuple[float, float]]:
         """
-        Get focused parameter bounds for performance optimization.
-        Prioritizes embedding-independent parameters.
+        Get focused bounds for high-impact parameters based on statistical analysis.
         """
-        metadata = cls.get_parameter_metadata()
+        # Get standard bounds
+        bounds = CalculatorFactory.get_parameter_bounds()
         
-        # Focus on embedding-independent parameters + component weights
-        focused_bounds = {}
+        # Override with focused ranges for high-impact parameters
+        focused_overrides = {
+            'info_normalization': (2.0, 4.0),  # μ=2.59, correlation=0.888
+            'factual_info_weight': (1.3, 2.0),  # μ=1.68, correlation=0.727
+            'max_output': (0.85, 0.98),  # μ=0.93, correlation=0.576
+            'concept_surprise_normalization': (2.5, 4.5),  # μ=3.53, correlation=0.540
+            'ne_amplification_factor': (15.0, 22.0),  # μ=17.79, correlation=0.452
+            
+            # Other high-impact parameters
+            'complexity_normalization': (10.0, 16.0),  # Best performers outside bounds
+            'bridge_normalization': (0.2, 0.8),  # μ=0.49, correlation=0.458
+            'semantic_reasoning_weight': (0.5, 1.6),  # μ=0.99, correlation=0.476
+        }
         
-        for param_name, meta in metadata.items():
-            if meta['embedding_dependency'] in ['independent', 'dependent']:
-                focused_bounds[param_name] = meta['bounds']
-        
-        return focused_bounds
+        # Apply focused overrides
+        bounds.update(focused_overrides)
+        return bounds
     
     @classmethod
     def get_optimization_space_size(cls) -> int:
