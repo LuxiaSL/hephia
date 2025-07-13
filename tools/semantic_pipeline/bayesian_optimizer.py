@@ -49,7 +49,7 @@ class OptimizationConfig:
     n_initial_points: int = 20            # Random exploration before Bayesian
     acquisition_function: str = 'EI'      # Expected Improvement
     n_jobs: int = 1                       # Parallel evaluations (1 for now)
-    random_state: int = 42               # For reproducible results
+    random_state: int = int(time.time()) % 10000
     
     # Test harness configuration
     sample_size: int = 10                # Number of sample nodes per evaluation
