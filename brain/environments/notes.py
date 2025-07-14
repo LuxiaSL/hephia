@@ -12,6 +12,7 @@ from datetime import datetime
 import os
 from uuid import uuid4
 
+from config import Config
 from .base_environment import BaseEnvironment
 from event_dispatcher import global_event_dispatcher, Event
 from brain.commands.model import (
@@ -28,10 +29,11 @@ class NotesEnvironment(BaseEnvironment):
 
     def __init__(self):
         self.db_path = 'data/notes.db'
+        self.max_sticky_notes = Config.MAX_STICKY_NOTES  # Configurable max sticky notes
         self._ensure_db()  # Setup database first
         super().__init__()  # Then initialize command structure
         
-        self.help_text = """
+        self.help_text = f"""
         The notes environment provides persistent external storage for thoughts and observations.
 
         Core Features:
@@ -44,6 +46,10 @@ class NotesEnvironment(BaseEnvironment):
         - Use tags consistently for better organization
         - Include context in searches
         - Review and update notes regularly
+
+        [NEW] Sticky Notes:
+        - sticky notes can be used to pin whatever you'd like to your system prompt/HUD.
+        - you can think of these as a way to set goals or persistent reminders, and can have up to {self.max_sticky_notes} sticky notes at a time.
         """
 
     def _register_commands(self) -> None:
@@ -68,16 +74,25 @@ class NotesEnvironment(BaseEnvironment):
                         type=ParameterType.STRING,
                         required=False,
                         examples=["--tags=important,todo", "--tags=project,idea"]
+                    ),
+                    Flag(
+                        name="sticky",
+                        description="Make this note a sticky note",
+                        type=ParameterType.BOOLEAN,
+                        required=False,
+                        examples=["--sticky=true", "--sticky=false"]
                     )
                 ],
                 examples=[
                     'notes create "<Content of note>"',
                     'notes create "<Content of note>" --tags=tags,go,here',
+                    'notes create "<content to keep visible" --sticky=true'
                 ],
-                related_commands=['list', 'tags'],
+                related_commands=['list', 'tags', 'sticky'],
                 failure_hints={
                     "DatabaseError": "Failed to save note. Try again.",
-                    "ValueError": "Invalid note format. Use quotes around content."
+                    "ValueError": "Invalid note format. Use quotes around content.",
+                    "StickyLimitExceeded": f"Cannot have more than {self.max_sticky_notes} sticky notes. Remove sticky from another note first."
                 }
             )
         )
@@ -126,12 +141,13 @@ class NotesEnvironment(BaseEnvironment):
                     Parameter(
                         name="note_id",
                         description="The ID of the note to read",
-                        required=True
+                        required=True,
+                        examples=["note-1", "note-42"]
                     )
                 ],
                 examples=[
-                    'notes read abc123',
-                    'notes read def456'
+                    'notes read note-1',
+                    'notes read note-42'
                 ],
                 related_commands=['update', 'delete'],
                 failure_hints={
@@ -149,13 +165,14 @@ class NotesEnvironment(BaseEnvironment):
                     Parameter(
                         name="note_id",
                         description="The ID of the note to update",
-                        required=True
+                        required=True,
+                        examples=["note-1", "note-42"]
                     ),
                     Parameter(
                         name="content",
                         description="The new note content",
                         required=True,
-                        examples=['"Updated content"']
+                        examples=['"<new content>"']
                     )
                 ],
                 flags=[
@@ -168,9 +185,9 @@ class NotesEnvironment(BaseEnvironment):
                     )
                 ],
                 examples=[
-                    'notes update abc123 "New content"',
+                    'notes update note-1 "<new content>"',
                 ],
-                related_commands=['read', 'delete'],
+                related_commands=['read', 'delete', 'sticky'],
                 failure_hints={
                     "NotFound": "Note not found. Check the ID and try again.",
                     "ValueError": "Invalid update format. Check command syntax."
@@ -187,11 +204,12 @@ class NotesEnvironment(BaseEnvironment):
                     Parameter(
                         name="note_id",
                         description="The ID of the note to delete",
-                        required=True
+                        required=True,
+                        examples=["note-1", "note-42"]
                     )
                 ],
                 examples=[
-                    'notes delete abc123'
+                    'notes delete note-1'
                 ],
                 related_commands=['read', 'update'],
                 failure_hints={
@@ -238,8 +256,8 @@ class NotesEnvironment(BaseEnvironment):
         self.register_command(
             CommandDefinition(
                 name="tags",
-                description="List all available tags", 
-                parameters=[],  # No parameters needed
+                description="List all used tags", 
+                parameters=[],
                 examples=[
                     'notes tags'
                 ],
@@ -259,7 +277,8 @@ class NotesEnvironment(BaseEnvironment):
                     Parameter(
                         name="note_id", 
                         description="Note ID to add tags to",
-                        required=True
+                        required=True,
+                        examples=["note-1", "note-42"]
                     ),
                     Parameter(
                         name="tags",
@@ -269,8 +288,8 @@ class NotesEnvironment(BaseEnvironment):
                     )
                 ],
                 examples=[
-                    'notes tag-add abc123 important',
-                    'notes tag-add def456 project,idea'
+                    'notes tag-add note-1 important',
+                    'notes tag-add note-42 project idea'
                 ],
                 failure_hints={
                     "NotFound": "Note not found. Check the ID.",
@@ -290,7 +309,8 @@ class NotesEnvironment(BaseEnvironment):
                     Parameter(
                         name="note_id",
                         description="Note ID to remove tags from",
-                        required=True
+                        required=True,
+                        examples=["note-1", "note-42"]
                     ),
                     Parameter(
                         name="tags", 
@@ -300,8 +320,8 @@ class NotesEnvironment(BaseEnvironment):
                     )
                 ],
                 examples=[
-                    'notes tag-remove abc123 important',
-                    'notes tag-remove def456 old-tag'
+                    'notes tag-remove note-1 important',
+                    'notes tag-remove note-42 old-tag'
                 ],
                 failure_hints={
                     "NotFound": "Note not found. Check the ID.",
@@ -309,6 +329,31 @@ class NotesEnvironment(BaseEnvironment):
                     "DatabaseError": "Failed to remove tags. Try again." 
                 },
                 related_commands=['tags', 'tag-add']
+            )
+        )
+
+        # Sticky notes command
+        self.register_command(
+            CommandDefinition(
+                name="sticky",
+                description=f"Toggle sticky status for a note (max {self.max_sticky_notes} sticky notes)",
+                parameters=[
+                    Parameter(
+                        name="note_id",
+                        description="The ID of the note to toggle sticky",
+                        required=True,
+                        examples=["note-1", "note-42"]
+                    )
+                ],
+                examples=[
+                    'notes sticky note-1',
+                    'notes sticky note-42'
+                ],
+                related_commands=['list', 'read'],
+                failure_hints={
+                    "NotFound": "Note not found. Check the ID and try again.",
+                    "StickyLimitExceeded": f"Cannot have more than {self.max_sticky_notes} sticky notes. Remove sticky from another note first."
+                }
             )
         )
     
@@ -319,7 +364,7 @@ class NotesEnvironment(BaseEnvironment):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Create tables. Note the addition of a 'tags' column to the notes table.
+        # Create tables.
         cursor.executescript("""
             CREATE TABLE IF NOT EXISTS notes (
                 id TEXT PRIMARY KEY,
@@ -350,17 +395,43 @@ class NotesEnvironment(BaseEnvironment):
                 context,
                 tags,
                 sentiment
-            );
-        """)
+            );""")
+
+        cursor.execute("PRAGMA table_info(notes)")
+        existing_columns = {col[1] for col in cursor.fetchall()}
         
+        # Add human_id column if missing
+        if 'llm_id' not in existing_columns:
+            # Add column without UNIQUE constraint first
+            cursor.execute("ALTER TABLE notes ADD COLUMN llm_id TEXT")
+
+            # Generate llm IDs for existing notes
+            cursor.execute("SELECT id, rowid FROM notes WHERE llm_id IS NULL ORDER BY created_at")
+            existing_notes = cursor.fetchall()
+            for i, (note_id, rowid) in enumerate(existing_notes, 1):
+                llm_id = f"note-{i}"
+                cursor.execute("UPDATE notes SET llm_id = ? WHERE id = ?", (llm_id, note_id))
+
+            # Now create unique index after data is populated
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_llm_id ON notes(llm_id)")
+
+        # Add sticky column if missing
+        if 'sticky' not in existing_columns:
+            cursor.execute("ALTER TABLE notes ADD COLUMN sticky BOOLEAN DEFAULT 0")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_notes_sticky ON notes(sticky)")
+
         # Create triggers for full-text search (FTS) updates.
         cursor.executescript("""
-            CREATE TRIGGER IF NOT EXISTS notes_after_insert AFTER INSERT ON notes BEGIN
+            DROP TRIGGER IF EXISTS notes_after_insert;
+            DROP TRIGGER IF EXISTS notes_after_update;
+            DROP TRIGGER IF EXISTS notes_after_delete;
+            
+            CREATE TRIGGER notes_after_insert AFTER INSERT ON notes BEGIN
                 INSERT INTO notes_fts(rowid, content, context, tags, sentiment)
                 VALUES (new.rowid, new.content, new.context, new.tags, new.sentiment);
             END;
 
-            CREATE TRIGGER IF NOT EXISTS notes_after_update AFTER UPDATE ON notes BEGIN
+            CREATE TRIGGER notes_after_update AFTER UPDATE ON notes BEGIN
                 UPDATE notes_fts 
                 SET content = new.content, 
                     context = new.context,
@@ -369,7 +440,7 @@ class NotesEnvironment(BaseEnvironment):
                 WHERE rowid = new.rowid;
             END;
 
-            CREATE TRIGGER IF NOT EXISTS notes_after_delete AFTER DELETE ON notes BEGIN
+            CREATE TRIGGER notes_after_delete AFTER DELETE ON notes BEGIN
                 DELETE FROM notes_fts WHERE rowid = old.rowid;
             END;
         """)
@@ -387,7 +458,7 @@ class NotesEnvironment(BaseEnvironment):
         """Execute a notes command with validated parameters."""
         try:
             if action == "create":
-                return await self._create_note(params[0], context, flags.get("tags"))
+                return await self._create_note(params[0], context, flags.get("tags"), flags.get("sticky", False))
             elif action == "list":
                 return await self._list_notes(
                     flags.get("tag"),
@@ -410,6 +481,8 @@ class NotesEnvironment(BaseEnvironment):
                 return await self._handle_tags("add", params[0], *params[1].split())
             elif action == "tag-remove":
                 return await self._handle_tags("remove", params[0], *params[1].split())
+            elif action == "sticky":
+                return await self._toggle_sticky(params[0])
             
             raise ValueError(f"Unknown action: {action}")
             
@@ -420,7 +493,7 @@ class NotesEnvironment(BaseEnvironment):
                 error=CommandValidationError(
                     message=f"Database error: {str(e)}",
                     suggested_fixes=[
-                        "Check database connectivity and ensure no concurrency issues",
+                        "Have admin check database connectivity and ensure no concurrency issues",
                         "Retry the operation"
                     ],
                     related_commands=["notes help"],
@@ -449,6 +522,7 @@ class NotesEnvironment(BaseEnvironment):
         content: str, 
         context: Dict[str, Any],
         tags: Optional[str] = None,
+        sticky: bool = False
     ) -> CommandResult:
         """
         Create a new note with context awareness.
@@ -462,6 +536,8 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
+            llm_id = self._get_next_llm_id(cursor)
+
             # Capture current cognitive state.
             note_context = {
                 'mood': context.get('internal_state', {}).get('mood', {}),
@@ -476,11 +552,30 @@ class NotesEnvironment(BaseEnvironment):
                 tag_list = [t.strip() for t in tags.split(',') if t.strip()]
                 tags_str = ",".join(tag_list)
             
-            # Store the note including the denormalized tags field.
+            cursor.execute("SELECT COUNT(*) FROM notes WHERE sticky = 1")
+            current_sticky_count = cursor.fetchone()[0]
+            
+            if current_sticky_count >= self.max_sticky_notes and sticky:
+                return CommandResult(
+                    success=False,
+                    message=f"Cannot make note sticky: already have {current_sticky_count}/{self.max_sticky_notes} sticky notes",
+                    suggested_commands=["notes list", f"notes sticky <note_id>  # to unstick another"],
+                    error=CommandValidationError(
+                        message=f"Sticky limit ({self.max_sticky_notes}) exceeded",
+                        suggested_fixes=[
+                            "Remove sticky from another note first",
+                            "Check current sticky notes"
+                        ],
+                        related_commands=["notes list"],
+                        examples=["notes sticky note-1  # to unstick", "notes list"]
+                    )
+                )
+
+            # Store the note.
             cursor.execute(
-                """INSERT INTO notes (id, content, context, tags) 
-                   VALUES (?, ?, ?, ?)""",
-                (note_id, content.strip(), json.dumps(note_context), tags_str)
+                """INSERT INTO notes (id, llm_id, content, context, tags, sticky) 
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (note_id, llm_id, content.strip(), json.dumps(note_context), tags_str, sticky)
             )
             
             # Handle tag associations.
@@ -503,31 +598,37 @@ class NotesEnvironment(BaseEnvironment):
             global_event_dispatcher.dispatch_event(
                 Event("notes:created", {
                     "note_id": note_id,
+                    "llm_id": llm_id,
                     "content": content,
                     "tags": tag_list,
-                    "context": note_context
+                    "context": note_context,
+                    "sticky": bool(sticky)
                 })
             )
             
             # Generate suggested next commands.
             suggested_next = [
-                f"notes read {note_id}",
-                f"notes update {note_id} \"Updated Content\"",
+                f"notes read {llm_id}",
+                f"notes update {llm_id} \"<new content>\"",
             ]
             if tag_list:
                 suggested_next.append(f"notes list --tag={tag_list[0]}")
             else:
-                suggested_next.append(f'notes tag-add {note_id} <tag>')
+                suggested_next.append(f'notes tag-add {llm_id} <tag>')
+
+            to_display = f"{content[:75]}..." if len(content) > 75 else content
             
             return CommandResult(
                 success=True,
-                message=f"Created note {note_id}\nContent: {content}\nTags: {', '.join(tag_list) if tag_list else 'none'}",
+                message=f"Created note {llm_id}\nContent: {to_display}\nTags: {', '.join(tag_list) if tag_list else 'none'}",
                 suggested_commands=suggested_next,
                 data={
                     "note_id": note_id,
                     "content": content,
                     "tags": tag_list,
-                    "context": note_context
+                    "context": note_context,
+                    "llm_id": llm_id,
+                    "sticky": bool(sticky)
                 }
             )
             
@@ -552,7 +653,7 @@ class NotesEnvironment(BaseEnvironment):
         finally:
             conn.close()
 
-    async def _read_note(self, note_id: str) -> CommandResult:
+    async def _read_note(self, note_identifier: str) -> CommandResult:
         """
         Read a specific note with its full context.
         Displays the note’s denormalized tags and parsed context.
@@ -561,14 +662,35 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
+            note_id = self._resolve_note_id(note_identifier, cursor)
+            if not note_id:
+                return CommandResult(
+                    success=False,
+                    message=f"Note {note_identifier} not found",
+                    suggested_commands=[
+                        "notes list",
+                        'notes create "<new note>"'
+                    ],
+                    error=CommandValidationError(
+                        message=f"Note {note_identifier} not found",
+                        suggested_fixes=[
+                            "Check the note ID",
+                            "Try 'notes list' to see available notes"
+                        ],
+                        related_commands=["notes list", "notes create"],
+                        examples=["notes read <note_id>", "notes list --limit=5"]
+                    )
+                )
+            
             cursor.execute("""
-                SELECT n.*, GROUP_CONCAT(t.name) as tag_list
+                SELECT n.id, n.content, n.created_at, n.updated_at, n.context, n.sentiment, 
+                       n.llm_id, n.sticky, n.tags, GROUP_CONCAT(t.name) as tag_list
                 FROM notes n
                 LEFT JOIN note_tags nt ON n.id = nt.note_id
                 LEFT JOIN tags t ON nt.tag_id = t.id
                 WHERE n.id = ?
                 GROUP BY n.id
-            """, (note_id.strip(),))
+            """, (note_id,))
             
             note = cursor.fetchone()
             if not note:
@@ -577,7 +699,7 @@ class NotesEnvironment(BaseEnvironment):
                     message=f"Note {note_id} not found",
                     suggested_commands=[
                         "notes list",
-                        'notes create "New note"'
+                        'notes create "<new note>"'
                     ],
                     error=CommandValidationError(
                         message=f"Note {note_id} not found",
@@ -586,7 +708,7 @@ class NotesEnvironment(BaseEnvironment):
                             "Try 'notes list' to see available notes"
                         ],
                         related_commands=["notes list", "notes create"],
-                        examples=["notes read abc123", "notes list --limit=5"]
+                        examples=["notes read <note_id>", "notes list --limit=5"]
                     )
                 )
             
@@ -594,11 +716,12 @@ class NotesEnvironment(BaseEnvironment):
             context_data = json.loads(note[4]) if note[4] else {}
             
             # Format the note display.
+            sticky_indicator = "📌 " if note[7] else ""
             content_lines = [
-                f"Note {note[0]}:",
+                f"{sticky_indicator}Note {note[6]}:",
                 f"Created: {note[2]}",
                 f"Updated: {note[3]}",
-                f"Tags: {note[6] or 'none'}",
+                f"Tags: {note[8] or 'none'}",
                 "",
                 "Content:",
                 note[1]
@@ -613,11 +736,12 @@ class NotesEnvironment(BaseEnvironment):
                 ])
 
             suggested = [
-                f"notes update {note_id} \"New content\"",
-                f"notes tag-add {note_id} <tag>"
+                f"notes update {note[6]} \"New content\"",
+                f"notes tag-add {note[6]} <tag>",
+                f"notes sticky {note[6]}"
             ]
-            if note[6]:
-                tags = note[6].split(',')
+            if note[8]:
+                tags = note[8].split(',')
                 suggested.append(f"notes list --tag={tags[0]}")
             
             return CommandResult(
@@ -626,10 +750,12 @@ class NotesEnvironment(BaseEnvironment):
                 suggested_commands=suggested,
                 data={
                     "note_id": note_id,
+                    "llm_id": note[6],
                     "content": note[1],
                     "created": note[2],
                     "updated": note[3],
-                    "tags": note[6].split(',') if note[6] else [],
+                    "tags": note[8].split(',') if note[8] else [],
+                    "sticky": bool(note[7]),
                     "context": context_data
                 }
             )
@@ -646,7 +772,7 @@ class NotesEnvironment(BaseEnvironment):
                     ],
                     related_commands=["notes list", "notes search"],
                     examples=[
-                        "notes read abc123",
+                        "notes read note-1",
                         "notes list --limit=5",
                         'notes search "keyword"'
                     ]
@@ -654,7 +780,7 @@ class NotesEnvironment(BaseEnvironment):
                 suggested_commands=[
                     "notes list", 
                     "notes search <query>",
-                    'notes create "New note"'
+                    'notes create "<new note>"'
                 ]
             )
         finally:
@@ -667,7 +793,7 @@ class NotesEnvironment(BaseEnvironment):
         
         try:
             base_query = """
-                SELECT n.*, GROUP_CONCAT(t.name) as tag_list
+                SELECT n.llm_id, n.content, n.created_at, n.tags, n.sticky
                 FROM notes n
                 LEFT JOIN note_tags nt ON n.id = nt.note_id
                 LEFT JOIN tags t ON nt.tag_id = t.id
@@ -695,13 +821,13 @@ class NotesEnvironment(BaseEnvironment):
                 )
             
             content_lines = ["Recent Notes:\n"]
-            for note in notes:
-                # note[6] is the denormalized tags field
+            for llm_id, content, created, tags, sticky in notes:
+                sticky_indicator = "📌 " if sticky else ""
                 content_lines.append(
-                    f"ID: {note[0]}\n"
-                    f"Created: {note[2]}\n"
-                    f"Content: {note[1][:75]}...\n"
-                    f"Tags: {note[6] or 'none'}\n"
+                    f"{sticky_indicator}ID: {llm_id}\n"
+                    f"Created: {created}\n"
+                    f"Content: {content[:75]}...\n"
+                    f"Tags: {tags or 'none'}\n"
                 )
 
             return CommandResult(
@@ -738,7 +864,7 @@ class NotesEnvironment(BaseEnvironment):
                     ]
                 ),
                 suggested_commands=[
-                    'notes create "New note"',
+                    'notes create "<new note>"',
                     "notes tags",
                     "notes search <query>"
                 ]
@@ -748,7 +874,7 @@ class NotesEnvironment(BaseEnvironment):
     
     async def _update_note(
         self,
-        note_id: str,
+        note_identifier: str,
         content: str,
         context: Dict[str, Any],
         tags: Optional[str] = None,
@@ -758,26 +884,30 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
-            # Verify the note exists.
-            cursor.execute("SELECT EXISTS(SELECT 1 FROM notes WHERE id = ?)", (note_id,))
-            if not cursor.fetchone()[0]:
+            # Resolve note ID using the helper method
+            note_id = self._resolve_note_id(note_identifier, cursor)
+            if not note_id:
                 return CommandResult(
                     success=False,
-                    message=f"Note {note_id} not found",
+                    message=f"Note {note_identifier} not found",
                     suggested_commands=[
                         "notes list",
                         f'notes create "{content}"'
                     ],
                     error=CommandValidationError(
-                        message=f"Note {note_id} not found",
+                        message=f"Note {note_identifier} not found",
                         suggested_fixes=[
                             "Verify the note ID is correct",
                             "Use 'notes list' to see available note IDs"
                         ],
                         related_commands=["notes list", "notes create"],
-                        examples=[f'notes update {note_id} "New content"', "notes list --limit=5"]
+                        examples=[f'notes update {note_identifier} "New content"', "notes list --limit=5"]
                     )
                 )
+
+            # Get the llm_id for the response
+            cursor.execute("SELECT llm_id FROM notes WHERE id = ?", (note_id,))
+            llm_id = cursor.fetchone()[0]
 
             new_context = {
                 'mood': context.get('internal_state', {}).get('mood', {}),
@@ -787,12 +917,15 @@ class NotesEnvironment(BaseEnvironment):
             
             # If new tags are provided, process them; otherwise keep the existing denormalized tags.
             tags_str = None
+            tag_list = []
             if tags is not None:
                 tag_list = [t.strip() for t in tags.split(',') if t.strip()]
                 tags_str = ",".join(tag_list)
             else:
                 cursor.execute("SELECT tags FROM notes WHERE id = ?", (note_id,))
-                tags_str = cursor.fetchone()[0]
+                existing_tags = cursor.fetchone()[0]
+                tags_str = existing_tags
+                tag_list = existing_tags.split(',') if existing_tags else []
 
             cursor.execute("""
                 UPDATE notes 
@@ -807,35 +940,24 @@ class NotesEnvironment(BaseEnvironment):
             if tags is not None:
                 cursor.execute("DELETE FROM note_tags WHERE note_id = ?", (note_id,))
                 for tag in tag_list:
-                    cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
+                    cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?", (tag,))
                     cursor.execute("SELECT id FROM tags WHERE name = ?", (tag,))
                     tag_id = cursor.fetchone()[0]
                     cursor.execute("INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)", (note_id, tag_id))
 
             conn.commit()
 
-            # Retrieve the updated denormalized tags.
-            cursor.execute("""
-                SELECT GROUP_CONCAT(t.name)
-                FROM tags t
-                WHERE t.id IN (
-                    SELECT tag_id FROM note_tags WHERE note_id = ?
-                )
-            """, (note_id,))
-            current_tags_row = cursor.fetchone()
-            current_tags = current_tags_row[0] if current_tags_row and current_tags_row[0] else ""
-            tag_list = current_tags.split(',') if current_tags else []
-
             return CommandResult(
                 success=True,
-                message=f"Updated note {note_id}\nNew content: {content}\nTags: {', '.join(tag_list)}",
+                message=f"Updated note {llm_id}\nNew content: {content}\nTags: {', '.join(tag_list)}",
                 suggested_commands=[
-                    f"notes read {note_id}",
+                    f"notes read {llm_id}",
                     "notes list",
                     f"notes list --tag={tag_list[0]}" if tag_list else "notes tags"
                 ],
                 data={
                     "note_id": note_id,
+                    "llm_id": llm_id,
                     "content": content,
                     "tags": tag_list,
                     "context": new_context
@@ -855,12 +977,12 @@ class NotesEnvironment(BaseEnvironment):
                     ],
                     related_commands=["notes read", "notes list"],
                     examples=[
-                        f'notes update {note_id} "Updated content"',
-                        f'notes update {note_id} "New content" --tags=important,todo'
+                        f'notes update {note_identifier} "Updated content"',
+                        f'notes update {note_identifier} "New content" --tags=important,todo'
                     ]
                 ),
                 suggested_commands=[
-                    f"notes read {note_id}",
+                    f"notes read {note_identifier}",
                     "notes list",
                     "notes tags"
                 ]
@@ -868,7 +990,7 @@ class NotesEnvironment(BaseEnvironment):
         finally:
             conn.close()
     
-    async def _delete_note(self, note_id: str) -> CommandResult:
+    async def _delete_note(self, note_identifier: str) -> CommandResult:
         """
         Delete a note and its associated data.
         
@@ -881,39 +1003,45 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
-            cursor.execute("SELECT 1 FROM notes WHERE id = ?", (note_id.strip(),))
-            if not cursor.fetchone():
+            # Resolve note ID using the helper method
+            note_id = self._resolve_note_id(note_identifier, cursor)
+            if not note_id:
                 return CommandResult(
                     success=False,
-                    message=f"Note {note_id} not found",
+                    message=f"Note {note_identifier} not found",
                     suggested_commands=[
                         "notes list",
                         "notes search <query>"
                     ],
                     error=CommandValidationError(
-                        message=f"Note {note_id} not found",
+                        message=f"Note {note_identifier} not found",
                         suggested_fixes=[
-                            "Double-check the note ID",
-                            "Try 'notes list' to see existing notes"
+                            "Check the note ID",
+                            "Try 'notes list' to see available notes"
                         ],
                         related_commands=["notes list", "notes search"],
-                        examples=["notes delete abc123", "notes list --limit=5"]
+                        examples=["notes delete note-1", "notes list --limit=5"]
                     )
                 )
 
-            cursor.execute("DELETE FROM notes WHERE id = ?", (note_id.strip(),))
+            # Get the llm_id for the response
+            cursor.execute("SELECT llm_id FROM notes WHERE id = ?", (note_id,))
+            llm_id = cursor.fetchone()[0]
+
+            cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
             conn.commit()
             
             return CommandResult(
                 success=True,
-                message=f"Successfully deleted note {note_id}",
+                message=f"Successfully deleted note {llm_id}",
                 suggested_commands=[
                     "notes list",
-                    "notes create \"New note\"",
+                    'notes create "New note"',
                     "notes tags"
                 ],
                 data={
-                    "deleted_id": note_id
+                    "deleted_id": note_id,
+                    "llm_id": llm_id
                 }
             )
         
@@ -928,11 +1056,14 @@ class NotesEnvironment(BaseEnvironment):
                         "Verify database access"
                     ],
                     related_commands=["notes list", "notes create"],
-                    examples=["notes delete abc123", "notes list --limit=5"]
+                    examples=[
+                        "notes delete note-1",
+                        "notes list --limit=5"
+                    ]
                 ),
                 suggested_commands=[
                     "notes list",
-                    "notes create \"New note\""
+                    'notes create "New note"'
                 ]
             )
         finally:
@@ -945,14 +1076,11 @@ class NotesEnvironment(BaseEnvironment):
         
         try:
             cursor.execute("""
-                SELECT notes.*, GROUP_CONCAT(t.name) as tag_list, notes_fts.rank as search_rank
+                SELECT notes.llm_id, notes.content, notes.created_at, notes.tags, notes.sticky
                 FROM notes_fts
                 JOIN notes ON notes_fts.rowid = notes.rowid
-                LEFT JOIN note_tags nt ON notes.id = nt.note_id
-                LEFT JOIN tags t ON nt.tag_id = t.id
                 WHERE notes_fts MATCH ?
-                GROUP BY notes.id
-                ORDER BY search_rank
+                ORDER BY rank
                 LIMIT ?
             """, (query, limit))
             
@@ -974,11 +1102,13 @@ class NotesEnvironment(BaseEnvironment):
                 )
             
             content_lines = [f"Search results for '{query}':\n"]
-            for note in notes:
+            for llm_id, content, created, tags, sticky in notes:
+                sticky_indicator = "📌 " if sticky else ""
                 content_lines.append(
-                    f"ID: {note[0]}\n"
-                    f"Content: {note[1][:50]}...\n"
-                    f"Tags: {note[6] or 'none'}\n"
+                    f"{sticky_indicator}ID: {llm_id}\n"
+                    f"Created: {created}\n"
+                    f"Content: {content[:50]}...\n"
+                    f"Tags: {tags or 'none'}\n"
                 )
 
             return CommandResult(
@@ -1023,7 +1153,7 @@ class NotesEnvironment(BaseEnvironment):
     async def _handle_tags(
         self,
         action: str,
-        note_id: str,
+        note_identifier: str,
         *tags: str
     ) -> CommandResult:
         """
@@ -1043,8 +1173,8 @@ class NotesEnvironment(BaseEnvironment):
                     suggested_fixes=["Use 'add' or 'remove' only"],
                     related_commands=["notes tag-add", "notes tag-remove"],
                     examples=[
-                        "notes tag-add abc123 important",
-                        "notes tag-remove abc123 important"
+                        "notes tag-add note-1 important",
+                        "notes tag-remove note-1 important"
                     ]
                 )
             )
@@ -1054,15 +1184,15 @@ class NotesEnvironment(BaseEnvironment):
                 success=False,
                 message="No tags specified",
                 suggested_commands=[
-                    f"notes tag-{action} {note_id} tag1 tag2"
+                    f"notes tag-{action} {note_identifier} tag1 tag2"
                 ],
                 error=CommandValidationError(
                     message="No tags specified",
                     suggested_fixes=["Provide at least one tag"],
                     related_commands=["notes tag-add", "notes tag-remove"],
                     examples=[
-                        "notes tag-add abc123 important",
-                        "notes tag-remove abc123 old-tag"
+                        "notes tag-add note-1 important",
+                        "notes tag-remove note-1 old-tag"
                     ]
                 )
             )
@@ -1071,25 +1201,30 @@ class NotesEnvironment(BaseEnvironment):
         cursor = conn.cursor()
         
         try:
-            cursor.execute("SELECT 1 FROM notes WHERE id = ?", (note_id,))
-            if not cursor.fetchone():
+            # Resolve note ID using the helper method
+            note_id = self._resolve_note_id(note_identifier, cursor)
+            if not note_id:
                 return CommandResult(
                     success=False,
-                    message=f"Note {note_id} not found",
+                    message=f"Note {note_identifier} not found",
                     suggested_commands=["notes list"],
                     error=CommandValidationError(
-                        message=f"Note {note_id} not found",
+                        message=f"Note {note_identifier} not found",
                         suggested_fixes=[
                             "Check the note ID carefully",
                             "Use 'notes list' to see which IDs exist"
                         ],
                         related_commands=["notes list", "notes create"],
                         examples=[
-                            "notes tag-add abc123 important",
-                            "notes tag-remove abc123 old-tag"
+                            "notes tag-add note-1 important",
+                            "notes tag-remove note-1 old-tag"
                         ]
                     )
                 )
+
+            # Get the llm_id for the response
+            cursor.execute("SELECT llm_id FROM notes WHERE id = ?", (note_id,))
+            llm_id = cursor.fetchone()[0]
 
             if action == 'add':
                 for tag in tags:
@@ -1123,14 +1258,15 @@ class NotesEnvironment(BaseEnvironment):
             
             return CommandResult(
                 success=True,
-                message=f"{action.capitalize()}ed tags {', '.join(tags)} {'to' if action == 'add' else 'from'} note {note_id}",
+                message=f"{action.capitalize()}ed tags {', '.join(tags)} {'to' if action == 'add' else 'from'} note {llm_id}",
                 suggested_commands=[
-                    f"notes read {note_id}",
+                    f"notes read {llm_id}",
                     "notes tags",
                     f"notes list --tag={tags[0]}"
                 ],
                 data={
                     "note_id": note_id,
+                    "llm_id": llm_id,
                     "action": action,
                     "tags": list(tags)
                 }
@@ -1148,7 +1284,7 @@ class NotesEnvironment(BaseEnvironment):
                     ],
                     related_commands=["notes list", "notes tags"],
                     examples=[
-                        f"notes tag-{action} abc123 important",
+                        f"notes tag-{action} note-1 important",
                         "notes tags"
                     ]
                 ),
@@ -1225,3 +1361,105 @@ class NotesEnvironment(BaseEnvironment):
             )
         finally:
             conn.close()
+
+    async def _toggle_sticky(self, note_identifier: str) -> CommandResult:
+        """Toggle sticky status for a note."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # Resolve note ID
+            note_id = self._resolve_note_id(note_identifier, cursor)
+            if not note_id:
+                return CommandResult(
+                    success=False,
+                    message=f"Note {note_identifier} not found",
+                    suggested_commands=["notes list"],
+                    error=CommandValidationError(
+                        message=f"Note {note_identifier} not found",
+                        suggested_fixes=["Check the note ID", "Use 'notes list' to see available notes"],
+                        related_commands=["notes list", "notes search"],
+                        examples=["notes sticky note-1", "notes sticky note-42"]
+                    )
+                )
+            
+            # Get current sticky status and llm_id
+            cursor.execute("SELECT sticky, llm_id FROM notes WHERE id = ?", (note_id,))
+            current_sticky, llm_id = cursor.fetchone()
+            
+            new_sticky = not current_sticky
+            
+            # If making sticky, check limit
+            if new_sticky:
+                cursor.execute("SELECT COUNT(*) FROM notes WHERE sticky = 1")
+                current_sticky_count = cursor.fetchone()[0]
+                
+                if current_sticky_count >= self.max_sticky_notes:
+                    return CommandResult(
+                        success=False,
+                        message=f"Cannot make note sticky: already have {current_sticky_count}/{self.max_sticky_notes} sticky notes",
+                        suggested_commands=["notes list", f"notes sticky <note_id>  # to unstick another"],
+                        error=CommandValidationError(
+                            message=f"Sticky limit ({self.max_sticky_notes}) exceeded",
+                            suggested_fixes=[
+                                "Remove sticky from another note first",
+                                "Check current sticky notes"
+                            ],
+                            related_commands=["notes list"],
+                            examples=["notes sticky note-1  # to unstick", "notes list"]
+                        )
+                    )
+            
+            # Update sticky status
+            cursor.execute("UPDATE notes SET sticky = ? WHERE id = ?", (new_sticky, note_id))
+            conn.commit()
+            
+            status = "sticky" if new_sticky else "unsticky"
+            return CommandResult(
+                success=True,
+                message=f"Note {llm_id} is now {status}",
+                suggested_commands=[
+                    f"notes read {llm_id}",
+                    "notes list"
+                ],
+                data={
+                    "note_id": note_id,
+                    "llm_id": llm_id,
+                    "sticky": new_sticky
+                }
+            )
+            
+        except Exception as e:
+            return CommandResult(
+                success=False,
+                message=f"Failed to toggle sticky: {str(e)}",
+                suggested_commands=["notes list"]
+            )
+        finally:
+            conn.close()
+
+    def _get_next_llm_id(self, cursor) -> str:
+        """Get the next available LLM ID."""
+        cursor.execute("SELECT MAX(CAST(SUBSTR(llm_id, 6) AS INTEGER)) FROM notes WHERE llm_id LIKE 'note-%'")
+        result = cursor.fetchone()
+        next_num = (result[0] or 0) + 1
+        return f"note-{next_num}"
+
+    def _resolve_note_id(self, note_identifier: str, cursor) -> Optional[str]:
+        """Resolve either UUID or llm_id to the actual UUID primary key."""
+        note_identifier = note_identifier.strip()
+        
+        # Try as UUID first (longer strings)
+        if len(note_identifier) > 10:  # UUIDs are much longer than our llm IDs
+            cursor.execute("SELECT id FROM notes WHERE id = ?", (note_identifier,))
+            result = cursor.fetchone()
+            if result:
+                return result[0]
+
+        # Try as llm_id
+        cursor.execute("SELECT id FROM notes WHERE llm_id = ?", (note_identifier,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]
+            
+        return None

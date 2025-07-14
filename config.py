@@ -296,6 +296,8 @@ class Config:
 
     DISCORD_BOT_URL = "http://localhost:5518"
 
+    MAX_STICKY_NOTES = 3
+
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
     EMOTION_UPDATE_TIMER = 0.05

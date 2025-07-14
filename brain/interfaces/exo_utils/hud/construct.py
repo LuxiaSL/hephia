@@ -12,9 +12,7 @@ from .sections.base import BaseHudSection
 from .sections.discord import DiscordHudSection
 from .sections.system import SystemHudSection
 from .sections.internals import InternalStateHudSection
-# from .sections.goals_section import GoalsHudSection # Future
-# from .sections.pins_section import PinsHudSection # Future
-# from .sections.notes_section import NotesHudSection # Future
+from .sections.stickys import StickyNotesHudSection
 
 class HudConstructor:
     """
@@ -24,19 +22,16 @@ class HudConstructor:
         self,
         # Services needed by various sections will be passed here
         discord_service: DiscordService,
-        # notes_manager: Optional[NotesManager] = None, # Future
         # Add other global services sections might need
     ):
         self.sections: List[BaseHudSection] = []
         self._initialize_sections(
             discord_service=discord_service,
-            # notes_manager=notes_manager
         )
 
     def _initialize_sections(
         self,
         discord_service: DiscordService,
-        # notes_manager: Optional[NotesManager]
     ):
         """
         Initializes and registers all active HUD sections based on configuration and available services.
@@ -46,6 +41,9 @@ class HudConstructor:
 
         # Internal State Section
         self.sections.append(InternalStateHudSection(prompt_key='interfaces.exo.hud.internals', section_name="Internal State"))
+
+        # Sticky Notes
+        self.sections.append(StickyNotesHudSection(prompt_key='interfaces.exo.hud.stickys', section_name="Sticky Notes"))
 
         # Discord Section (conditional on config)
         if Config.get_discord_enabled():
