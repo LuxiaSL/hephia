@@ -387,7 +387,8 @@ class RetrievalMetricsOrchestrator:
                 return {
                     'embedding_similarity': 0.0,
                     'text_relevance': 0.0,
-                    'semantic_density': 0.0
+                    'semantic_density': 0.0,
+                    'semantic_cohesion': 0.0
                 }
                 
             calculator = self.calculators[MetricComponent.SEMANTIC]
@@ -516,9 +517,27 @@ class RetrievalMetricsOrchestrator:
                     if 'error' in component_metrics:
                         continue
                         
-                    # Extract main score based on component type
                     if component == MetricComponent.SEMANTIC:
-                        component_score = component_metrics.get('embedding_similarity', 0.0)
+                        # Step 1: Pure relevance (varies by query)
+                        embedding_sim = component_metrics.get('embedding_similarity', 0.0)
+                        text_relevance = component_metrics.get('text_relevance', 0.0)
+                        
+                        relevance_score = (
+                            embedding_sim * 0.65 +
+                            text_relevance * 0.35
+                        )
+                        
+                        # Step 2: Quality multiplier (intrinsic to memory) 
+                        semantic_density = component_metrics.get('semantic_density', 0.0)
+                        semantic_cohesion = component_metrics.get('semantic_cohesion', 0.5)
+                        
+                        quality_multiplier = 0.5 + (
+                            semantic_density * 0.375 +
+                            semantic_cohesion * 0.125 
+                        )
+                        
+                        # Step 3: Quality-weighted relevance
+                        component_score = relevance_score * quality_multiplier
                     elif component == MetricComponent.EMOTIONAL:
                         component_score = component_metrics.get('vector_similarity', 0.0)
                     elif component == MetricComponent.STATE:

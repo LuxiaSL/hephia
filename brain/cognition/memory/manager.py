@@ -163,22 +163,6 @@ class MemoryManager:
                 BrainLogger.error(f"Even heuristic fallback failed: {fallback_error}")
                 # Emergency permissive fallback
                 return True
-
-    # Legacy method maintained for any remaining direct calls
-    async def _check_significance(self, memory_data: MemoryData) -> bool:
-        """
-        Legacy significance checking method (heuristic only).
-        Maintained for backward compatibility but logs deprecation warning.
-        """
-        BrainLogger.warning(
-            f"Using legacy significance check for {memory_data.interface_id} - "
-            "consider updating to content-aware flow"
-        )
-        try:
-            return await self.significance_analyzer.analyze_significance(memory_data)
-        except Exception as e:
-            BrainLogger.error(f"Error checking significance: {e}")
-            return False
     
     @brain_trace
     async def _generate_memory_content(self, memory_data: MemoryData) -> Optional[str]:

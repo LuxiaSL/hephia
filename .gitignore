@@ -59,10 +59,4 @@ data/
 # i should probably know what this is but i dont but i assume it's chill
 .coverage
 
-tools/semantic_pipeline/dbs/
-tools/semantic_pipeline/optimization_results/
-tools/semantic_pipeline/auto_hybrid_seed.json
-tools/semantic_pipeline/analyzers/
-tools/semantic_pipeline/insights_output/
-tools/semantic_pipeline/comprehensive_statistical_database.json
-tools/semantic_pipeline/seed_gen.py
+tools/semantic_pipeline/

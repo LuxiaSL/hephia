@@ -267,24 +267,37 @@ class MergeManager:
         available_space = MAX_CONTENT_LENGTH - len(parent.text_content)
         
         # If child content needs to be chunked
-        if len(child.text_content) > available_space:
-            # Divide available space into chunks
-            chunk_size = available_space // 3  # Allow for 3 chunks with some buffer
+        if len(child.text_content) > available_space and available_space > 50:
+            # Reserve space for condensation markers
+            marker_overhead = len("...[condensed]...") * 2  # Two markers
+            usable_space = max(30, available_space - marker_overhead)  # Minimum 30 chars
             
-            # Take beginning, middle and end sections of child content
-            start_chunk = child.text_content[:chunk_size]
-            mid_point = len(child.text_content) // 2
-            mid_chunk = child.text_content[mid_point - chunk_size//2:mid_point + chunk_size//2]
-            end_chunk = child.text_content[-chunk_size:]
-            
-            # Combine with markers
-            child_content = f"{start_chunk}...[condensed]...{mid_chunk}...[condensed]...{end_chunk}"
+            # Use proportional chunking based on content length
+            if len(child.text_content) <= usable_space * 2:
+                # For shorter content, just take beginning and end
+                chunk_size = usable_space // 2
+                start_chunk = child.text_content[:chunk_size]
+                end_chunk = child.text_content[-chunk_size:]
+                child_content = f"{start_chunk}...[condensed]...{end_chunk}"
+            else:
+                # For longer content, use three chunks
+                chunk_size = usable_space // 3
+                start_chunk = child.text_content[:chunk_size]
+                mid_point = len(child.text_content) // 2
+                mid_start = max(chunk_size, mid_point - chunk_size//2)
+                mid_end = min(len(child.text_content) - chunk_size, mid_point + chunk_size//2)
+                mid_chunk = child.text_content[mid_start:mid_end]
+                end_chunk = child.text_content[-chunk_size:]
+                child_content = f"{start_chunk}...[condensed]...{mid_chunk}...[condensed]...{end_chunk}"
+        elif available_space <= 50:
+            # If very little space, just take a summary
+            child_content = f"[too faint to recall...]"
         else:
             child_content = child.text_content
 
         # Append child content to parent
-        parent.text_content = f"{parent.text_content}\n[Merged Memory]: {child_content}"
-        
+        parent.text_content = f"{parent.text_content}\n[this feels faint but relevant]: {child_content}"
+
         # Update semantic context with merged information
         parent.semantic_context.update({
             f"merged_{child.node_id}": {

@@ -26,10 +26,10 @@ try:
     # Note: Loading large models can take time and memory.
     NLP = spacy.load("en_core_web_sm") 
 except ImportError:
-    print("Warning: SpaCy not available. NE Density will be 0.")
+    print("Warning: SpaCy not available. NE Density will be 0. Please install 'spacy' and 'en_core_web_sm' model.")
     NLP = None
 except OSError:
-    print("Warning: SpaCy model 'en_core_web_sm' not found. NE Density will be 0.")
+    print("Warning: SpaCy model 'en_core_web_sm' not found. NE Density will be 0. Please install 'spacy' and 'en_core_web_sm' model.")
     NLP = None
 
 # Import internal modules
@@ -103,6 +103,11 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             # Start the expensive semantic density calculation first
             density_task = asyncio.create_task(self._calculate_semantic_density(text_content))
 
+            cohesion_task = None
+            sentences = [s.strip() for s in text_content.split('.') if s.strip()]
+            if len(sentences) >= 2:
+                cohesion_task = asyncio.create_task(self._calculate_semantic_cohesion_cached(sentences))
+
             # Start cluster analysis in parallel if requested (also expensive)
             cluster_task = None
             if analyze_clusters and 'cluster_nodes' in kwargs:
@@ -124,6 +129,11 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             
             # Wait for density calculation to complete
             metrics['semantic_density'] = await density_task
+
+            if cohesion_task:
+                metrics['semantic_cohesion'] = await cohesion_task
+            else:
+                metrics['semantic_cohesion'] = 0.4
             
             # Get cluster results if requested
             if cluster_task:
@@ -160,7 +170,8 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
 
     def _calculate_text_relevance_internal(self, text: str, query: str) -> float:
         """
-        Internal text relevance calculation (the actual computation).
+        Enhanced text relevance calculation optimized for direct matching.
+        Ensures important entities and phrases aren't lost in semantic analysis.
         """
         try:
             if not text or not query:
@@ -169,23 +180,118 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             text_lower = text.lower()
             query_lower = query.lower()
             
-            # Calculate keyword overlap
+            # Base keyword overlap (preserve existing logic)
             query_words = set(query_lower.split())
             text_words = set(text_lower.split())
             if not query_words:
                 return 0.0
                 
-            # Direct keyword matching
             word_matches = query_words.intersection(text_words)
             keyword_score = len(word_matches) / len(query_words)
-
-            # Add semantic patterns here in future
-            # EXPANSION POINT: Enhanced semantic pattern matching
             
-            return keyword_score
+            # ENHANCEMENT 1: Named entity exact matching boost
+            entity_boost = self._calculate_entity_relevance_boost(text, query)
+            
+            # ENHANCEMENT 2: Information density weighting for matched words
+            weighted_score = self._calculate_weighted_word_relevance(text_lower, query_lower, word_matches)
+            
+            # ENHANCEMENT 3: Exact phrase matching bonus
+            phrase_bonus = self._calculate_phrase_relevance_bonus(text_lower, query_lower)
+            
+            # Combine scores: baseline + enhancements
+            final_score = (
+                keyword_score * 0.5 +           # Base keyword overlap
+                entity_boost * 0.25 +           # Entity matching boost
+                weighted_score * 0.15 +         # Information density weighting  
+                phrase_bonus * 0.10             # Exact phrase bonus
+            )
+            
+            return min(1.0, final_score)
             
         except Exception as e:
-            self.logger.log_error(f"Text relevance calculation failed: {str(e)}")
+            self.logger.log_error(f"Enhanced text relevance calculation failed: {e}")
+            return 0.0
+        
+    def _calculate_entity_relevance_boost(self, text: str, query: str) -> float:
+        """Calculate boost for exact entity matches (names, important terms)."""
+        try:
+            # Look for capitalized words (likely entities) - simple but effective
+            query_entities = set()
+            text_entities = set()
+            
+            for word in query.split():
+                if word and word[0].isupper() and len(word) > 2:  # Capitalized, meaningful length
+                    query_entities.add(word.lower())
+                    
+            for word in text.split():
+                if word and word[0].isupper() and len(word) > 2:
+                    text_entities.add(word.lower())
+            
+            if not query_entities:
+                return 0.0
+                
+            entity_matches = query_entities.intersection(text_entities)
+            return len(entity_matches) / len(query_entities)
+            
+        except Exception:
+            return 0.0
+        
+    def _calculate_weighted_word_relevance(self, text_lower: str, query_lower: str, word_matches: set) -> float:
+        """Weight matched words by their information value."""
+        try:
+            if not word_matches:
+                return 0.0
+                
+            weighted_score = 0.0
+            query_words = set(query_lower.split())
+            
+            for word in word_matches:
+                weight = 1.0  # Base weight
+                
+                # Higher weight for longer words (more specific)
+                if len(word) >= 6:
+                    weight += 0.5
+                elif len(word) >= 4:
+                    weight += 0.2
+                    
+                # Higher weight for technical/specific terms
+                if any(suffix in word for suffix in ['tion', 'ment', 'ness', 'ity']):
+                    weight += 0.3
+                    
+                # Higher weight for numbers/dates
+                if any(c.isdigit() for c in word):
+                    weight += 0.4
+                    
+                weighted_score += weight
+                
+            return weighted_score / len(query_words)
+            
+        except Exception:
+            return 0.0
+        
+    def _calculate_phrase_relevance_bonus(self, text_lower: str, query_lower: str) -> float:
+        """Calculate bonus for exact phrase matches."""
+        try:
+            bonus = 0.0
+            
+            # Look for 2-word and 3-word phrases
+            query_words = query_lower.split()
+            
+            for i in range(len(query_words) - 1):
+                # 2-word phrases
+                phrase_2 = f"{query_words[i]} {query_words[i+1]}"
+                if phrase_2 in text_lower:
+                    bonus += 0.3
+                    
+                # 3-word phrases
+                if i < len(query_words) - 2:
+                    phrase_3 = f"{query_words[i]} {query_words[i+1]} {query_words[i+2]}"
+                    if phrase_3 in text_lower:
+                        bonus += 0.5
+                        
+            return min(1.0, bonus)
+            
+        except Exception:
             return 0.0
             
     @async_lru_cache(maxsize=1000, ttl=7200)
@@ -210,14 +316,6 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             except Exception:
                 return 0.0
 
-    async def _calculate_simple_density(self, text: str) -> float:
-        """Simplified density calculation for shorter texts."""
-        tokens = text.lower().split()
-        # Simple lexical diversity metric
-        unique_ratio = len(set(tokens)) / len(tokens) if tokens else 0.0
-        # Scale to appropriate range (0.3-0.7) for short texts
-        return 0.3 + (unique_ratio * 0.4)
-
     async def _calculate_full_density(self, text: str) -> float:
         """Full parallel density calculation for longer texts."""
         # Split into sentences
@@ -228,51 +326,41 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         # Start multiple async tasks in parallel
         tasks = {}
         
-        # 1. Calculate semantic cohesion if multiple sentences
-        tasks['cohesion'] = self._calculate_semantic_cohesion(sentences)
-        
-        # 2. Start NLP processing pipeline
+        # Start NLP processing pipeline
         tasks['nlp'] = self._process_nlp_features(text)
         
         # Wait for all tasks to complete
         results = await asyncio.gather(
-            tasks['cohesion'],
             tasks['nlp'],
             return_exceptions=True
         )
         
         # Extract results (with error handling)
-        semantic_cohesion = 0.5
         nlp_features = {}
         
         if not isinstance(results[0], Exception):
-            semantic_cohesion = results[0]
+            nlp_features = results[0]
         
-        if not isinstance(results[1], Exception):
-            nlp_features = results[1]
-        
-        # Combine metrics with weights
+        # OPTIMIZED: Component weights from Bayesian optimization (semantic_cohesion moved to orchestrator)
         weights = {
-            'semantic_cohesion': 0.25,       # How connected are ideas
-            'ne_density': 0.25,              # Specific entities mentioned
-            'abstraction_level': 0.20,       # Abstract vs concrete reasoning
-            'logical_complexity': 0.15,      # Logical structure complexity
-            'conceptual_bridging': 0.10,     # Connecting disparate ideas
-            'information_density': 0.05      # Factual information density
+            'ne_density': 0.35697005328542325,
+            'conceptual_surprise': 0.12266690258945108,
+            'logical_complexity': 0.24064287712085727,
+            'conceptual_bridging': 0.18685031356266707,
+            'information_density': 0.0928698534416014
         }
         
         # Extract features with defaults
         ne_density = nlp_features.get('ne_density', 0.0)
-        abstraction_level = nlp_features.get('abstraction_level', 0.5)
+        conceptual_surprise = nlp_features.get('conceptual_surprise', 0.5) 
         logical_complexity = nlp_features.get('logical_complexity', 0.0)
         conceptual_bridging = nlp_features.get('conceptual_bridging', 0.0)
         information_density = nlp_features.get('information_density', 0.0)
         
         # Calculate final score
         density_score = (
-            semantic_cohesion * weights['semantic_cohesion'] +
             ne_density * weights['ne_density'] +
-            abstraction_level * weights['abstraction_level'] +
+            conceptual_surprise * weights['conceptual_surprise'] +
             logical_complexity * weights['logical_complexity'] +
             conceptual_bridging * weights['conceptual_bridging'] +
             information_density * weights['information_density']
@@ -283,9 +371,8 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         # Log raw density for analysis
         self.logger.debug(f"[DENSITY_DEBUG] Raw density before transformation: {raw_density:.3f}")
         # and log the density scores
-        self.logger.debug(f"[DENSITY_DEBUG] Semantic Cohesion: {semantic_cohesion:.3f}, "
-                    f"NE Density: {ne_density:.3f}, "
-                    f"Abstraction Level: {abstraction_level:.3f}, "
+        self.logger.debug(f"[DENSITY_DEBUG] NE Density: {ne_density:.3f}, "
+                    f"Conceptual Surprise: {conceptual_surprise:.3f}, "
                     f"Logical Complexity: {logical_complexity:.3f}, "
                     f"Conceptual Bridging: {conceptual_bridging:.3f}, "
                     f"Information Density: {information_density:.3f}")
@@ -300,18 +387,30 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
     def _apply_exponential_density_transform(self, raw_density: float, text: str) -> float:
         """
         Apply exponential transformation to enhance semantic density discrimination.
+        OPTIMIZED: Bayesian-optimized transformation parameters for better LLM content discrimination.
         """
         try:
-            # Method 1: Power law transformation (more aggressive for high density)
-            if raw_density < 0.35:
-                enhanced = (raw_density / 0.35) ** 4.0 * 0.2  # Compress low end more
-            elif raw_density < 0.45:
-                enhanced = 0.2 + (raw_density - 0.35) * 5.0   # Steep middle
+            # OPTIMIZED PARAMETERS: From Bayesian optimization
+            low_threshold = 0.3691616082034308
+            mid_threshold = 0.38941444011515397
+            low_power = 2.9488588762066383
+            low_scale = 0.3935247114507835
+            mid_slope = 6.6566558364680715
+            high_base = 0.48682834810794123
+            high_scale = 9.877801387880073
+            min_output = 0.08324797874360076
+            max_output = 0.8723102125163544
+
+            # Power law transformation with optimized parameters
+            if raw_density < low_threshold:
+                enhanced = (raw_density / low_threshold) ** low_power * low_scale
+            elif raw_density < mid_threshold:
+                enhanced = low_scale + (raw_density - low_threshold) * mid_slope
             else:
-                enhanced = 0.7 + (1.0 - (0.5 ** ((raw_density - 0.45) * 15))) * 0.3
+                enhanced = 0.7 + (1.0 - (high_base ** ((raw_density - mid_threshold) * high_scale))) * 0.3
             
-            # Ensure bounds
-            enhanced = max(0.05, min(0.95, enhanced))
+            # Apply optimized output bounds
+            enhanced = max(min_output, min(max_output, enhanced))
             
             # Log transformation details for analysis
             self.logger.debug(f"[DENSITY_TRANSFORM] Raw: {raw_density:.3f} → Enhanced: {enhanced:.3f}")
@@ -325,32 +424,47 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             shifted = (raw_density - 0.35) * 16
             return 1 / (1 + math.exp(-shifted))
 
-    async def _calculate_semantic_cohesion(self, sentences: List[str]) -> float:
+    @async_lru_cache(
+        maxsize=1000, 
+        ttl=3600, 
+        key_func=lambda self, sentences: self._generate_text_cache_key('|||'.join(sentences), "cohesion")
+    )
+    async def _calculate_semantic_cohesion_cached(self, sentences: List[str]) -> float:
+        """Cached version of semantic cohesion calculation."""
+        return await self._calculate_semantic_cohesion_internal(sentences)
+
+    async def _calculate_semantic_cohesion_internal(self, sentences: List[str]) -> float:
         """Calculate semantic cohesion with parallel embedding generation."""
-        if len(sentences) <= 1:
-            return 0.5
+        if len(sentences) < 2:
+            return 0.4
         
-        # Generate embeddings in parallel
-        embedding_tasks = [
-            self.embedding_manager.encode(s, normalize_embeddings=True)
-            for s in sentences
-        ]
-        embeddings = await asyncio.gather(*embedding_tasks)
-        
-        # Calculate pairwise similarities
-        similarities = []
-        
-        # For large numbers of sentences, we could parallelize this too
-        # But for typical memory content, this is usually fast enough
-        for i in range(len(embeddings)):
-            for j in range(i+1, len(embeddings)):
-                sim = self.embedding_manager.calculate_similarity(
-                    embeddings[i],
-                    embeddings[j]
-                )
-                similarities.append(sim)
-        
-        return np.mean(similarities) if similarities else 0.5
+        try:
+            # Generate embeddings in parallel
+            embedding_tasks = [
+                self.embedding_manager.encode(s, normalize_embeddings=True)
+                for s in sentences
+            ]
+            embeddings = await asyncio.gather(*embedding_tasks)
+            
+            # Calculate pairwise similarities
+            similarities = []
+            for i in range(len(embeddings)):
+                for j in range(i+1, len(embeddings)):
+                    try:
+                        sim = self.embedding_manager.calculate_similarity(
+                            embeddings[i],
+                            embeddings[j]
+                        )
+                        similarities.append(sim)
+                    except Exception as e:
+                        self.logger.log_error(f"Similarity calculation failed: {e}")
+                        continue
+            
+            return np.mean(similarities) if similarities else 0.4
+            
+        except Exception as e:
+            self.logger.log_error(f"Semantic cohesion calculation failed: {e}")
+            return 0.4
 
     async def _process_nlp_features(self, text: str) -> Dict[str, float]:
         """
@@ -358,9 +472,8 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         """
         if not text or not NLP:
             return {
-                'semantic_cohesion_base': 0.0,
                 'ne_density': 0.0,
-                'abstraction_level': 0.0,
+                'conceptual_surprise': 0.0,
                 'logical_complexity': 0.0,
                 'conceptual_bridging': 0.0,
                 'information_density': 0.0
@@ -371,9 +484,8 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
             
             if not doc:
                 return {
-                    'semantic_cohesion_base': 0.0,
                     'ne_density': 0.0,
-                    'abstraction_level': 0.0,
+                    'conceptual_surprise': 0.0,
                     'logical_complexity': 0.0,
                     'conceptual_bridging': 0.0,
                     'information_density': 0.0
@@ -381,15 +493,14 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
 
             # Calculate all discriminators from the single SpaCy doc
             ne_density = self._calculate_named_entity_density(doc)
-            abstraction_level = self._calculate_abstraction_level(doc)
+            conceptual_surprise = self._calculate_conceptual_surprise(doc)
             logical_complexity = self._calculate_logical_complexity(doc)
             conceptual_bridging = self._calculate_conceptual_bridging(doc)
             information_density = self._calculate_information_density(doc)
 
             return {
-                'semantic_cohesion_base': 0.5,  # Placeholder - calculated separately
                 'ne_density': ne_density,
-                'abstraction_level': abstraction_level,
+                'conceptual_surprise': conceptual_surprise,
                 'logical_complexity': logical_complexity,
                 'conceptual_bridging': conceptual_bridging,
                 'information_density': information_density
@@ -397,79 +508,150 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         except Exception as e:
             self.logger.log_error(f"Enhanced SpaCy processing failed: {e}")
             return {
-                'semantic_cohesion_base': 0.5,
                 'ne_density': 0.0,
-                'abstraction_level': 0.5,
+                'conceptual_surprise': 0.5,
                 'logical_complexity': 0.5,
                 'conceptual_bridging': 0.5,
                 'information_density': 0.5
             }
-        
-    def _calculate_abstraction_level(self, doc) -> float:
+
+    def _calculate_conceptual_surprise(self, doc) -> float:
         """
-        Calculate abstraction level using domain-specific patterns instead of word frequency.
-        Optimized for AI agent memory formation content.
+        Calculate conceptual surprise - how linguistically unexpected are the patterns in this text?
+        Measures deviation from typical language patterns across multiple axes.
+        OPTIMIZED: Replaced abstraction heuristics with multi-axis surprise analysis.
         """
         if not doc:
             return 0.5
-
-        abstract_score = 0.0
-        concrete_score = 0.0
-        total_scored = 0
-
-        for token in doc:
-            if token.pos_ not in ['NOUN', 'VERB', 'ADJ'] or token.is_stop:
-                continue
-
-            lemma = token.lemma_.lower()
-            scored = False
-
-            # Concrete patterns - specific to agent memory domain
-            if token.ent_type_ or token.like_num:
-                concrete_score += 3.0
-                scored = True
-            elif lemma in {'execute', 'run', 'process', 'create', 'update', 'delete', 'fix', 'install', 'query', 'database', 'file', 'system', 'command', 'code', 'error', 'result'}:
-                concrete_score += 2.0
-                scored = True
-            elif token.pos_ == 'VERB' and len(token.text) <= 5:
-                concrete_score += 1.5  # Short action verbs
-                scored = True
-
-            # Abstract patterns - reasoning and conceptual words
-            elif lemma in {'understanding', 'realization', 'insight', 'concept', 'approach', 'strategy', 'pattern', 'relationship', 'significance', 'complexity', 'abstraction'}:
-                abstract_score += 2.5
-                scored = True
-            elif lemma in {'learn', 'understand', 'realize', 'recognize', 'develop', 'improve', 'analyze', 'evaluate', 'consider', 'determine'}:
-                abstract_score += 2.0
-                scored = True
-            elif token.pos_ == 'ADJ' and len(token.text) >= 8:
-                abstract_score += 1.5  # Long descriptive adjectives
-                scored = True
-
-            # Default patterns for unscored tokens
-            elif not scored:
-                if len(token.text) <= 4:
-                    concrete_score += 1.0
-                elif len(token.text) >= 10:
-                    abstract_score += 1.0
-
-            total_scored += 1
-
-        if total_scored == 0:
-            return 0.5
-
-        # Calculate ratio
-        total_points = abstract_score + concrete_score
-        if total_points == 0:
-            return 0.5
-
-        abstraction_ratio = abstract_score / total_points
         
-        # Map to realistic 0.2-0.8 range instead of 0.15-0.85
-        final_score = 0.2 + (abstraction_ratio * 0.6)
+        # OPTIMIZED PARAMETERS: From Bayesian optimization
+        syntactic_surprise_weight = 0.7199080112909861
+        semantic_role_surprise_weight = 1.636863548712361
+        discourse_surprise_weight = 1.5645776018689803
+        concept_surprise_normalization = 2.9918127231770475
+
+        # Component 1: Syntactic Surprise - unusual dependency structures and POS patterns
+        syntactic_surprise = self._analyze_syntactic_surprise(doc) * syntactic_surprise_weight
         
-        return min(0.95, max(0.05, final_score))
+        # Component 2: Semantic Role Surprise - unexpected agent-action-object combinations  
+        semantic_role_surprise = self._analyze_semantic_role_surprise(doc) * semantic_role_surprise_weight
+        
+        # Component 3: Discourse Surprise - unusual information packaging and emphasis
+        discourse_surprise = self._analyze_discourse_surprise(doc) * discourse_surprise_weight
+        
+        # Combine and normalize
+        total_surprise = syntactic_surprise + semantic_role_surprise + discourse_surprise
+        normalized = max(0.05, min(0.95, total_surprise / concept_surprise_normalization))
+        
+        return normalized
     
+    def _analyze_syntactic_surprise(self, doc) -> float:
+        """
+        Analyze syntactic surprise - unusual dependency structures and POS patterns.
+        Returns surprise score from 0 (expected) to 1 (highly unexpected).
+        """
+        if not doc:
+            return 0.0
+        
+        surprise_score = 0.0
+        total_tokens = len([token for token in doc if not token.is_space])
+        
+        if total_tokens == 0:
+            return 0.0
+        
+        # Detect unusual dependency patterns
+        rare_dependencies = {'advcl', 'acl:relcl', 'ccomp', 'xcomp', 'csubj', 'csubjpass'}
+        complex_dependencies = 0
+        
+        for token in doc:
+            # Count rare/complex dependency relations
+            if token.dep_ in rare_dependencies:
+                complex_dependencies += 1
+            
+            # Detect unusual POS sequences (simplified heuristic)
+            if token.pos_ == 'ADV' and token.head.pos_ == 'ADJ':
+                surprise_score += 0.1  # Adverb modifying adjective (somewhat unusual)
+            elif token.pos_ == 'VERB' and len([child for child in token.children if child.pos_ == 'VERB']) >= 2:
+                surprise_score += 0.2  # Verb with multiple verb children (unusual)
+        
+        # Normalize by text length
+        dependency_surprise = min(1.0, complex_dependencies / max(1, total_tokens * 0.1))
+        pattern_surprise = min(1.0, surprise_score / max(1, total_tokens * 0.05))
+        
+        return (dependency_surprise + pattern_surprise) / 2.0
+    
+    def _analyze_semantic_role_surprise(self, doc) -> float:
+        """
+        Analyze semantic role surprise - unexpected agent-action-object combinations.
+        Returns surprise score from 0 (expected) to 1 (highly unexpected).
+        """
+        if not doc:
+            return 0.0
+        
+        surprise_score = 0.0
+        verb_count = 0
+        
+        for token in doc:
+            if token.pos_ == 'VERB' and not token.is_stop:
+                verb_count += 1
+                
+                # Find subjects and objects
+                subjects = [child for child in token.children if child.dep_ in ['nsubj', 'nsubjpass']]
+                objects = [child for child in token.children if child.dep_ in ['dobj', 'pobj', 'iobj']]
+                
+                # Detect unusual combinations 
+                for subj in subjects:
+                    if subj.ent_type_ == 'PERSON' and token.lemma_ in ['compile', 'execute', 'process']:
+                        surprise_score += 0.1  # Person doing technical actions (slightly unusual)
+                    elif subj.ent_type_ in ['ORG', 'PRODUCT'] and token.lemma_ in ['think', 'feel', 'believe']:
+                        surprise_score += 0.3  # Organizations having emotions (more unusual)
+                
+                # Abstract subjects with concrete actions
+                for subj in subjects:
+                    if subj.pos_ == 'NOUN' and subj.lemma_ in ['idea', 'concept', 'thought'] and token.lemma_ in ['run', 'move', 'break']:
+                        surprise_score += 0.2  # Abstract concepts doing physical actions
+        
+        return min(1.0, surprise_score / max(1, verb_count * 0.2)) if verb_count > 0 else 0.0
+    
+    def _analyze_discourse_surprise(self, doc) -> float:
+        """
+        Analyze discourse surprise - unusual information packaging and emphasis.
+        Returns surprise score from 0 (expected) to 1 (highly unexpected).
+        """
+        if not doc:
+            return 0.0
+        
+        surprise_score = 0.0
+        sentence_count = len(list(doc.sents))
+        
+        if sentence_count == 0:
+            return 0.0
+        
+        for sent in doc.sents:
+            sent_tokens = [token for token in sent if not token.is_space]
+            if not sent_tokens:
+                continue
+            
+            # Detect unusual emphasis patterns
+            caps_count = sum(1 for token in sent_tokens if token.text.isupper() and len(token.text) > 1)
+            if caps_count > len(sent_tokens) * 0.3:  # More than 30% caps
+                surprise_score += 0.3
+            
+            # Detect unusual sentence structures
+            # Very short sentences with complex punctuation
+            if len(sent_tokens) <= 3 and any(token.text in ['!', '?', '...'] for token in sent_tokens):
+                surprise_score += 0.2
+            
+            # Very long sentences (potential run-ons)
+            if len(sent_tokens) > 30:
+                surprise_score += 0.2
+            
+            # Detect fronted elements
+            if sent_tokens and sent_tokens[0].pos_ in ['ADV', 'SCONJ'] and sent_tokens[0].dep_ == 'advmod':
+                surprise_score += 0.1  # Fronted adverbials
+        
+        return min(1.0, surprise_score / max(1, sentence_count * 0.3))
+        
     def _calculate_logical_complexity(self, doc) -> float:
         """
         Calculate logical complexity using a hybrid of syntactic and semantic analysis.
@@ -482,24 +664,30 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         if sentence_count == 0:
             return 0.0
         
+        # OPTIMIZED PARAMETERS: From Bayesian optimization
+        dependency_weight = 1.284465024260733
+        pos_weight = 1.878490677686282
+        semantic_reasoning_weight = 0.5
+        complexity_normalization = 19.014960800460248
+
         # 1. Analyze grammatical structure (dependency parsing)
-        dependency_score = self._analyze_dependency_complexity(doc)
+        dependency_score = self._analyze_dependency_complexity(doc) * dependency_weight
         
-        # 2. Analyze simple structural markers (POS tags)
-        pos_score = self._analyze_pos_complexity(doc)
+        # 2. Analyze simple structural markers (POS tags)  
+        pos_score = self._analyze_pos_complexity(doc) * pos_weight
         
         # 3. Analyze semantic and reasoning patterns
-        semantic_score = self._analyze_semantic_complexity(doc)
+        semantic_score = self._analyze_semantic_complexity(doc) * semantic_reasoning_weight
         
         # Combine scores and normalize by sentence count
         total_complexity = dependency_score + pos_score + semantic_score
         complexity_per_sentence = total_complexity / sentence_count
         
-        # Map to a 0.05-0.95 range. The divisor is tuned for the higher potential score.
-        return max(0.05, min(0.95, complexity_per_sentence / 8.0))
+        # OPTIMIZED: Enhanced normalization factor (was 8.0, now 19.015)
+        return max(0.05, min(0.95, complexity_per_sentence / complexity_normalization))
 
     def _analyze_dependency_complexity(self, doc) -> float:
-        """Analyze syntactic complexity using dependency parsing."""
+        """Analyze syntactic complexity using dependency parsing"""
         complexity = 0.0
         for token in doc:
             # Subordinate clauses indicate high complexity
@@ -563,26 +751,33 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
     def _calculate_conceptual_bridging(self, doc) -> float:
         """
         Measures conceptual bridging using a hybrid of syntactic and semantic analysis.
+        OPTIMIZED: Enhanced with Bayesian-optimized component weights and normalization.
         """
         if not doc or not len(doc):
             return 0.0
+
+        # OPTIMIZED PARAMETERS: From Bayesian optimization
+        syntactic_bridge_weight = 3.431218468386543
+        semantic_bridge_weight = 2.404539956228189
+        entity_bridge_weight = 1.5521114443634185
+        bridge_normalization = 0.7189199492281488
 
         bridging_score = 0.0
 
         for token in doc:
             # Calculate bridging score from different linguistic facets
-            bridging_score += self._get_syntactic_bridge_score(token) * 2.0
-            bridging_score += self._get_semantic_bridge_score(token) * 2.0
+            bridging_score += self._get_syntactic_bridge_score(token) * syntactic_bridge_weight
+            bridging_score += self._get_semantic_bridge_score(token) * semantic_bridge_weight
 
         entity_count = len(doc.ents)
         if entity_count >= 2:
-            bridging_score += min(entity_count * 0.8, 3.0)
+            bridging_score += min(entity_count * entity_bridge_weight, 3.0)
         
         # Normalize by the number of tokens
         density = bridging_score / len(doc)
         
-        # Scale the final score
-        return max(0.05, min(0.95, density / 0.5))
+        # OPTIMIZED: Enhanced normalization factor
+        return max(0.05, min(0.95, density / bridge_normalization))
 
     def _get_syntactic_bridge_score(self, token) -> float:
         """Analyzes grammatical markers that create bridges."""
@@ -622,23 +817,30 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         """
         Calculate information density using linguistic features rather than exact vocabulary.
         More robust and generalizable approach.
+        OPTIMIZED: Enhanced with Bayesian-optimized component weights and amplification.
         """
         if not doc or not len(doc):
             return 0.0
         
+        # OPTIMIZED PARAMETERS: From Bayesian optimization
+        technical_info_weight = 1.5739014204032535
+        social_info_weight = 0.5
+        factual_info_weight = 2.0
+        info_density_amplification = 5.75187709484826
+
         total_score = 0.0
         
         for token in doc:
-            # Use separate scoring functions for different information types
-            total_score += self._get_technical_info_score(token)
-            total_score += self._get_social_info_score(token)
-            total_score += self._get_factual_info_score(token)
+            # OPTIMIZED: Apply component-specific weights to different information types
+            total_score += self._get_technical_info_score(token) * technical_info_weight
+            total_score += self._get_social_info_score(token) * social_info_weight
+            total_score += self._get_factual_info_score(token) * factual_info_weight
         
         # Normalize by document length
-        density = total_score / len(doc)
+        raw_density = total_score / len(doc)
         
-        # Map to 0.05-0.95 range
-        return max(0.05, min(0.95, density / 2.0))
+        # OPTIMIZED: Enhanced amplification factor prevents saturation in LLM content
+        return max(0.05, min(0.95, raw_density / info_density_amplification))
 
     def _get_technical_info_score(self, token) -> float:
         """Score technical information using linguistic features."""
@@ -722,10 +924,8 @@ class SemanticMetricsCalculator(BaseSemanticMetricsCalculator):
         
         raw_density = len(doc.ents) / len(tokens)
         
-        # Amplify the raw score. We'll set a "high water mark" where a raw density
-        # of 0.1 or greater gets a full score of 1.0. This makes the metric
-        # much more sensitive to the presence of even a few entities.
-        amplification_factor = 10.0  # (since 1.0 / 0.1 = 10)
+        # OPTIMIZED: Bayesian optimization found 23.546 as optimal amplification
+        amplification_factor = 23.5461056089212
         amplified_score = min(1.0, raw_density * amplification_factor)
         
         return amplified_score

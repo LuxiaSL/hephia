@@ -22,7 +22,7 @@ class DensityEntry:
     # Individual components
     cohesion: float
     ne_density: float
-    abstraction_level: float
+    conceptual_surprise: float
     logical_complexity: float
     conceptual_bridging: float
     information_density: float
@@ -98,7 +98,7 @@ class DensityAnalyzer:
             'components': re.compile(
                 r'\[DENSITY_DEBUG\] Semantic Cohesion: ([0-9.]+),\s*'
                 r'NE Density: ([0-9.]+),\s*'
-                r'Abstraction Level: ([0-9.]+),\s*'
+                r'Conceptual Surprise: ([0-9.]+),\s*'
                 r'Logical Complexity: ([0-9.]+),\s*'
                 r'Conceptual Bridging: ([0-9.]+),\s*'
                 r'Information Density: ([0-9.]+)'
@@ -154,7 +154,7 @@ class DensityAnalyzer:
                     timestamp=timestamp,
                     cohesion=float(components_match.group(1)),
                     ne_density=float(components_match.group(2)),
-                    abstraction_level=float(components_match.group(3)),
+                    conceptual_surprise=float(components_match.group(3)),
                     logical_complexity=float(components_match.group(4)),
                     conceptual_bridging=float(components_match.group(5)),
                     information_density=float(components_match.group(6))
@@ -231,7 +231,7 @@ class DensityAnalyzer:
         component_data = {
             'semantic_cohesion': [e.cohesion for e in self.entries],
             'ne_density': [e.ne_density for e in self.entries],
-            'abstraction_level': [e.abstraction_level for e in self.entries],
+            'conceptual_surprise': [e.conceptual_surprise for e in self.entries],
             'logical_complexity': [e.logical_complexity for e in self.entries],
             'conceptual_bridging': [e.conceptual_bridging for e in self.entries],
             'information_density': [e.information_density for e in self.entries]
@@ -497,9 +497,9 @@ class DensityAnalyzer:
                         f"⚙️ NE DENSITY: Low discrimination (CV: {analysis.coefficient_of_variation:.3f}). "
                         f"Consider adjusting amplification factor or entity type filtering."
                     )
-                elif name == 'abstraction_level':
+                elif name == 'conceptual_surprise':
                     recommendations.append(
-                        f"⚙️ ABSTRACTION LEVEL: Low discrimination (CV: {analysis.coefficient_of_variation:.3f}). "
+                        f"⚙️ CONCEPTUAL SURPRISE: Low discrimination (CV: {analysis.coefficient_of_variation:.3f}). "
                         f"Consider adjusting concrete/abstract term detection or scoring weights."
                     )
                 elif name == 'logical_complexity':

@@ -25,7 +25,7 @@ class ConsolidationConfig:
     """Configuration for consolidation behavior."""
     activity_window: float = 3600  # 1 hour
     min_activity_ratio: float = 0.7  # For consolidation triggers
-    strength_threshold: float = 0.3  # When to consider consolidation
+    strength_threshold: float = 0.205  # When to consider consolidation
     max_nodes_ratio: float = 1.2     # Ratio to ideal node count
     consolidation_cooldown: float = 300  # 5 minutes between consolidations (300)
     min_active_nodes: int = 5  # Minimum nodes to maintain

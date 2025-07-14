@@ -377,9 +377,6 @@ class MemorySystemOrchestrator:
                         override_config=metrics_config
                     )
 
-                    self.logger.debug(f"[EVAL_DEBUG] Forward metrics: {type(forward_metrics)} - {forward_metrics if isinstance(forward_metrics, dict) else 'scalar'}")
-                    self.logger.debug(f"[EVAL_DEBUG] Backward metrics: {type(backward_metrics)} - {backward_metrics if isinstance(backward_metrics, dict) else 'scalar'}")
-                
                     if isinstance(forward_metrics, dict) and isinstance(backward_metrics, dict):
                         # Average the bidirectional metrics
                         forward_components = forward_metrics.get('component_metrics', {})
@@ -989,7 +986,7 @@ class MemorySystemOrchestrator:
                 temp_node=temp_node,
                 context=context,
                 evaluation_purpose="strength",
-                sample_size=10,
+                sample_size=20,
                 metrics_config_override=None  # Use default metrics config
             )
             
@@ -1057,21 +1054,6 @@ class MemorySystemOrchestrator:
                     
         return result
 
-    def _calculate_component_weights(self, node: Union[CognitiveMemoryNode, BodyMemoryNode]) -> Dict[str, float]:
-        """Calculate dynamic weights based on node type and available data."""
-        if isinstance(node, CognitiveMemoryNode):
-            return {
-                'novelty': 0.375,      # Semantic similarity importance
-                'emotional': 0.225,     # Emotional impact
-                'state': 0.225,        # State comparison
-            }
-        else:  # BodyMemoryNode
-            return {
-                'novelty': 0.0,      # Less emphasis on semantic
-                'emotional': 0.45,     # Higher emotional weight
-                'state': 0.55,        # Higher state importance
-            }
-
     def _calculate_novelty(self, metrics_list: List[Dict]) -> float:
         """Calculate novelty using enhanced semantic discrimination."""
         try:
@@ -1086,14 +1068,16 @@ class MemorySystemOrchestrator:
                     embedding_sim = semantic_metrics.get('embedding_similarity', 0.0)
                     text_relevance = semantic_metrics.get('text_relevance', 0.0)
                     semantic_density = semantic_metrics.get('semantic_density', 0.5)
+                    semantic_cohesion = semantic_metrics.get('semantic_cohesion', 0.5)
 
                     raw_densities.append(semantic_density)
                     
                     # Compute novelty as inverse of similarity
                     novelty_score = (
-                        (1.0 - embedding_sim) * 0.425 +
-                        (1.0 - text_relevance) * 0.275 +
-                        semantic_density * 0.30
+                        (1.0 - embedding_sim) * 0.35 +
+                        semantic_density * 0.40 +
+                        (1.0 - text_relevance) * 0.15 +
+                        semantic_cohesion * 0.10
                     )
                     self.logger.debug(f"[NOVELTY_DEBUG] Entry {i+1}: emb_sim={embedding_sim:.3f}, text_rel={text_relevance:.3f}, density={semantic_density:.3f}, novelty={novelty_score:.3f}")
                     semantic_scores.append(novelty_score)
@@ -1275,7 +1259,7 @@ class MemorySystemOrchestrator:
     
     async def get_random_nodes(
         self,
-        count: int = 5,
+        count: int,
         network_type: str = "cognitive",
         include_ghosted: bool = False
     ) -> List[Union[CognitiveMemoryNode, BodyMemoryNode]]:

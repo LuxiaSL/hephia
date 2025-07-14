@@ -26,7 +26,7 @@ class EmbeddingManager:
         self._sentence_transformer = None  # For lazy loading
         self._embedding_cache = {} 
         self._cache_size = 1000
-        self._embedding_dims = 1024
+        self._embedding_dims = 384
         
         if self.use_local:
             # Don't load immediately - wait for first use
@@ -58,43 +58,26 @@ class EmbeddingManager:
 
     @property
     def sentence_transformer(self) -> Optional[Any]:
-        """Lazy load the Stella 400 M embedder."""
+        """Lazy load the all_minilm embedder."""
         if self._sentence_transformer is None and self.use_local:
             gpu_available = torch.cuda.is_available()
-            fast_kernel   = False
-
-            if gpu_available:
-                try:
-                    import xformers            # optional speed-up
-                    fast_kernel = True
-                except ImportError:
-                    MemoryLogger.warning("xformers not found; falling back to standard attention.")
 
             MemoryLogger.info(
-                f"Loading Stella 400 M embedder on {'GPU' if gpu_available else 'CPU'} "
-                f"{'with xformers' if fast_kernel else 'without xformers'}"
+                f"Loading all-MiniLM embedder on {'GPU' if gpu_available else 'CPU'}"
             )
-
-            config_kwargs = {
-                "use_memory_efficient_attention": fast_kernel,
-                "unpad_inputs": fast_kernel,
-                "attn_implementation": "eager",
-            }
 
             try:
                 from sentence_transformers import SentenceTransformer
                 self._sentence_transformer = SentenceTransformer(
-                    "dunzhang/stella_en_400M_v5",
-                    device="cuda" if gpu_available else "cpu",
-                    trust_remote_code=True,
-                    config_kwargs=config_kwargs
+                    "all-MiniLM-L6-v2",
+                    device="cuda" if gpu_available else "cpu"
                 )
-                MemoryLogger.info("Loaded Stella 400 M successfully.")
+                MemoryLogger.info("Loaded all-MiniLM-L6-v2 successfully.")
             except ImportError as e:
                 MemoryLogger.warning(f"sentence-transformers missing: {e}. API fallback engaged.")
                 self.use_local = False
             except Exception as e:
-                MemoryLogger.warning(f"Stella init failed: {e}. API fallback engaged.")
+                MemoryLogger.warning(f"all-MiniLM init failed: {e}. API fallback engaged.")
                 self.use_local = False
 
         return self._sentence_transformer

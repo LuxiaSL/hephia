@@ -36,6 +36,9 @@ def detect_cognitive_conflict(
     """
     # If metrics not provided, calculate them
     if not metrics and metrics_orchestrator:
+        from ...metrics.orchestrator import MetricsConfiguration
+        metrics_config = MetricsConfiguration()
+        metrics_config.detailed_metrics = True
         metrics = metrics_orchestrator.calculate_metrics(nodeA, nodeB)
 
     component_metrics = metrics.get('component_metrics', {})
