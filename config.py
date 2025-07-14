@@ -300,7 +300,7 @@ class Config:
 
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
-    EMOTION_UPDATE_TIMER = 0.05
+    EMOTION_UPDATE_TIMER = 1
     MEMORY_UPDATE_TIMER = 180 # think about this deeper
 
     # Processor settings

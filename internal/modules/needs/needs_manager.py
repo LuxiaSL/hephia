@@ -93,8 +93,6 @@ class NeedsManager:
                 old_value = need.value
                 need.update()
                 if need.value != old_value:
-                    # Dispatch need:changed event
-                    # See EVENT_CATALOG.md for full event details
                     global_event_dispatcher.dispatch_event_sync(Event("need:changed", {
                         "need_name": need_name,
                         "old_value": old_value,

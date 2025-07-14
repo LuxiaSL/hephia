@@ -29,31 +29,33 @@ class MeditateEnvironment(BaseEnvironment):
         super().__init__()
         
         self.help_text = """
-        The meditation environment allows focused introspection and state influence.
-        Use 'focus' to meditate on specific states or concepts.
-        Use 'absorb' to deeply reflect on specific memories.
+The meditation environment allows focused introspection and state influence.
+Use 'focus' to meditate on states using related memories for guidance.
+Use 'absorb' to deeply reflect on memories about specific topics.
 
-        Examples:
-        - meditate focus "calm"
-        - meditate focus "contentment"
-        - meditate absorb <memory_id>
-        """
+Examples:
+- meditate focus "calm" - find memories of calm moments and focus toward that state
+- meditate absorb "feeling accomplished" - absorb memories about accomplishment
+- meditate focus "confidence" --intensity=0.7 --duration=2
+- meditate absorb "peaceful moments" --count=2
+"""
 
     def _register_commands(self) -> None:
         """Register meditation environment commands."""
         self.register_command(
             CommandDefinition(
                 name="focus",
-                description="Meditate on and elicit a specific state",
+                description="Meditate on a state using related memories for emotional guidance",
                 parameters=[
                     Parameter(
                         name="state",
-                        description="State or concept to focus on",
+                        description="State, feeling, or concept to focus on",
                         required=True,
                         examples=[
                             '"calm"',
-                            '"joy"',
-                            '"clarity"'
+                            '"confidence"',
+                            '"clarity"',
+                            '"feeling accomplished"'
                         ]
                     )
                 ],
@@ -73,11 +75,12 @@ class MeditateEnvironment(BaseEnvironment):
                 ],
                 examples=[
                     'meditate focus "calm"',
-                    'meditate focus "joy" --intensity=0.7',
-                    'meditate focus "peace" --duration=2'
+                    'meditate focus "confidence" --intensity=0.7',
+                    'meditate focus "feeling proud" --duration=2',
+                    'meditate focus "inner peace" --intensity=0.6 --duration=3'
                 ],
                 related_commands=[
-                    'meditate absorb',
+                    'meditate absorb "related topic"',
                     'reflect query "similar feeling"'
                 ],
                 category="State Focus"
@@ -87,12 +90,17 @@ class MeditateEnvironment(BaseEnvironment):
         self.register_command(
             CommandDefinition(
                 name="absorb",
-                description="Deeply absorb and reflect on a specific memory",
+                description="Deeply absorb and reflect on memories related to a topic",
                 parameters=[
                     Parameter(
-                        name="memory_id",
-                        description="ID of the memory to absorb",
-                        required=True
+                        name="topic",
+                        description="Topic or theme to search for and absorb memories about",
+                        required=True,
+                        examples=[
+                            '"feeling accomplished"',
+                            '"times I learned something new"',
+                            '"peaceful moments"'
+                        ]
                     )
                 ],
                 flags=[
@@ -100,21 +108,27 @@ class MeditateEnvironment(BaseEnvironment):
                         name="intensity",
                         description="Depth of absorption",
                         type=ParameterType.NUMBER,
-                        default=0.5
+                        default=0.8
+                    ),
+                    Flag(
+                        name="count",
+                        description="Maximum number of memories to absorb",
+                        type=ParameterType.INTEGER,
+                        default=3
                     )
                 ],
                 examples=[
-                    'meditate absorb memory_123',
-                    'meditate absorb memory_456 --intensity=0.8'
+                    'meditate absorb "feeling proud of my work"',
+                    'meditate absorb "calm moments" --intensity=0.6',
+                    'meditate absorb "recent insights" --count=2 --intensity=0.9'
                 ],
                 related_commands=[
-                    'reflect query "related memories"',
-                    'meditate focus "similar feeling"'
+                    'reflect query "similar topic"',
+                    'meditate focus "related feeling"'
                 ],
                 category="Memory Absorption"
             )
         )
-
     async def _execute_command(
         self,
         action: str,
@@ -129,8 +143,8 @@ class MeditateEnvironment(BaseEnvironment):
                 intensity = flags.get("intensity", 0.5)
                 duration = flags.get("duration", 1)
                 
-                # Request state influence through cognitive bridge
-                result = self.cognitive_bridge.meditate_on_state(
+                # Request memory-informed focus meditation through cognitive bridge
+                result = await self.cognitive_bridge.focus_on_state_with_memories(
                     state,
                     intensity,
                     duration
@@ -142,21 +156,54 @@ class MeditateEnvironment(BaseEnvironment):
                         message=f"Attempted to focus on '{state}' but felt no significant shift.",
                         suggested_commands=[
                             f'meditate focus "{state}" --intensity={min(1.0, intensity + 0.2)}',
-                            'reflect query "similar states"'
+                            f'reflect query "{state}"'
                         ]
                     )
                 
-                response = (
-                    f"Focusing on '{state}'...\n\n"
-                    f"Feeling a {result.get('intensity', 'subtle')} sense of {state}.\n"
-                    f"Internal state is shifting {result.get('direction', 'gradually')}."
-                )
+                # Check if this was memory-informed or basic meditation
+                memory_count = result.get('memory_count', 0)
+                effects = result.get('effects', [])
                 
-                # Suggest follow-ups based on the meditation result
-                suggested = [
-                    f'reflect query "times I felt {state}"',
-                    f'meditate focus "{state}" --duration={duration + 1}'
-                ]
+                if memory_count > 0:
+                    # Memory-informed meditation response
+                    avg_direction = result.get('average_direction', {})
+                    valence = avg_direction.get('valence', 0.0)
+                    arousal = avg_direction.get('arousal', 0.0)
+                    
+                    # Create descriptive response based on actual emotional direction
+                    direction_desc = ""
+                    if abs(valence) > 0.1:
+                        direction_desc += "uplifting" if valence > 0 else "contemplative"
+                    if abs(arousal) > 0.1:
+                        if direction_desc:
+                            direction_desc += " and "
+                        direction_desc += "energizing" if arousal > 0 else "calming"
+                    if not direction_desc:
+                        direction_desc = "subtle"
+                    
+                    response = (
+                        f"Focusing on '{state}' through {memory_count} related memories...\n\n"
+                        f"Drawing emotional patterns from past experiences of {state}.\n"
+                        f"Feeling a {direction_desc} influence (valence: {valence:+.2f}, arousal: {arousal:+.2f}).\n\n"
+                        f"Effects:\n" + "\n".join(f"• {effect}" for effect in effects)
+                    )
+                    
+                    suggested = [
+                        f'reflect query "times I felt {state}"',
+                        f'meditate absorb "{state}"'
+                    ]
+                else:
+                    # Basic meditation fallback response
+                    response = (
+                        f"Focusing on '{state}'...\n\n"
+                        f"No specific memories surfaced, drawing from intuitive understanding.\n"
+                        f"Gentle influence toward {state}."
+                    )
+                    
+                    suggested = [
+                        f'reflect query "{state}"',
+                        f'meditate absorb "{state}"'
+                    ]
                 
                 return CommandResult(
                     success=True,
@@ -166,58 +213,78 @@ class MeditateEnvironment(BaseEnvironment):
                         "state": state,
                         "intensity": intensity,
                         "duration": duration,
+                        "memory_informed": memory_count > 0,
                         "result": result
                     }
                 )
-                
+            # Handle memory absorption command        
             elif action == "absorb":
-                memory_id = params[0]
-                intensity = flags.get("intensity", 0.5)
+                topic = params[0]
+                intensity = flags.get("intensity", 0.8)
+                max_count = flags.get("count", 3)
                 
                 # Request memory absorption through cognitive bridge
                 result = await self.cognitive_bridge.absorb_memory(
-                    memory_id,
-                    intensity
+                    topic,  # Now passing topic instead of memory_id
+                    intensity,
+                    max_count
                 )
                 
                 if not result:
                     error = CommandValidationError(
-                        message=f"Could not find or access memory {memory_id}",
+                        message=f"No memories found related to '{topic}'",
                         suggested_fixes=[
-                            "Verify the memory ID is correct",
-                            "Check if the memory still exists"
+                            "Try a broader search term",
+                            "Check recent memories first",
+                            "Use different keywords"
                         ],
                         related_commands=[
+                            'reflect query "' + topic + '"',
                             'reflect recent',
-                            'reflect query "recent memories"'
+                            'meditate absorb "broader topic"'
                         ],
                         examples=[
-                            'meditate absorb memory_123',
-                            'meditate absorb memory_456'
+                            'meditate absorb "feeling good"',
+                            'meditate absorb "recent experiences"'
                         ]
                     )
                     return CommandResult(
                         success=False,
-                        message=f"Could not find or access memory {memory_id}.",
+                        message=f"No memories found for '{topic}'. Try a broader search or check recent memories.",
                         suggested_commands=[
-                            'reflect recent',
-                            'reflect query "recent memories"'
+                            f'reflect query "{topic}"',
+                            'reflect recent'
                         ],
                         error=error
                     )
                 
-                # Format the absorption experience
-                memory_content = result.get("content", "this memory")
-                effects = result.get("effects", [])
+                # Format the absorption experience with actual results
+                absorbed_count = result.get("absorbed_count", 0)
+                memories = result.get("memories", [])
+                collective_effects = result.get("collective_effects", [])
+                
+                # Create detailed response showing what was absorbed
+                memory_descriptions = []
+                for memory in memories[:3]:  # Show top 3 in response
+                    content_preview = memory['content'][:50] + "..." if len(memory['content']) > 50 else memory['content']
+                    relevance = memory.get('relevance', 0.0)
+                    memory_descriptions.append(f"• {content_preview} (relevance: {relevance:.2f})")
+                
+                effects_text = ""
+                if collective_effects:
+                    effects_text = "\n\nEffects:\n" + "\n".join(f"• {effect}" for effect in collective_effects[:5])
                 
                 response = (
-                    f"Absorbing memory: {memory_content}\n\n" +
-                    "\n".join(f"• {effect}" for effect in effects)
+                    f"Absorbed {absorbed_count} memories about '{topic}':\n\n" +
+                    "\n".join(memory_descriptions) +
+                    effects_text
                 )
-                # Suggest relevant follow-ups
+                
+                # Suggest relevant follow-ups based on the topic
                 suggested = [
-                    f'reflect query "similar to {memory_id}"',
-                    f'meditate focus "{result.get("dominant_feeling", "this feeling")}"'
+                    f'reflect query "{topic}"',
+                    f'meditate focus "{topic}"',
+                    'reflect recent'
                 ]
                 
                 return CommandResult(
@@ -225,9 +292,11 @@ class MeditateEnvironment(BaseEnvironment):
                     message=response,
                     suggested_commands=suggested,
                     data={
-                        "memory_id": memory_id,
+                        "topic": topic,
                         "intensity": intensity,
-                        "result": result
+                        "absorbed_count": absorbed_count,
+                        "memories": memories,
+                        "collective_effects": collective_effects
                     }
                 )
                 

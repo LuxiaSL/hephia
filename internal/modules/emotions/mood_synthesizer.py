@@ -295,42 +295,57 @@ class MoodSynthesizer:
                 'calming': {'valence': 0.1, 'arousal': -0.4},
                 'deepening': {'valence': -0.2, 'arousal': -0.3},
                 'focusing': {'valence': 0.2, 'arousal': 0.3},
-                'activation': {'valence': 0.3, 'arousal': 0.4}
+                'activation': {'valence': 0.3, 'arousal': 0.4},
+                'memory_informed': None  # Special handling below
             }
 
-            if meditation_type in meditation_influences:
+            if meditation_type == 'memory_informed':
+                # Handle memory-informed meditation using discovered emotional patterns
+                valence_direction = meditation_data.get('valence_direction', 0.0)
+                arousal_direction = meditation_data.get('arousal_direction', 0.0)
+                memory_count = meditation_data.get('memory_count', 0)
+                
+                # Scale the discovered patterns for mood influence
+                # Memory-informed meditation should have stronger mood influence since it's based on actual patterns
+                memory_factor = min(1.5, 1.0 + (memory_count * 0.1))  # Boost based on number of memories
+                scaled_valence = valence_direction * intensity * memory_factor * (1 + 0.2 * duration)
+                scaled_arousal = arousal_direction * intensity * memory_factor * (1 + 0.2 * duration)
+                
+            elif meditation_type in meditation_influences:
                 influence = meditation_influences[meditation_type]
                 
                 # Scale influence by intensity and duration
                 scaled_valence = influence['valence'] * intensity * (1 + 0.2 * duration)
                 scaled_arousal = influence['arousal'] * intensity * (1 + 0.2 * duration)
+            else:
+                return  # Unknown meditation type
+            
+            # Create meditation-influenced mood
+            meditation_mood = Mood(
+                valence=self.current_mood.valence + (scaled_valence * self.weights['emotions']),
+                arousal=self.current_mood.arousal + (scaled_arousal * self.weights['emotions'])
+            )
+            
+            # Clamp values
+            meditation_mood.valence = max(-1.0, min(1.0, meditation_mood.valence))
+            meditation_mood.arousal = max(-1.0, min(1.0, meditation_mood.arousal))
+            
+            # Update mood if change is significant
+            if abs(meditation_mood.valence - self.current_mood.valence) > 0.1 or \
+            abs(meditation_mood.arousal - self.current_mood.arousal) > 0.1:
                 
-                # Create meditation-influenced mood
-                meditation_mood = Mood(
-                    valence=self.current_mood.valence + (scaled_valence * self.weights['emotions']),
-                    arousal=self.current_mood.arousal + (scaled_arousal * self.weights['emotions'])
-                )
+                old_name = self.current_mood_name
+                self.current_mood = meditation_mood
+                new_name = self._map_mood_to_name(meditation_mood)
                 
-                # Clamp values
-                meditation_mood.valence = max(-1.0, min(1.0, meditation_mood.valence))
-                meditation_mood.arousal = max(-1.0, min(1.0, meditation_mood.arousal))
-                
-                # Update mood if change is significant
-                if abs(meditation_mood.valence - self.current_mood.valence) > 0.1 or \
-                   abs(meditation_mood.arousal - self.current_mood.arousal) > 0.1:
-                    
-                    old_name = self.current_mood_name
-                    self.current_mood = meditation_mood
-                    new_name = self._map_mood_to_name(meditation_mood)
-                    
-                    if new_name != old_name:
-                        self.current_mood_name = new_name
-                        global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
-                            "old_name": old_name,
-                            "new_name": new_name,
-                            "mood_object": meditation_mood,
-                            "source": "meditation"
-                        }))
+                if new_name != old_name:
+                    self.current_mood_name = new_name
+                    global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
+                        "old_name": old_name,
+                        "new_name": new_name,
+                        "mood_object": meditation_mood,
+                        "source": "memory_informed_meditation" if meditation_type == 'memory_informed' else "meditation"
+                    }))
 
         except Exception as e:
             print(f"Error processing meditation effect: {str(e)}")

@@ -349,50 +349,198 @@ class CognitiveBridge:
                 {"message": f"Meditation failed: {str(e)}"}
             ))
             return {}
-
-    async def absorb_memory(self, memory_id: str, intensity: float) -> Dict[str, Any]:
+        
+    async def focus_on_state_with_memories(
+        self, 
+        state_query: str, 
+        intensity: float = 0.5, 
+        duration: int = 1
+    ) -> Dict[str, Any]:
         """
-        Deep focus on specific memory with amplified echo effects.
-        Abstracts memory interaction through the memory system orchestrator.
+        Focus meditation that finds memories related to the state and uses their
+        emotional patterns to create more targeted meditation effects.
+        
+        Args:
+            state_query: Abstract state or feeling to focus on
+            intensity: Desired meditation intensity 
+            duration: Meditation duration in cycles
+            
+        Returns:
+            Dict containing meditation results and emotional patterns found
         """
         try:
-            # Use memory system's meditation method instead of direct manipulation
-            meditation_result = await self.memory_system.meditate_on_memory(
-                memory_id=memory_id,
-                intensity=intensity,
-                duration=5  # Default duration for absorption
+            # Get current context
+            context = await self.internal_context.get_memory_context(is_cognitive=True)
+            
+            # Do mini-reflect to find relevant memories (smaller set than full reflect)
+            related_memories = await self.retrieve_memories(
+                query=state_query,
+                limit=5,  # Smaller set for focus vs absorb
+                context_state=context,
+                threshold=0.15  # Slightly higher threshold for relevance
             )
-
-            if not meditation_result:
-                return None
-
-            # Format result using meditation data
-            result = {
-                "content": meditation_result.get("content"),
-                "effects": ["Memory becoming clearer"],
-                "connected_effects": []
+            
+            if not related_memories:
+                # Fall back to basic meditation if no memories found
+                return self.meditate_on_state(state_query, intensity, duration)
+            
+            # Extract emotional patterns from memories
+            emotional_patterns = []
+            total_relevance = 0.0
+            
+            for memory in related_memories:
+                relevance = memory.get('relevance', 0.0)
+                total_relevance += relevance
+                
+                # Try to extract emotional context from memory if available
+                # This would come from the memory's processed_state when it was formed
+                if 'emotional_state' in memory.get('processed_state', {}):
+                    emotions = memory['processed_state']['emotional_state']
+                    for emotion in emotions:
+                        emotional_patterns.append({
+                            'valence': emotion.get('valence', 0.0),
+                            'arousal': emotion.get('arousal', 0.0),
+                            'intensity': emotion.get('intensity', 0.0),
+                            'weight': relevance
+                        })
+            
+            if not emotional_patterns:
+                # If no emotional patterns found, fall back to basic meditation
+                return self.meditate_on_state(state_query, intensity, duration)
+            
+            # Calculate weighted average emotional direction
+            total_weight = sum(p['weight'] for p in emotional_patterns)
+            if total_weight > 0:
+                avg_valence = sum(p['valence'] * p['weight'] for p in emotional_patterns) / total_weight
+                avg_arousal = sum(p['arousal'] * p['weight'] for p in emotional_patterns) / total_weight
+                avg_intensity = sum(p['intensity'] * p['weight'] for p in emotional_patterns) / total_weight
+            else:
+                avg_valence = avg_arousal = avg_intensity = 0.0
+            
+            # Create memory-informed meditation events
+            memory_informed_effects = []
+            
+            # Dispatch emotional meditation based on discovered patterns
+            global_event_dispatcher.dispatch_event(Event(
+                "cognitive:emotional:meditation",
+                {
+                    "type": "memory_informed",
+                    "state_query": state_query,
+                    "valence_direction": avg_valence,
+                    "arousal_direction": avg_arousal,
+                    "intensity": intensity * (1 + avg_intensity * 0.5),  # Boost based on memory intensity
+                    "duration": duration,
+                    "memory_count": len(related_memories)
+                }
+            ))
+            
+            memory_informed_effects.append(f"Drawing from {len(related_memories)} related memories")
+            memory_informed_effects.append(f"Emotional resonance: {avg_valence:.2f} valence, {avg_arousal:.2f} arousal")
+            
+            # Also dispatch mood meditation if the pattern suggests it
+            if abs(avg_valence) > 0.2:
+                mood_type = "elevation" if avg_valence > 0 else "deepening"
+                global_event_dispatcher.dispatch_event(Event(
+                    "cognitive:mood:meditation",
+                    {
+                        "type": mood_type,
+                        "intensity": intensity * abs(avg_valence),
+                        "duration": duration
+                    }
+                ))
+                memory_informed_effects.append(f"Mood influence: {mood_type}")
+            
+            return {
+                "state_query": state_query,
+                "memory_count": len(related_memories),
+                "emotional_patterns": emotional_patterns,
+                "average_direction": {
+                    "valence": avg_valence,
+                    "arousal": avg_arousal,
+                    "intensity": avg_intensity
+                },
+                "effects": memory_informed_effects,
+                "total_relevance": total_relevance
             }
+            
+        except Exception as e:
+            self.logger.error(f"Memory-informed focus meditation error: {str(e)}")
+            # Fall back to basic meditation on error
+            return self.meditate_on_state(state_query, intensity, duration)
 
-            # Process connected memories from meditation result
-            if "connected_memories" in meditation_result:
-                for connection in meditation_result["connected_memories"]:
-                    result["connected_effects"].append({
-                        "content": connection["content"],
-                        "strength": connection["connection_strength"],
-                        "depth": connection["depth"]
+    async def absorb_memory(
+        self, 
+        query: str, 
+        intensity: float = 0.8, 
+        max_memories: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Absorb memories based on a query topic rather than specific memory ID.
+        Retrieves relevant memories and performs meditation on the top results.
+        
+        Args:
+            query: Topic or theme to search for memories about
+            intensity: Meditation intensity for each memory
+            max_memories: Maximum number of memories to absorb
+            
+        Returns:
+            Dict containing absorbed memories and their collective effects
+        """
+        try:
+            # Get current context for memory retrieval
+            context = await self.internal_context.get_memory_context(is_cognitive=True)
+            
+            # Retrieve relevant memories using existing infrastructure
+            relevant_memories = await self.retrieve_memories(
+                query=query,
+                limit=max_memories,
+                context_state=context,
+                threshold=0.1  # Only memories with some relevance
+            )
+            
+            if not relevant_memories:
+                return None
+                
+            # Meditate on each retrieved memory
+            absorbed_memories = []
+            collective_effects = []
+            
+            for memory in relevant_memories:
+                meditation_result = await self.memory_system.meditate_on_memory(
+                    memory_id=memory['id'],
+                    intensity=intensity,
+                    duration=3  # Shorter duration per memory when doing multiple
+                )
+                
+                if meditation_result and 'error' not in meditation_result:
+                    absorbed_memories.append({
+                        'memory_id': memory['id'],
+                        'content': memory['content'],
+                        'relevance': memory.get('relevance', 0.0),
+                        'effects': meditation_result.get('echo_effects', [])
                     })
-
-            # Include echo effects if available
-            if "echo_effects" in meditation_result:
-                result["effects"].extend(meditation_result["echo_effects"])
-
-            return result
-
+                    
+                    # Collect effects for summary
+                    if meditation_result.get('echo_effects'):
+                        collective_effects.extend(meditation_result['echo_effects'])
+            
+            if not absorbed_memories:
+                return None
+                
+            return {
+                'query': query,
+                'absorbed_count': len(absorbed_memories),
+                'memories': absorbed_memories,
+                'collective_effects': collective_effects,
+                'intensity': intensity
+            }
+            
         except Exception as e:
             global_event_dispatcher.dispatch_event(Event(
                 "cognitive:error",
-                {"message": f"Memory absorption failed: {str(e)}"}
+                {"message": f"Memory absorption by query failed: {str(e)}"}
             ))
+            self.logger.error(f"Query-based absorption error: {str(e)}")
             return None
 
     async def _handle_memory_formation(self, event: Event):

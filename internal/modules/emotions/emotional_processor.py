@@ -723,10 +723,32 @@ class EmotionalProcessor:
                 'calming': {'valence': 0.3, 'arousal': -0.6, 'name': 'peaceful'},
                 'focusing': {'valence': 0.2, 'arousal': 0.4, 'name': 'focused'},
                 'satisfaction': {'valence': 0.4, 'arousal': -0.2, 'name': 'content'},
-                'activation': {'valence': 0.3, 'arousal': 0.5, 'name': 'energized'}
+                'activation': {'valence': 0.3, 'arousal': 0.5, 'name': 'energized'},
+                'memory_informed': None  # Special handling below
             }
 
-            if meditation_type in meditation_mappings:
+            if meditation_type == 'memory_informed':
+                # Handle memory-informed meditation with discovered emotional patterns
+                state_query = meditation_data.get('state_query', 'focused')
+                valence_direction = meditation_data.get('valence_direction', 0.0)
+                arousal_direction = meditation_data.get('arousal_direction', 0.0)
+                memory_count = meditation_data.get('memory_count', 0)
+                
+                # Create vector based on discovered emotional patterns
+                meditation_vector = EmotionalVector(
+                    valence=valence_direction * 0.7,  # Scale down the influence
+                    arousal=arousal_direction * 0.7,
+                    intensity=intensity * (1 + 0.1 * memory_count),  # Boost intensity based on memory count
+                    source_type='memory_informed_meditation',
+                    source_data={
+                        'state_query': state_query,
+                        'memory_count': memory_count,
+                        'duration': duration
+                    },
+                    name=f"memory-informed {state_query}"
+                )
+                
+            elif meditation_type in meditation_mappings:
                 mapping = meditation_mappings[meditation_type]
                 
                 # Create meditation vector
@@ -738,23 +760,25 @@ class EmotionalProcessor:
                     source_data={'type': meditation_type, 'duration': duration},
                     name=mapping['name']
                 )
+            else:
+                return  # Unknown meditation type
 
-                # Apply meditation-specific dampening
-                category = self._categorize_vector(meditation_vector.valence, meditation_vector.arousal)
-                meditation_dampening = await self._calculate_dampening(category) * 0.8
-                meditation_vector.intensity *= meditation_dampening
+            # Apply meditation-specific dampening
+            category = self._categorize_vector(meditation_vector.valence, meditation_vector.arousal)
+            meditation_dampening = await self._calculate_dampening(category) * 0.8
+            meditation_vector.intensity *= meditation_dampening
 
-                # Add meditation vector to current stimulus
-                self.current_stimulus.add_vector(meditation_vector)
+            # Add meditation vector to current stimulus
+            self.current_stimulus.add_vector(meditation_vector)
 
-                # Log and dispatch meditation effect (counts as new emotion for systems)
-                global_event_dispatcher.dispatch_event_sync(Event("emotion:new", {
-                    "emotion": meditation_vector,
-                    "duration": duration
-                }))
+            # Log and dispatch meditation effect (counts as new emotion for systems)
+            global_event_dispatcher.dispatch_event_sync(Event("emotion:new", {
+                "emotion": meditation_vector,
+                "duration": duration
+            }))
 
-                # Process influences on meditation vector
-                await self._process_influences(meditation_vector)
+            # Process influences on meditation vector
+            await self._process_influences(meditation_vector)
 
         except Exception as e:
             print(f"Error processing meditation: {str(e)}")
