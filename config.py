@@ -30,7 +30,7 @@ class ModelConfig:
     model_id: str
     env_var: Optional[str] = None
     max_tokens: int = 250
-    temperature: float = 0.7
+    temperature: float = 0.95
     description: str = ""
 
 class Config:
@@ -360,5 +360,5 @@ class Config:
         'loneliness': 0.0002
     }
 
-    VERSION = "0.2.5"
+    VERSION = "0.3"
 

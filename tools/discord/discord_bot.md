@@ -49,6 +49,11 @@ This guide outlines how to set up and configure a Discord bot to work with Hephi
     ```bash
     python tools/discord/bot.py
     ```
+    or
+    ```bash
+    python launch.py
+    # option 2
+    ```
     Default port: 5518
 
 ## API Endpoints

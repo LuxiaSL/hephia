@@ -1,11 +1,12 @@
 # Basic requirements
 fastapi
-uvicorn
+uvicorn[standard]
 aiohttp
 bs4
 colorama
 python-dotenv
-nltk
+textual
+pyperclip
 pydantic
 numpy
 sentence-transformers
@@ -13,6 +14,8 @@ discord.py
 aiosqlite
 psutil
 sortedcontainers
+aiorwlock
+spacy
 
 # Curses on Windows vs. non-Windows
 windows-curses; sys_platform == "win32"

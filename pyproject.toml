@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hephia"
-version = "0.2.5"
+version = "0.3"
 description = "An autonomous independent digital companion"
 readme = "README.md"
 requires-python = ">=3.9, <3.13"
@@ -20,13 +20,11 @@ dependencies = [
     "bs4",
     "colorama",
     "python-dotenv",
-    "nltk>=3.8.1",
     "textual",
     "pyperclip",
     "pydantic",
     "numpy",
     "sentence-transformers",
-    "xformers",
     "discord.py",
     "aiosqlite",
     "psutil",

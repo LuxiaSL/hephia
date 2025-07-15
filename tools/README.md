@@ -2,7 +2,7 @@
 
 This directory contains assorted utility scripts for managing Hephia's cognitive processing.
 
-## Available Tools
+## Some Available Tools
 
 - **prune.py**: Recovery utility for cognitive processing when updates stall. Run this script to soft reset by a turn.
 
@@ -16,12 +16,4 @@ This directory contains assorted utility scripts for managing Hephia's cognitive
 
 ## Usage
 
-Simply run the desired Python script from another command line while the server is up:
-
-```bash
-python tools\\prune.py
-python tools\\talk.py 
-python tools\\clear_data.py (optionally --include-tags) 
-python tools\\discord_bot.py
-python tools\\actions_sdk.py --help
-```
+Simply run launch.py and choose the desired tool you'd like to use. Handles venv and other bits for you. 

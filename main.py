@@ -67,7 +67,7 @@ async def main() -> None:
     """Initialize and run the complete Hephia system."""
     print(f"""
 ╔══════════════════════════════╗
-║     Hephia Project v0.2.5    ║
+║     Hephia Project v0.3      ║
 ╚══════════════════════════════╝
 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     """)
