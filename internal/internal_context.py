@@ -61,7 +61,7 @@ class InternalContext:
                 'active': behavior is not None
             }
             
-            # Get emotional state from recent body memories (await the async call)
+            # Get emotional state from recent body memories
             if use_memory_emotions:
                 emotional_state = await self.get_recent_emotions(use_timeframe=True)
             else:
@@ -146,57 +146,56 @@ class InternalContext:
                 # Process and return the emotional state from recent_nodes.
                 emotional_state = []
                 for node in recent_nodes:
-                    if 'emotional_state' in node.processed_state:
-                        emotional_data = node.processed_state['emotional_state']
-                        if emotional_data and isinstance(emotional_data, list):
-                            aggregate_state = emotional_data[0]
-                            if aggregate_state:
-                                emotional_state.append({
-                                    'name': aggregate_state.get('name'),
-                                    'intensity': float(aggregate_state.get('intensity', 0.0)),
-                                    'valence': float(aggregate_state.get('valence', 0.0)), 
-                                    'arousal': float(aggregate_state.get('arousal', 0.0))
-                                })
-                return emotional_state
+                    # Use raw state instead of processed state
+                    if 'emotions' in node.raw_state and 'active_vectors' in node.raw_state['emotions']:
+                        active_vectors = node.raw_state['emotions']['active_vectors']
+                        for vector in active_vectors:
+                            emotional_state.append({
+                                'name': vector.get('name', 'unknown'),
+                                'intensity': float(vector.get('intensity', 0.0)),
+                                'valence': float(vector.get('valence', 0.0)), 
+                                'arousal': float(vector.get('arousal', 0.0))
+                            })
 
-            else:
-                # For the default case, use caching.
-                # Determine the latest timestamp from body memory nodes.
-                nodes = self.internal.memory_system.body_network.nodes.values()
-                latest_node_timestamp = max((node.timestamp for node in nodes), default=0.0)
-                
-                # If cache exists and nothing new has been added, return cached result.
-                if (
-                    self._recent_emotions_cache is not None and 
-                    latest_node_timestamp <= self._recent_emotions_cache_timestamp
-                ):
-                    return self._recent_emotions_cache
+                if emotional_state:
+                    return emotional_state
+        
+            # For the default case, use caching.
+            # Determine the latest timestamp from body memory nodes.
+            nodes = self.internal.memory_system.body_network.nodes.values()
+            latest_node_timestamp = max((node.timestamp for node in nodes), default=0.0)
+            
+            # If cache exists and nothing new has been added, return cached result.
+            if (
+                self._recent_emotions_cache is not None and 
+                latest_node_timestamp <= self._recent_emotions_cache_timestamp
+            ):
+                return self._recent_emotions_cache
 
-                # Otherwise, perform the query for the top 5 most recent memories.
-                recent_nodes = await self.internal.memory_system.get_recent_memories(
-                    count=5,
-                    network_type="body",
-                    include_ghosted=False
-                )
-                emotional_state = []
-                for node in recent_nodes:
-                    if 'emotional_state' in node.processed_state:
-                        emotional_data = node.processed_state['emotional_state']
-                        if emotional_data and isinstance(emotional_data, list):
-                            aggregate_state = emotional_data[0]
-                            if aggregate_state:
-                                emotional_state.append({
-                                    'name': aggregate_state.get('name'),
-                                    'intensity': float(aggregate_state.get('intensity', 0.0)),
-                                    'valence': float(aggregate_state.get('valence', 0.0)), 
-                                    'arousal': float(aggregate_state.get('arousal', 0.0))
-                                })
-                
-                # Update cache.
-                self._recent_emotions_cache = emotional_state
-                self._recent_emotions_cache_timestamp = latest_node_timestamp
-                
-                return emotional_state
+            # Otherwise, perform the query for the top 5 most recent memories.
+            recent_nodes = await self.internal.memory_system.get_recent_memories(
+                count=5,
+                network_type="body",
+                include_ghosted=False
+            )
+            emotional_state = []
+            for node in recent_nodes:
+                # Use raw state instead of processed state
+                if 'emotions' in node.raw_state and 'active_vectors' in node.raw_state['emotions']:
+                    active_vectors = node.raw_state['emotions']['active_vectors']
+                    for vector in active_vectors:
+                        emotional_state.append({
+                            'name': vector.get('name', 'unknown'),
+                            'intensity': float(vector.get('intensity', 0.0)),
+                            'valence': float(vector.get('valence', 0.0)), 
+                            'arousal': float(vector.get('arousal', 0.0))
+                        })
+            
+            # Update cache.
+            self._recent_emotions_cache = emotional_state
+            self._recent_emotions_cache_timestamp = latest_node_timestamp
+            
+            return emotional_state
 
         except Exception as e:
             print(f"DEBUG - Error getting emotional state: {str(e)}")

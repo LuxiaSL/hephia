@@ -91,14 +91,39 @@ class InternalStateHudSection(BaseHudSection):
 
             # Emotional State - create a concise summary
             emotions_data = state_block.get('emotional_state', [])
+            
             if emotions_data:
-                # Sort by intensity, highest first
-                sorted_emotions = sorted(emotions_data, key=lambda e: e.get('intensity', 0.0), reverse=True)
-                emotion_summary_parts = [
-                    f"{e.get('name', 'Unknown')} (strength: {e.get('intensity', 0.0):.2f})"
-                    for e in sorted_emotions
-                ]
-                state_vars["internal_state_emotions_summary_str"] = f"emotions: {', '.join(emotion_summary_parts)}"
+                # Sort by intensity, highest should be primary
+                sorted_emotions = sorted(emotions_data, key=lambda e: e.get('intensity', 0), reverse=True)
+                
+                # Get primary emotion and remaining emotions
+                overall_emotion = sorted_emotions[0] if sorted_emotions else None
+                individual_emotions = sorted_emotions[1:] if len(sorted_emotions) > 1 else []
+
+                # Format overall emotion as primary feeling
+                overall_str = ""
+                if overall_emotion:
+                    overall_str = f"feeling {overall_emotion['name']} ({overall_emotion['intensity']:.2f})"
+                
+                # Format individual emotions as nuanced layers
+                individual_str = ""
+                if individual_emotions:
+                    emotion_descriptors = []
+                    for emotion in individual_emotions[:8]:  # Limit to 8 for readability
+                        emotion_descriptors.append(f"{emotion['name']} ({emotion['intensity']:.2f})")
+                    individual_str = ", ".join(emotion_descriptors)
+                
+                # Combine with natural flow
+                if overall_str and individual_str:
+                    emotions_str = f"{overall_str}, with traces of {individual_str}"
+                elif overall_str:
+                    emotions_str = overall_str
+                elif individual_str:
+                    emotions_str = f"experiencing {individual_str}"
+                else:
+                    emotions_str = "emotionally stable"
+                
+                state_vars["internal_state_emotions_summary_str"] = f"emotions: {emotions_str}"
             else:
                 state_vars["internal_state_emotions_summary_str"] = "emotions: neutral"
 

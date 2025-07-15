@@ -857,6 +857,15 @@ class MemorySystemOrchestrator:
             initial_strength = await self._calculate_initial_strength(
                 await self.internal_context.get_memory_context(is_cognitive=True)
             )
+
+            logger.debug(f"=== BODY MEMORY FORMATION DEBUG ===")
+            logger.debug(f"Metadata: {metadata}")
+            if 'emotions' in raw_state:
+                logger.debug(f"Raw emotions data: {raw_state['emotions']}")
+            if 'emotional_state' in processed_state:
+                logger.debug(f"Processed emotions data: {processed_state['emotional_state']}")
+            logger.debug(f"=== END DEBUG ===")
+            
             current_time = time.time()
             new_node = BodyMemoryNode(
                 timestamp=current_time,

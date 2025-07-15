@@ -866,11 +866,10 @@ class EmotionalProcessor:
                         'source_interface': event.data.get('source_interface', 'unknown')
                     }
                 )
-                
-                global_event_dispatcher.dispatch_event_sync(Event("emotion:cognitive_complete", {
+
+                global_event_dispatcher.dispatch_event(Event("emotion:finished", {
                     "emotion": final_state,
-                    "applied_influences": len(applied_influences),
-                    "source_interface": event.data.get('source_interface', 'unknown')
+                    "initial": applied_influences[0]
                 }))
             else:
                 InternalLogger.debug("No cognitive influences were strong enough to apply after dampening")

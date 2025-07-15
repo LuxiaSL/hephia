@@ -136,10 +136,12 @@ class SystemHudSection(BaseHudSection):
         # 4. Conversation Limit Info (Data provided by ExoProcessorInterface in hud_metadata)
         conv_fill_percent = (hud_metadata.get("conversation_state_size") / Config.get_exo_max_turns()) * 100 if hud_metadata.get("conversation_state_size") is not None else None
         if conv_fill_percent is not None:
-            if conv_fill_percent >= 100:
-                system_vars["system_conversation_fill_percent_str"] = f"{conv_fill_percent:.0f}% full, trimming active..."
+            if conv_fill_percent >= 99:
+                system_vars["system_conversation_fill_percent_str"] = f"{conv_fill_percent:.0f}%, trimming active..."
+            elif conv_fill_percent >= 80:
+                system_vars["system_conversation_fill_percent_str"] = f"{conv_fill_percent:.0f}%, will begin trimming at limit..."
             else:
-                system_vars["system_conversation_fill_percent_str"] = f"{conv_fill_percent:.0f}% full"
+                system_vars["system_conversation_fill_percent_str"] = f"{conv_fill_percent:.0f}%"
         else:
             system_vars["system_conversation_fill_percent_str"] = "N/A"
 

@@ -18,6 +18,8 @@ from brain.commands.model import (
 )
 from brain.environments.base_environment import BaseEnvironment
 
+from loggers import BrainLogger
+
 class TerminalFormatter:
     """Formats system output in a consistent, terminal-like format."""
 
@@ -67,21 +69,18 @@ class TerminalFormatter:
         # Format emotional state as recent experience
         emotions_str = ""
         if emotional_state:
+
             # Separate overall stimulus from individual vectors
             overall_emotion = None
             individual_emotions = []
             
-            for emotion in emotional_state:
-                if emotion.get('type') == 'overall':
-                    overall_emotion = emotion
-                elif emotion.get('type') == 'individual':
-                    individual_emotions.append(emotion)
-                else:
-                    # Fallback for emotions without type metadata
-                    individual_emotions.append(emotion)
-                
-            emotion_parts = []
+            #sort by intensity, highest should be primary
+            emotional_state.sort(key=lambda e: e.get('intensity', 0), reverse=True)
             
+            overall_emotion = emotional_state[0] if emotional_state else None
+            for emotion in emotional_state[1:]:
+                individual_emotions.append(emotion)
+
             # Format overall emotion as primary feeling
             overall_str = ""
             if overall_emotion:
