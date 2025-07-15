@@ -166,7 +166,7 @@ class NameMappingService:
         mapping = self.channel_mappings.get(channel_id)
         return mapping.llm_path if mapping else None
     
-    # User Mapping Methods (new functionality)
+    # User Mapping Methods
     
     async def update_user_mappings(self) -> None:
         """Update user mappings from current Discord state."""
@@ -205,10 +205,10 @@ class NameMappingService:
                 if hasattr(member, 'global_name') and member.global_name:
                     names_to_try.append(member.global_name.lower())
                 
-                # Use the first available name (prefer display name)
+                # Use the first available unique name for the reverse map
                 for name in names_to_try:
-                    if name and name not in self.name_to_user_id:
-                        self.name_to_user_id[name] = user_id
+                    if name and name.lower() not in self.name_to_user_id:
+                        self.name_to_user_id[name.lower()] = user_id
                         break
         
         logger.info(f"Updated {len(self.user_mappings)} user mappings")
@@ -281,7 +281,7 @@ class NameMappingService:
         mapping = self.user_mappings.get(user_id)
         return mapping.llm_name if mapping else None
     
-    # Emoji Mapping Methods (new functionality)
+    # Emoji Mapping Methods
     
     async def update_emoji_mappings(self) -> None:
         """Update emoji mappings from current Discord state."""
@@ -443,28 +443,32 @@ class NameMappingService:
         
         try:
             converted_content = content
-            
-            # Convert mentions: @username -> <@123456>
-            for match in self.llm_mention_pattern.finditer(content):
-                username = match.group(1)
-                mention_text = match.group(0)
-                
-                try:
-                    if strict:
-                        user_id = self.find_user_id_strict(username, guild_id)
-                    else:
-                        user_id = self.find_user_id(username, guild_id)
-                    
-                    if user_id:
-                        converted_content = converted_content.replace(mention_text, f"<@{user_id}>")
-                    else:
-                        result.add_warning(f"Could not resolve username '{username}' - mention won't ping")
-                        # Keep the @username format as fallback
                         
-                except UserNotFoundError as e:
-                    if strict:
-                        raise
-                    result.add_warning(f"Could not resolve username '{username}' - mention won't ping")
+            guild_user_ids = self.guild_users.get(guild_id, set())
+            possible_names = []
+            for user_id in guild_user_ids:
+                mapping = self.user_mappings.get(user_id)
+                if mapping:
+                    if mapping.display_name:
+                        possible_names.append(mapping.display_name)
+                    if mapping.username:
+                        possible_names.append(mapping.username)
+                    if mapping.global_name:
+                        possible_names.append(mapping.global_name)
+
+            sorted_names = sorted(list(set(possible_names)), key=len, reverse=True)
+
+            for username in sorted_names:
+                mention_text = f"@{username}"
+                while mention_text in converted_content:
+                    try:
+                        user_id = self.find_user_id_strict(username, guild_id)
+                        converted_content = converted_content.replace(mention_text, f"<@{user_id}>", 1)
+                    except UserNotFoundError as e:
+                        if strict:
+                            raise
+                        result.add_warning(f"Could not resolve username '{username}' - mention won't ping")
+                        break
             
             # Convert emojis: :emoji: -> <:emoji:789>
             for match in self.llm_emoji_pattern.finditer(content):

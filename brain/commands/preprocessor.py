@@ -656,7 +656,6 @@ class CommandPreprocessor:
         dangerous_patterns = [
             r'`.*`',  # Backticks
             r'\$\(.+\)',  # Command substitution
-            r';\s*\w+',  # Command chain attempts
             r'\|\s*\w+',  # Pipe attempts
             r'>\s*\w+',  # Redirection attempts
             r'<\s*\w+',  # Input redirection

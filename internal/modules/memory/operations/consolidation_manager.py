@@ -8,11 +8,12 @@ Manages network consolidation operations including:
 - Network health maintenance
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 import time
 
-from ..nodes.base_node import BaseMemoryNode
+from ..nodes.body_node import BodyMemoryNode
+from ..nodes.cognitive_node import CognitiveMemoryNode
 from ..operations.ghost_manager import GhostManager
 from ..operations.merge_manager import MergeManager
 
@@ -24,9 +25,9 @@ class ConsolidationConfig:
     """Configuration for consolidation behavior."""
     activity_window: float = 3600  # 1 hour
     min_activity_ratio: float = 0.7  # For consolidation triggers
-    strength_threshold: float = 0.3  # When to consider consolidation
+    strength_threshold: float = 0.205  # When to consider consolidation
     max_nodes_ratio: float = 1.2     # Ratio to ideal node count
-    consolidation_cooldown: float = 300  # 5 minutes between consolidations
+    consolidation_cooldown: float = 300  # 5 minutes between consolidations (300)
     min_active_nodes: int = 5  # Minimum nodes to maintain
 
 
@@ -57,7 +58,7 @@ class ConsolidationManager:
     async def check_consolidation_needed(
         self,
         network_type: str,
-        current_nodes: List[BaseMemoryNode]
+        current_nodes: List[Union[BodyMemoryNode, CognitiveMemoryNode]]
     ) -> bool:
         """
         Determine if consolidation should be triggered based on:
@@ -96,7 +97,7 @@ class ConsolidationManager:
     async def update_activity_patterns(
         self,
         network_type: str,
-        current_nodes: List[BaseMemoryNode]
+        current_nodes: List[Union[BodyMemoryNode, CognitiveMemoryNode]]
     ) -> None:
         """Update rolling average of network activity."""
         current_time = time.time()
@@ -112,7 +113,7 @@ class ConsolidationManager:
     async def run_consolidation_cycle(
         self,
         network_type: str,
-        nodes: List[BaseMemoryNode]
+        nodes: List[Union[BodyMemoryNode, CognitiveMemoryNode]]
     ) -> None:
         """
         Run a complete consolidation cycle:
@@ -144,7 +145,7 @@ class ConsolidationManager:
                     continue
 
                 # If merging is not possible, consider ghosting via ghost manager
-                await self.ghost_manager.consider_ghosting(node)
+                await self.ghost_manager.consider_ghosting(network_type, node)
 
             # Finally, verify overall network health
             await self._verify_network_health(network_type, nodes)
@@ -155,7 +156,7 @@ class ConsolidationManager:
     async def _verify_network_health(
         self,
         network_type: str,
-        current_nodes: List[BaseMemoryNode]
+        current_nodes: List[Union[BodyMemoryNode, CognitiveMemoryNode]]
     ) -> None:
         """
         Verify and maintain network health:
@@ -170,7 +171,7 @@ class ConsolidationManager:
         # Check ghost ratio
         ghost_ratio = len(ghost_nodes) / (len(current_nodes) or 1)
         if ghost_ratio > 0.5:  # If more than 50% of nodes are ghosted, prune excess.
-            await self._prune_excess_ghosts(ghost_nodes)
+            await self._prune_excess_ghosts(ghost_nodes, network_type)
 
         # Check node strength distribution
         strengths = [n.strength for n in active_nodes]
@@ -181,7 +182,8 @@ class ConsolidationManager:
 
     async def _prune_excess_ghosts(
         self,
-        ghost_nodes: List[BaseMemoryNode]
+        ghost_nodes: List[Union[BodyMemoryNode, CognitiveMemoryNode]],
+        network_type: str
     ) -> None:
         """Remove oldest or weakest ghost nodes to maintain a healthy ratio."""
         # Sort ghosts by a combination of age and strength (lower strength and older preferred for removal)
@@ -193,11 +195,12 @@ class ConsolidationManager:
         num_to_keep = int(len(sorted_ghosts) * 0.3)
         to_prune = sorted_ghosts[num_to_keep:]
         for node in to_prune:
-            await self.ghost_manager.handle_final_pruning(node)
+            # Handle final pruning via ghost manager
+            await self.ghost_manager.handle_final_pruning(node, network_type)     
 
     async def _boost_network_strength(
         self,
-        active_nodes: List[BaseMemoryNode]
+        active_nodes: List[Union[BodyMemoryNode, CognitiveMemoryNode]]
     ) -> None:
         """
         Apply a small strength boost to maintain network health when average strength is low.

@@ -151,12 +151,12 @@ class EmotionalMetricsCalculator:
         Implements "connecting foam" concept.
         """
         if not vectors:
-            return 0.3  # Base neutral alignment
+            return 0.35  # Base neutral alignment
             
         # Calculate reduced weight based on vectors present
         total_intensity = sum(v.get('intensity', 0.0) for v in vectors)
-        return 0.3 * (1.0 - min(1.0, total_intensity))
-            
+        return 0.35 * (1.0 - min(1.0, total_intensity))
+
     def _calculate_temporal_weight(self, timestamp: float) -> float:
         """Calculate temporal weighting for preserved signatures."""
         time_diff = time.time() - timestamp
@@ -243,6 +243,6 @@ class EmotionalMetricsCalculator:
             'emotional_complexity': 0.0,
             'valence_shift': 0.0,
             'intensity_delta': 0.0,
-            'neutral_alignment': 0.3,
+            'neutral_alignment': 0.35,
             'body_state_similarity': 0.0
         }

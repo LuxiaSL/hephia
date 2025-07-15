@@ -20,7 +20,7 @@ import json
 import asyncio
 from abc import ABC, abstractmethod
 
-from loggers import SystemLogger, PromptLogger
+from loggers import SystemLogger
 from config import Config
 
 
@@ -48,26 +48,6 @@ class BaseAPIClient(ABC):
         headers = self._get_headers(extra_headers)
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         last_exception = None
-
-        # Log prompt before making the request
-        if (payload and "messages" in payload) and Config.get_log_prompts():
-            temp_messages = payload["messages"]
-            if self.service_name == "Anthropic":
-                # Anthropic uses a different format for system messages
-                temp_messages = [
-                    {"role": "system", "content": payload["system"]},
-                ] + temp_messages
-
-            PromptLogger.log_prompt(
-                service=self.service_name,
-                messages=temp_messages,
-                model=payload.get("model", "unknown"),
-                metadata={
-                    "temperature": payload.get("temperature"),
-                    "max_tokens": payload.get("max_tokens"),
-                    "endpoint": endpoint
-                }
-            )
 
         for attempt in range(self.max_retries):
             try:

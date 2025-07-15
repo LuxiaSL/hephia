@@ -12,20 +12,27 @@ Key capabilities:
 - Result normalization and weighting
 """
 
+import time
 import asyncio
+import hashlib
 import concurrent.futures as cf
 
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 from enum import Enum, auto
 
+import numpy as np
+
 from .semantic import SemanticMetricsCalculator 
 from .emotional import EmotionalMetricsCalculator
 from .state import StateMetricsCalculator
 from .temporal import TemporalMetricsCalculator
 from .strength import StrengthMetricsCalculator
+from ..nodes.cognitive_node import CognitiveMemoryNode
+from ..nodes.body_node import BodyMemoryNode
 from ..embedding_manager import EmbeddingManager
 from ..state.signatures import EmotionalStateSignature
+from ..async_lru_cache import async_lru_cache
 
 from loggers.loggers import MemoryLogger
 
@@ -57,11 +64,11 @@ class MetricsConfiguration:
             
         if self.component_weights is None:
             self.component_weights = {
-                MetricComponent.SEMANTIC: 0.4,
+                MetricComponent.SEMANTIC: 0.425,
                 MetricComponent.EMOTIONAL: 0.2, 
                 MetricComponent.STATE: 0.225,
                 MetricComponent.TEMPORAL: 0.1,
-                MetricComponent.STRENGTH: 0.075
+                MetricComponent.STRENGTH: 0.05
             }
             
         # Initialize empty option dicts if None
@@ -123,6 +130,65 @@ class RetrievalMetricsOrchestrator:
         if MetricComponent.STRENGTH in self.config.enabled_components:
             self.calculators[MetricComponent.STRENGTH] = StrengthMetricsCalculator()
 
+    def _generate_cache_key(
+        self,
+        target_node: Any,
+        comparison_state: Dict[str, Any],
+        query_text: str,
+        query_embedding: List[float],
+        body_node_id: Optional[str] = None
+    ) -> str:
+        """
+        Generate a stable cache key for metrics calculation.
+        Uses content hashing to ensure consistency across calls.
+        """
+        try:
+            # Create a stable representation of the calculation inputs
+            key_components = []
+            
+            # Node identifier
+            if hasattr(target_node, 'node_id') and target_node.node_id:
+                key_components.append(f"node:{target_node.node_id}")
+            else:
+                # Fallback to content hash for nodes without IDs
+                node_content = getattr(target_node, 'text_content', '') or str(getattr(target_node, 'raw_state', {}))
+                node_hash = hashlib.md5(node_content.encode('utf-8')).hexdigest()[:8]
+                key_components.append(f"content:{node_hash}")
+            
+            # Comparison state hash
+            if comparison_state:
+                state_str = str(sorted(comparison_state.items()))
+                state_hash = hashlib.md5(state_str.encode('utf-8')).hexdigest()[:8]
+                key_components.append(f"state:{state_hash}")
+            
+            # Query content hash
+            if query_text:
+                query_hash = hashlib.md5(query_text.encode('utf-8')).hexdigest()[:8]
+                key_components.append(f"query:{query_hash}")
+            
+            # Embedding hash (first few values as representative)
+            if query_embedding and len(query_embedding) > 0:
+                emb_sample = str(query_embedding[:5])  # First 5 values as signature
+                emb_hash = hashlib.md5(emb_sample.encode('utf-8')).hexdigest()[:6]
+                key_components.append(f"emb:{emb_hash}")
+            
+            # Body node reference
+            if body_node_id:
+                key_components.append(f"body:{body_node_id}")
+            
+            return "|".join(key_components)
+            
+        except Exception as e:
+            # Fallback to a basic key if hashing fails
+            self.logger.log_error(f"Cache key generation failed: {e}")
+            return f"fallback:{hash((str(target_node), str(comparison_state), query_text))}"
+
+    @async_lru_cache(
+        maxsize=2000, 
+        ttl=7200, 
+        key_func=lambda self, target_node, comparison_state, query_text, query_embedding, body_node_id=None, preserved_signature=None, override_config=None: 
+            self._generate_cache_key(target_node, comparison_state, query_text, query_embedding, body_node_id)
+    )
     async def calculate_metrics(
         self,
         target_node: Any,
@@ -134,20 +200,27 @@ class RetrievalMetricsOrchestrator:
         override_config: Optional[MetricsConfiguration] = None
     ) -> Union[float, Dict[str, Any]]:
         """
-        Calculate comprehensive retrieval metrics.
-        
-        Args:
-            target_node: Node to analyze
-            comparison_state: State to compare against
-            query_text: Optional text query
-            query_embedding: Optional pre-computed embedding
-            body_node_id: Optional body memory reference
-            preserved_signature: Optional preserved state signature
-            override_config: Optional config override for this calculation
-            
-        Returns:
-            Either final similarity score or detailed metrics dict
-            depending on configuration
+        Calculate comprehensive retrieval metrics with intelligent caching.
+        Uses custom cache key generation via decorator.
+        """
+        return await self._calculate_metrics_internal(
+            target_node, comparison_state, query_text, query_embedding,
+            body_node_id, preserved_signature, override_config
+        )
+
+    async def _calculate_metrics_internal(
+        self,
+        target_node: Any,
+        comparison_state: Dict[str, Any],
+        query_text: str,
+        query_embedding: List[float],
+        body_node_id: Optional[str] = None,
+        preserved_signature: Optional[EmotionalStateSignature] = None,
+        override_config: Optional[MetricsConfiguration] = None
+    ) -> Union[float, Dict[str, Any]]:
+        """
+        Internal implementation of metrics calculation.
+        This is the actual computation that gets cached.
         """
         try:
             config = override_config or self.config
@@ -228,6 +301,77 @@ class RetrievalMetricsOrchestrator:
                     'component_metrics': {}
                 }
             return 0.0
+        
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache performance statistics from decorators."""
+        stats = {}
+        
+        try:
+            # Get stats from decorated methods
+            if hasattr(self.calculate_metrics, 'cache_info'):
+                stats['metrics_cache'] = self.calculate_metrics.cache_info()
+                
+            if self.embedding_manager and hasattr(self.embedding_manager.calculate_similarity_cached, 'cache_info'):
+                stats['embedding_cache'] = self.embedding_manager.calculate_similarity_cached.cache_info()
+                
+            if hasattr(self.calculators.get(MetricComponent.SEMANTIC), '_calculate_text_relevance_cached'):
+                semantic_calc = self.calculators[MetricComponent.SEMANTIC]
+                if hasattr(semantic_calc._calculate_text_relevance_cached, 'cache_info'):
+                    stats['semantic_cache'] = semantic_calc._calculate_text_relevance_cached.cache_info()
+            
+            if hasattr(self, 'body_memory_reference') and self.body_memory_reference:
+                try:
+                    body_network = getattr(self.body_memory_reference, 'body_network', None)
+                    if body_network and hasattr(body_network, 'connection_manager'):
+                        body_conn_mgr = body_network.connection_manager
+                        if hasattr(body_conn_mgr, '_calculate_connection_weight_cached') and hasattr(body_conn_mgr._calculate_connection_weight_cached, 'cache_info'):
+                            stats['body_connection_cache'] = body_conn_mgr._calculate_connection_weight_cached.cache_info()
+                except Exception as e:
+                    stats['body_connection_cache_error'] = str(e)
+            
+            stats['cache_enabled'] = True
+            
+        except Exception as e:
+            stats = {'cache_enabled': False, 'error': str(e)}
+        
+        return stats
+
+    async def clear_all_caches(self) -> Dict[str, bool]:
+        """Clear all decorator-managed caches."""
+        results = {}
+        
+        try:
+            # Clear decorator caches
+            if hasattr(self.calculate_metrics, 'cache_clear'):
+                await self.calculate_metrics.cache_clear()
+                results['metrics_cache'] = True
+                
+            if self.embedding_manager and hasattr(self.embedding_manager.calculate_similarity_cached, 'cache_clear'):
+                await self.embedding_manager.calculate_similarity_cached.cache_clear()
+                results['embedding_cache'] = True
+                
+            if hasattr(self.calculators.get(MetricComponent.SEMANTIC), '_calculate_text_relevance_cached'):
+                semantic_calc = self.calculators[MetricComponent.SEMANTIC]
+                if hasattr(semantic_calc._calculate_text_relevance_cached, 'cache_clear'):
+                    await semantic_calc._calculate_text_relevance_cached.cache_clear()
+                    results['semantic_cache'] = True
+            
+            if hasattr(self, 'body_memory_reference') and self.body_memory_reference:
+                try:
+                    body_network = getattr(self.body_memory_reference, 'body_network', None)
+                    if body_network and hasattr(body_network, 'connection_manager'):
+                        body_conn_mgr = body_network.connection_manager
+                        if hasattr(body_conn_mgr, '_calculate_connection_weight_cached') and hasattr(body_conn_mgr._calculate_connection_weight_cached, 'cache_clear'):
+                            await body_conn_mgr._calculate_connection_weight_cached.cache_clear()
+                            results['body_connection_cache'] = True
+                except Exception as e:
+                    results['body_connection_cache_error'] = str(e)
+                
+        except Exception as e:
+            self.logger.log_error(f"Cache clearing failed: {e}")
+            results['error'] = str(e)
+        
+        return results
 
     async def _calculate_semantic_metrics(
         self,
@@ -242,8 +386,9 @@ class RetrievalMetricsOrchestrator:
             if not hasattr(node, 'text_content') or node.text_content is None:
                 return {
                     'embedding_similarity': 0.0,
-                    'text_similarity': 0.0,
-                    'combined_similarity': 0.0
+                    'text_relevance': 0.0,
+                    'semantic_density': 0.0,
+                    'semantic_cohesion': 0.0
                 }
                 
             calculator = self.calculators[MetricComponent.SEMANTIC]
@@ -372,9 +517,27 @@ class RetrievalMetricsOrchestrator:
                     if 'error' in component_metrics:
                         continue
                         
-                    # Extract main score based on component type
                     if component == MetricComponent.SEMANTIC:
-                        component_score = component_metrics.get('embedding_similarity', 0.0)
+                        # Step 1: Pure relevance (varies by query)
+                        embedding_sim = component_metrics.get('embedding_similarity', 0.0)
+                        text_relevance = component_metrics.get('text_relevance', 0.0)
+                        
+                        relevance_score = (
+                            embedding_sim * 0.65 +
+                            text_relevance * 0.35
+                        )
+                        
+                        # Step 2: Quality multiplier (intrinsic to memory) 
+                        semantic_density = component_metrics.get('semantic_density', 0.0)
+                        semantic_cohesion = component_metrics.get('semantic_cohesion', 0.5)
+                        
+                        quality_multiplier = 0.5 + (
+                            semantic_density * 0.375 +
+                            semantic_cohesion * 0.125 
+                        )
+                        
+                        # Step 3: Quality-weighted relevance
+                        component_score = relevance_score * quality_multiplier
                     elif component == MetricComponent.EMOTIONAL:
                         component_score = component_metrics.get('vector_similarity', 0.0)
                     elif component == MetricComponent.STATE:
@@ -409,8 +572,8 @@ class RetrievalMetricsOrchestrator:
         
     async def compare_nodes(
         self,
-        nodeA: Any,
-        nodeB: Any,
+        nodeA: Union[CognitiveMemoryNode, BodyMemoryNode],
+        nodeB: Union[CognitiveMemoryNode, BodyMemoryNode],
         override_config: Optional[MetricsConfiguration] = None
     ) -> Dict[str, float]:
         """
@@ -427,21 +590,47 @@ class RetrievalMetricsOrchestrator:
         # Force detailed_metrics on for this computation.
         config.detailed_metrics = True
 
+        # Helper function to get embedding dimension safely
+        def get_embedding_dim(node: Union[CognitiveMemoryNode, BodyMemoryNode]) -> int:
+            if hasattr(node, 'embedding') and node.embedding:
+                if isinstance(node.embedding, list):
+                    return len(node.embedding)
+                elif hasattr(node.embedding, 'shape'):
+                    return node.embedding.shape[0]  # For numpy arrays
+            return self.embedding_manager._embedding_dims
+        
+        # Helper function to get safe embedding
+        def get_safe_embedding(node: Union[CognitiveMemoryNode, BodyMemoryNode], target_dim: int) -> List[float]:
+            if hasattr(node, 'embedding'):
+                validated_embedding = self._validate_embedding(node.embedding, getattr(node, 'node_id', 'unknown'))
+                if len(validated_embedding) == target_dim:
+                    return validated_embedding
+            # Return zero vector of correct dimension
+            return [0.0] * target_dim
+
+        # Get embedding dimensions
+        dim_a = get_embedding_dim(nodeA)
+        dim_b = get_embedding_dim(nodeB)
+
+        target_dim = max(dim_a, dim_b, self.embedding_manager._embedding_dims)
+
         # For pairwise, we pass empty query info. The idea is that the node's own data
         # and the other node's stored state (e.g., raw_state) will drive the comparison.
         # For semantic comparison, use the other node's embedding
+
+        # maybe disregard? see how it affects results
         metricsA = await self.calculate_metrics(
             target_node=nodeA,
             comparison_state=getattr(nodeB, 'raw_state', {}),
-            query_text="",
-            query_embedding=getattr(nodeB, 'embedding', [0.0] * (nodeA.embedding.shape[0] if hasattr(nodeA, 'embedding') else 0)),
+            query_text=getattr(nodeB, 'text_content', ""),
+            query_embedding=get_safe_embedding(nodeB, target_dim),
             override_config=config
         )
         metricsB = await self.calculate_metrics(
             target_node=nodeB,
             comparison_state=getattr(nodeA, 'raw_state', {}),
-            query_text="",
-            query_embedding=getattr(nodeA, 'embedding', [0.0] * (nodeB.embedding.shape[0] if hasattr(nodeB, 'embedding') else 0)),
+            query_text= getattr(nodeA, 'text_content', ""),
+            query_embedding=get_safe_embedding(nodeA, target_dim),
             override_config=config
         )
 
@@ -456,7 +645,8 @@ class RetrievalMetricsOrchestrator:
             compA_val = detailedA.get(comp_key, {})
             compB_val = detailedB.get(comp_key, {})
             # Compute a difference value between the two component dicts.
-            dissonance[comp_key] = self._compare_component_dicts(compA_val, compB_val)
+            raw_diff = self._compare_component_dicts(compA_val, compB_val)
+            dissonance[comp_key] = float(raw_diff)
         return dissonance
 
     def _compare_component_dicts(self, dataA: Any, dataB: Any) -> float:
@@ -464,13 +654,11 @@ class RetrievalMetricsOrchestrator:
         Recursively compare two data structures (expected to be dicts or numeric values)
         and return an average absolute difference.
         
-        If both values are numeric, the difference is the absolute difference.
-        If they are dicts, we compute the difference over their union of keys.
-        Otherwise, if one or both values are missing or non-numeric, we assume zero.
+        Ensures all return values are Python floats, not numpy types.
         """
-        # If both are numeric values, return absolute difference.
-        if isinstance(dataA, (int, float)) and isinstance(dataB, (int, float)):
-            return abs(dataA - dataB)
+        # If both are numeric values, return absolute difference as Python float
+        if isinstance(dataA, (int, float, np.number)) and isinstance(dataB, (int, float, np.number)):
+            return float(abs(float(dataA) - float(dataB)))
         
         # If both are dicts, compare recursively key by key.
         if isinstance(dataA, dict) and isinstance(dataB, dict):
@@ -482,10 +670,46 @@ class RetrievalMetricsOrchestrator:
                     dataB.get(key, 0)
                 )
                 differences.append(diff)
-            return sum(differences) / len(differences) if differences else 0.0
+            return float(sum(differences) / len(differences)) if differences else 0.0
         
-        # For any non-numeric and non-dict types, return 0 difference.
+        # For any non-numeric and non-dict types, return 0 difference as Python float
         return 0.0
+    
+    def _validate_embedding(self, embedding: Any, node_id: str = "unknown") -> List[float]:
+        """
+        Validate and normalize an embedding to ensure it's a proper list of floats.
+        
+        Args:
+            embedding: The embedding to validate
+            node_id: Node ID for logging purposes
+            
+        Returns:
+            List[float]: Validated embedding
+        """
+        try:
+            if embedding is None:
+                self.logger.warning(f"Node {node_id} has None embedding, using zero vector")
+                return [0.0] * self.embedding_manager._embedding_dims
+                
+            if isinstance(embedding, list):
+                # Ensure all elements are floats
+                return [float(x) for x in embedding]
+                
+            elif hasattr(embedding, 'tolist'):
+                # Convert numpy array to list
+                return [float(x) for x in embedding.tolist()]
+                
+            elif hasattr(embedding, '__iter__'):
+                # Convert any iterable to list of floats
+                return [float(x) for x in embedding]
+                
+            else:
+                self.logger.error(f"Node {node_id} has invalid embedding type: {type(embedding)}")
+                return [0.0] * self.embedding_manager._embedding_dims
+                
+        except Exception as e:
+            self.logger.error(f"Failed to validate embedding for node {node_id}: {e}")
+            return [0.0] * self.embedding_manager._embedding_dims
 
     def update_configuration(
         self,

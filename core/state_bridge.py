@@ -49,9 +49,7 @@ class StateBridge:
         self.state_lock = asyncio.Lock()
         self.db_path = 'data/server_state.db'
         self.last_vacuum_time = datetime.min
-        self.last_cleanup_time = datetime.min
         self.vacuum_interval = timedelta(minutes=10) 
-        self.cleanup_interval = timedelta(minutes=5) 
         self.max_states = 5
         self.last_state_hash = None
         self.last_cognitive_summary: Optional[str] = ""
@@ -209,12 +207,9 @@ class StateBridge:
                 if new_hash != self.last_state_hash:
                     self.persistent_state = new_state
                     self.last_state_hash = new_hash
-                    await self._save_session()
 
-                    # Cleanup old states periodically
-                    if datetime.now() - self.last_cleanup_time >= self.cleanup_interval:
-                        await self._cleanup_old_states()
-                        self.last_cleanup_time = datetime.now()
+                    await self._save_session()
+                    await self._cleanup_old_states()
 
                     # Broadcast API context
                     context = await self.internal_context.get_api_context(use_memory_emotions=False)
@@ -234,26 +229,44 @@ class StateBridge:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Enable auto_vacuum mode (if not already set).
-        cursor.execute("PRAGMA auto_vacuum")
-        mode = cursor.fetchone()[0]
-        if mode == 0:
-            cursor.execute("PRAGMA auto_vacuum = FULL")
-            print("Auto-vacuum set to FULL.")
+        cursor.execute("PRAGMA auto_vacuum = FULL")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS system_state (
                 id INTEGER PRIMARY KEY,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 session_state BLOB,
-                brain_state TEXT,
+                brain_state BLOB, 
                 compressed BOOLEAN DEFAULT 0
             )
         """)
+        
+        # Check if migration is needed by examining the current brain_state column type
+        cursor.execute("PRAGMA table_info(system_state)")
+        columns = cursor.fetchall()
+        brain_state_column = next((col for col in columns if col[1] == 'brain_state'), None)
+        
+        # Only run migration if brain_state exists and is not already BLOB type
+        if brain_state_column and brain_state_column[2] != 'BLOB':
+            try:
+                print("Running one-time migration: Converting brain_state to BLOB...")
+                cursor.execute("ALTER TABLE system_state ADD COLUMN temp_brain_state BLOB")
+                cursor.execute("UPDATE system_state SET temp_brain_state = CAST(brain_state AS BLOB)")
+                cursor.execute("ALTER TABLE system_state DROP COLUMN brain_state")
+                cursor.execute("ALTER TABLE system_state RENAME COLUMN temp_brain_state TO brain_state")
+                print("Migration complete.")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" in str(e):
+                    # Clean up if temp column already exists
+                    cursor.execute("DROP COLUMN temp_brain_state")
+                else:
+                    raise
+
         conn.commit()
         conn.close()
 
     async def _save_session(self):
+        """Saves the current session state, compressing both session and brain states."""
         if not self.persistent_state:
             return
 
@@ -261,14 +274,18 @@ class StateBridge:
         cursor = conn.cursor()
         try:
             session_json = json.dumps(self.persistent_state.session_state)
-            compressed_session = zlib.compress(session_json.encode())
+            compressed_session = zlib.compress(session_json.encode('utf-8'))
+            
+            brain_json = json.dumps(self.persistent_state.brain_state)
+            compressed_brain = zlib.compress(brain_json.encode('utf-8'))
+
             cursor.execute("""
                 INSERT INTO system_state (timestamp, session_state, brain_state, compressed)
                 VALUES (?, ?, ?, ?)
             """, (
                 self.persistent_state.timestamp.isoformat(),
                 compressed_session,
-                json.dumps(self.persistent_state.brain_state),
+                compressed_brain,
                 True
             ))
             conn.commit()
@@ -276,7 +293,7 @@ class StateBridge:
             conn.close()
 
     async def _load_last_session(self) -> Optional[PersistentState]:
-        """Load most recent session state."""
+        """Load most recent session state, handling both compressed and uncompressed data."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -290,17 +307,21 @@ class StateBridge:
             
             row = cursor.fetchone()
             if row:
-                timestamp, session_state, brain_state, compressed = row
+                timestamp, session_state_blob, brain_state_blob, compressed = row
                 
-                # Decompress session state if needed
-                if compressed:
-                    session_state = zlib.decompress(session_state).decode()
+                session_state = json.loads(zlib.decompress(session_state_blob).decode('utf-8'))
                 
-                brain_state = json.loads(brain_state)
-                session_state = json.loads(session_state)
-                
-                # Validate brain state structure
-                validated_brain_state = self._validate_brain_state(brain_state)
+                loaded_brain_state = {}
+                try:
+                    loaded_brain_state = json.loads(zlib.decompress(brain_state_blob).decode('utf-8'))
+                except (zlib.error, TypeError, AttributeError):
+                    try:
+                        loaded_brain_state = json.loads(brain_state_blob)
+                    except (json.JSONDecodeError, TypeError):
+                         print("Warning: Could not decode brain_state from last session.")
+                         loaded_brain_state = {}
+
+                validated_brain_state = self._validate_brain_state(loaded_brain_state)
                 
                 return PersistentState(
                     session_state=session_state,
@@ -313,14 +334,10 @@ class StateBridge:
         return None
 
     async def _cleanup_old_states(self, force: bool = False):
-        """
-        Delete old state entries, keeping only the most recent self.max_states entries.
-        Optionally, force cleanup regardless of the cleanup interval.
-        """
+        """Deletes old states and periodically vacuums the database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
-            # Delete states older than the most recent self.max_states
             cursor.execute(f"""
                 DELETE FROM system_state 
                 WHERE id NOT IN (
@@ -329,15 +346,15 @@ class StateBridge:
                     LIMIT {self.max_states}
                 )
             """)
-            deleted_count = cursor.rowcount
-            if deleted_count > 0:
-                print(f"Cleaned up {deleted_count} old state entries")
+            
             conn.commit()
 
+            # The vacuum operation still runs on a timer to avoid doing it too frequently.
             current_time = datetime.now()
             if force or current_time - self.last_vacuum_time >= self.vacuum_interval:
+                print("Performing periodic database VACUUM...")
                 cursor.execute("VACUUM")
                 self.last_vacuum_time = current_time
-                print("Database VACUUM completed")
+                print("Database VACUUM completed.")
         finally:
             conn.close()

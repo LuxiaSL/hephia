@@ -1,14 +1,17 @@
 id: interfaces.exo.memory
 
 defaults:
-  template: |
-    Review this significant terminal interaction and form a clear first person memory:
+  snippet: |
+    Command: ${command_input}
+    Response: ${response}
+  
+  combined: |
+    Review the recent terminal interaction history and form a clear first-person memory of what occurred:
 
-    Context:
-    - Command: ${command_input}
-    - Response: ${content}
-    - Result: ${result_message}
+    Recent Interaction History:
+    ${interaction_history}
 
-    - Extra self data: ${context}
+    Additional Context:
+    ${context}
 
-    Focus on what was meaningful and any changes in understanding or state.
+    Focus on what was meaningful, any changes in understanding, significant events, or patterns that emerged from these interactions. Form this as a coherent memory from your perspective.

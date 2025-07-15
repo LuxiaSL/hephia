@@ -459,13 +459,11 @@ def main():
             print_status("Could not find pip, and uv installation failed", "error")
             return
 
-    # Download NLTK data
-    print_status("Downloading NLTK data...")
-    nltk_script = "import nltk; nltk.download('punkt_tab'); nltk.download('maxent_ne_chunker'); nltk.download('maxent_ne_chunker_tab'); nltk.download('averaged_perceptron_tagger_eng'); nltk.download('words')"
-    if not run_command([python_path, "-c", nltk_script],
-                     "Failed to download NLTK data"):
+    print_status("Downloading SpaCy NLP model (en_core_web_sm)...")
+    if not run_command([python_path, "-m", "spacy", "download", "en_core_web_sm"],
+                     "Failed to download SpaCy model"):
         return
-    print_status("NLTK data downloaded successfully", "success")
+    print_status("SpaCy model downloaded successfully", "success")
 
     # Create .env file if it doesn't exist
     if not os.path.exists(".env"):

@@ -30,7 +30,7 @@ class ModelConfig:
     model_id: str
     env_var: Optional[str] = None
     max_tokens: int = 250
-    temperature: float = 0.7
+    temperature: float = 0.95
     description: str = ""
 
 class Config:
@@ -296,9 +296,11 @@ class Config:
 
     DISCORD_BOT_URL = "http://localhost:5518"
 
+    MAX_STICKY_NOTES = 3
+
     # internal timers (in seconds)
     NEED_UPDATE_TIMER = 5
-    EMOTION_UPDATE_TIMER = 0.05
+    EMOTION_UPDATE_TIMER = 1
     MEMORY_UPDATE_TIMER = 180 # think about this deeper
 
     # Processor settings
@@ -308,7 +310,7 @@ class Config:
     SHUTDOWN_TIMEOUT = 15
 
     # lower = more memories, higher = less memories
-    MEMORY_SIGNIFICANCE_THRESHOLD = 0.6
+    MEMORY_SIGNIFICANCE_THRESHOLD = 0.625
     
     # Initial needs
     INITIAL_HUNGER = 0
@@ -358,5 +360,5 @@ class Config:
         'loneliness': 0.0002
     }
 
-    VERSION = "0.2.5"
+    VERSION = "0.3"
 

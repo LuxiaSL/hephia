@@ -1,9 +1,11 @@
 """
 brain/cognition/memory/manager.py
 
-Central memory management system that handles memory operations 
-across all interfaces. Operates "subconsciously" - accessing but 
-not generating notifications/events.
+Central memory management system with neuromorphic flow.
+Generates memory content FIRST, then evaluates significance using
+sophisticated metrics on the actual generated content.
+
+Event → Generate Content → Sophisticated Significance Check → Form or Discard Memory
 """
 
 from typing import Dict, Any, Optional, List
@@ -34,6 +36,15 @@ class MemoryManager:
         self.interfaces = interfaces
         self.significance_analyzer = SignificanceAnalyzer()
         self._memory_lock = asyncio.Lock()
+        
+        self._generation_stats = {
+            "total_generated": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "generation_failures": 0,
+            "significance_failures": 0
+        }
+        
         self._setup_memory_listeners()
 
     def _setup_memory_listeners(self):
@@ -46,9 +57,16 @@ class MemoryManager:
     
     @brain_trace
     async def _handle_memory_event(self, event: Event) -> None:
-        """Handle memory check events from all interfaces."""
+        """
+        Handle memory check events with neuromorphic flow.
+        
+        1. Extract memory data
+        2. Generate memory content (always - the "experience")
+        3. Evaluate significance using sophisticated metrics on generated content
+        4. Form memory if significant, discard if not
+        """
         try:
-            # Check if the event data is wrapped (has an "event_data" key) and extract it.
+            # Extract memory data from event
             if isinstance(event.data, dict) and "event_data" in event.data:
                 memory_payload = event.data["event_data"]
             else:
@@ -61,42 +79,97 @@ class MemoryManager:
                 interface_id=memory_data.interface_id
             )
             
-            # Check significance based on source type
-            brain_trace.memory.significance("Checking significance")
-            if not await self._check_significance(memory_data):
-                brain_trace.memory.skip(reason="below significance threshold")
+            brain_trace.memory.generate("Generating memory content")
+            BrainLogger.debug(f"Experiencing memory content for {memory_data.interface_id}")
+            
+            memory_content = await self._generate_memory_content(memory_data)
+            self._generation_stats["total_generated"] += 1
+            
+            if not memory_content:
+                brain_trace.memory.skip(reason="content generation failed")
+                self._generation_stats["generation_failures"] += 1
+                BrainLogger.warning(f"Memory content generation failed for {memory_data.interface_id}")
                 return
             
-            # Get memory content based on source type
-            brain_trace.memory.generate("Generating memory content")
-            BrainLogger.debug(f"Generating memory content for {memory_data.interface_id}")
-            memory_content = await self._generate_memory_content(memory_data)
+            brain_trace.memory.significance("Evaluating significance with generated content")
+            is_significant = await self._check_significance_with_content(memory_data, memory_content)
             
-            if memory_content:
-                brain_trace.memory.form("Forming final memory")
-                await self._form_memory(memory_data, memory_content)
+            if not is_significant:
+                brain_trace.memory.skip(reason="below significance threshold after content evaluation")
+                self._generation_stats["rejected"] += 1
+                BrainLogger.debug(
+                    f"Generated memory content rejected for {memory_data.interface_id} "
+                    f"(length: {len(memory_content)} chars)"
+                )
+                # Content is discarded here (neuromorphic pruning)
+                return
+            
+            # Content passed significance check - form the memory
+            brain_trace.memory.form("Forming memory after significance approval")
+            self._generation_stats["accepted"] += 1
+            BrainLogger.info(
+                f"Memory content accepted for {memory_data.interface_id} "
+                f"(length: {len(memory_content)} chars)"
+            )
+            
+            await self._form_memory(memory_data, memory_content)
                 
         except Exception as e:
+            self._generation_stats["significance_failures"] += 1
             brain_trace.error(
                 error=e,
                 context={
                     "event_data": event.data,
-                    "interface_id": memory_data.interface_id if 'memory_data' in locals() else None
+                    "interface_id": memory_data.interface_id if 'memory_data' in locals() else None,
+                    "has_content": 'memory_content' in locals(),
+                    "content_length": len(memory_content) if 'memory_content' in locals() and memory_content else 0
                 }
             )
+            BrainLogger.error(f"Memory event handling failed: {e}")
             raise
 
-    async def _check_significance(self, memory_data: MemoryData) -> bool:
-        """Route to SignificanceAnalyzer for significance checking."""
+    async def _check_significance_with_content(
+        self, 
+        memory_data: MemoryData, 
+        generated_content: str
+    ) -> bool:
+        """
+        Enhanced significance checking that includes generated content.
+        Uses the new SignificanceAnalyzer with metrics-based evaluation.
+        
+        Args:
+            memory_data: Original memory context and metadata
+            generated_content: LLM-generated memory content to evaluate
+            
+        Returns:
+            bool: Whether the memory is significant enough to store
+        """
         try:
-            return self.significance_analyzer.analyze_significance(memory_data)
+            # Call enhanced SignificanceAnalyzer with generated content
+            return await self.significance_analyzer.analyze_significance(
+                memory_data=memory_data,
+                generated_content=generated_content
+            )
         except Exception as e:
-            BrainLogger.error(f"Error checking significance: {e}")
-            return False
+            BrainLogger.error(f"Error in enhanced significance checking: {e}")
+            # Fallback to heuristic-only evaluation on error
+            try:
+                BrainLogger.warning(f"Falling back to heuristic-only significance for {memory_data.interface_id}")
+                return await self.significance_analyzer.analyze_significance(
+                    memory_data=memory_data,
+                    generated_content=None  # Forces heuristic fallback
+                )
+            except Exception as fallback_error:
+                BrainLogger.error(f"Even heuristic fallback failed: {fallback_error}")
+                # Emergency permissive fallback
+                return True
     
     @brain_trace
     async def _generate_memory_content(self, memory_data: MemoryData) -> Optional[str]:
-        """Generate memory content based on source type."""
+        """
+        Generate memory content based on source type.
+        This happens BEFORE significance evaluation.
+        """
         try:
             interface = self.interfaces.get(memory_data.interface_id)
             if not interface:
@@ -112,13 +185,13 @@ class MemoryManager:
                 metadata=memory_data.metadata
             )
 
-            # Generate memory content
+            # Generate memory content using LLM
             brain_trace.memory.model("Getting model config")
             model_name = Config.get_cognitive_model()
             model_config = Config.AVAILABLE_MODELS[model_name]
             
             brain_trace.memory.completion("Generating completion")
-            BrainLogger.debug(f"Getting completion for memory from {memory_data.interface_id}")
+            BrainLogger.debug(f"Getting LLM completion for memory from {memory_data.interface_id}")
             content = await self.api.create_completion(
                 provider=model_config.provider.value,
                 model=model_config.model_id,
@@ -142,9 +215,13 @@ class MemoryManager:
 
             if content:
                 brain_trace.memory.success(content_length=len(content))
+                BrainLogger.debug(f"Generated {len(content)} chars for {memory_data.interface_id}")
             else:
                 brain_trace.memory.fail(reason="empty content")
+                # Try fallback memory from interface
                 content = await interface.get_fallback_memory(memory_data)
+                if content:
+                    BrainLogger.info(f"Using fallback memory content for {memory_data.interface_id}")
                 
             return content
             
@@ -157,11 +234,15 @@ class MemoryManager:
                     "metadata": memory_data.metadata
                 }
             )
+            BrainLogger.error(f"Memory content generation failed for {memory_data.interface_id}: {e}")
             return None
     
     @brain_trace
     async def _form_memory(self, memory_data: MemoryData, content: str) -> None:
-        """Form final memory and dispatch to cognitive bridge."""
+        """
+        Form final memory and dispatch to cognitive bridge.
+        This now only happens for content that passed sophisticated significance evaluation.
+        """
         try:
             event_data = {
                 "event_type": memory_data.interface_id,
@@ -171,7 +252,9 @@ class MemoryManager:
                     "metadata": {
                         "source_type": memory_data.source_type.value,
                         "original_metadata": memory_data.metadata,
-                        "timestamp": memory_data.timestamp.isoformat()
+                        "timestamp": memory_data.timestamp.isoformat(),
+                        "neuromorphic_flow": True,  # Flag indicating this used new flow
+                        "content_length": len(content)
                     }
                 }
             }
@@ -368,3 +451,26 @@ class MemoryManager:
         except Exception as e:
             BrainLogger.error(f"Memory content generation failed: {e}")
             return None
+
+    def get_generation_stats(self) -> Dict[str, Any]:
+        """Get statistics about the neuromorphic memory generation flow."""
+        total = self._generation_stats["total_generated"]
+        if total == 0:
+            return {**self._generation_stats, "acceptance_rate": 0.0, "rejection_rate": 0.0}
+        
+        return {
+            **self._generation_stats,
+            "acceptance_rate": self._generation_stats["accepted"] / total,
+            "rejection_rate": self._generation_stats["rejected"] / total
+        }
+
+    def reset_generation_stats(self) -> None:
+        """Reset generation statistics (useful for monitoring)."""
+        self._generation_stats = {
+            "total_generated": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "generation_failures": 0,
+            "significance_failures": 0
+        }
+        BrainLogger.info("Memory generation statistics reset")

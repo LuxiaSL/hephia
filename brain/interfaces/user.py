@@ -28,8 +28,7 @@ class UserInterface(CognitiveInterface):
         cognitive_bridge: CognitiveBridge,
         notification_manager: NotificationManager
     ):
-        super().__init__("user", state_bridge, cognitive_bridge, notification_manager)
-        self.api = api_manager
+        super().__init__("user", state_bridge, cognitive_bridge, notification_manager, api_manager)
 
     @brain_trace
     async def process_interaction(self, content: Dict[str, Any]) -> str:
@@ -45,7 +44,7 @@ class UserInterface(CognitiveInterface):
             brain_trace.interaction.context("Getting cognitive context")
             # Get cognitive context including state and recent activity
             context_parts = {}
-            async for key, value in self.get_cognitive_context():
+            async for key, value in self.get_cognitive_context(content):
                 context_parts[key] = value
             
             # Build final context string from parts
@@ -70,7 +69,37 @@ class UserInterface(CognitiveInterface):
             })
 
             await self.announce_cognitive_context([result, content.get('messages', [])], notification)
-            
+
+            # Apply cognitive influences before memory formation
+            brain_trace.interaction.cognitive("Applying cognitive influences")
+            try:
+                influences = await self.analyze_cognitive_influence(
+                    formatted_response=result,
+                    other_updates=other_updates,
+                    metadata={
+                        'conversation': content.get('messages', [])[-3:] if content.get('messages') else [],
+                        'interaction_type': 'conversation',
+                        'message_count': len(content.get('messages', []))
+                    },
+                    notification=notification
+                )
+                
+                if influences:
+                    # Dispatch cognitive influences to emotional processor
+                    global_event_dispatcher.dispatch_event_sync(Event(
+                        "cognitive:emotional:influence",
+                        {
+                            'influences': influences,
+                            'source_interface': self.interface_id,
+                            'trigger_context': 'user_conversation'
+                        }
+                    ))
+                    BrainLogger.info(f"Applied {len(influences)} cognitive influences from {self.interface_id}")
+
+            except Exception as e:
+                BrainLogger.error(f"Cognitive influence analysis failed for {self.interface_id}: {e}")
+                # Continue with normal flow even if cognitive influence fails
+
             await self._dispatch_memory_check(result, content.get('messages', []), context)
 
             return result
@@ -147,7 +176,7 @@ class UserInterface(CognitiveInterface):
         # Format recent conversation context
         conversation_context = "\n".join([
             f"{msg.get('role', 'unknown')}: {msg.get('content', '')}"
-            for msg in conversation[-3:]  # Last 3 messages
+            for msg in conversation[-5:]  # Last 5 messages
         ]) if conversation else "No conversation context"
 
         return get_prompt(
@@ -188,9 +217,31 @@ class UserInterface(CognitiveInterface):
     async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to user conversations.
-        Focuses on direct interaction patterns.
+        Uses current conversation context for targeted memory retrieval.
         """
+        # Default query if no metadata available
         query = "user conversation interaction discussion"
+        
+        if metadata:
+            # Extract conversation messages for context
+            conversation = metadata.get('conversation', [])
+            
+            if conversation:
+                # Get recent messages for context (last 3-5 messages)
+                recent_messages = conversation[-5:]
+                
+                # Build context from recent conversation
+                context_parts = []
+                for msg in recent_messages:
+                    role = msg.get('role', 'unknown')
+                    content = msg.get('content', '')
+                    if content:
+                        context_parts.append(f"{role}: {content}")
+                
+                # Use conversation context as query if available
+                if context_parts:
+                    query = " ".join(context_parts)
+        
         return await self.cognitive_bridge.retrieve_memories(
             query=query,
             limit=3

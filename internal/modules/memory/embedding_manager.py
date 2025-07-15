@@ -1,4 +1,8 @@
-# embeddings/embedding_manager.py
+import asyncio
+import hashlib
+import time
+import torch
+
 from typing import List, Optional, Any
 
 from loggers.loggers import MemoryLogger
@@ -22,6 +26,7 @@ class EmbeddingManager:
         self._sentence_transformer = None  # For lazy loading
         self._embedding_cache = {} 
         self._cache_size = 1000
+        self._embedding_dims = 384
         
         if self.use_local:
             # Don't load immediately - wait for first use
@@ -29,28 +34,54 @@ class EmbeddingManager:
         else:
             MemoryLogger.info("Using API embedding")
 
+    def _generate_similarity_cache_key(self, vec1: List[float], vec2: List[float]) -> str:
+        """Generate cache key for similarity calculations."""
+        try:
+            # Create deterministic hash from vector contents
+            # Use first and last few values as signature to avoid hashing entire vectors
+            if not vec1 or not vec2 or len(vec1) != len(vec2):
+                return f"invalid:{len(vec1)}:{len(vec2)}"
+                
+            # Sample key points from vectors for efficient hashing
+            v1_sample = vec1[:3] + vec1[-3:] if len(vec1) >= 6 else vec1
+            v2_sample = vec2[:3] + vec2[-3:] if len(vec2) >= 6 else vec2
+            
+            # Create ordered pair (smaller hash first for consistency)
+            h1 = hashlib.md5(str(v1_sample).encode()).hexdigest()[:8]
+            h2 = hashlib.md5(str(v2_sample).encode()).hexdigest()[:8]
+            
+            return f"{min(h1, h2)}:{max(h1, h2)}"
+            
+        except Exception:
+            # Fallback to basic string hash
+            return f"fallback:{hash((str(vec1[:3]), str(vec2[:3])))}"
+
     @property
     def sentence_transformer(self) -> Optional[Any]:
-        """Lazy load the sentence transformer model."""
+        """Lazy load the all_minilm embedder."""
         if self._sentence_transformer is None and self.use_local:
+            gpu_available = torch.cuda.is_available()
+
+            MemoryLogger.info(
+                f"Loading all-MiniLM embedder on {'GPU' if gpu_available else 'CPU'}"
+            )
+
             try:
-                # Lazy import
                 from sentence_transformers import SentenceTransformer
-                self._sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
-                MemoryLogger.info("Successfully loaded sentence-transformers")
-            except ImportError as e:
-                MemoryLogger.warning(
-                    f"Could not import sentence-transformers: {e}. "
-                    "Will use API fallback for embeddings."
+                self._sentence_transformer = SentenceTransformer(
+                    "all-MiniLM-L6-v2",
+                    device="cuda" if gpu_available else "cpu"
                 )
+                MemoryLogger.info("Loaded all-MiniLM-L6-v2 successfully.")
+            except ImportError as e:
+                MemoryLogger.warning(f"sentence-transformers missing: {e}. API fallback engaged.")
                 self.use_local = False
             except Exception as e:
-                MemoryLogger.warning(
-                    f"Failed to initialize sentence-transformers: {e}. "
-                    "Will use API fallback for embeddings."
-                )
+                MemoryLogger.warning(f"all-MiniLM init failed: {e}. API fallback engaged.")
                 self.use_local = False
+
         return self._sentence_transformer
+
             
     def preprocess_text(self, text: str, max_length: int = 512) -> str:
         """
@@ -99,7 +130,7 @@ class EmbeddingManager:
             normalize_embeddings: Whether to L2-normalize embeddings
             
         Returns:
-            List[float]: 384-dimensional embedding vector
+            List[float]: n-dimensional embedding vector
         """
         return list(await self._cached_internal_encode(text, convert_to_tensor, normalize_embeddings))
 
@@ -112,7 +143,7 @@ class EmbeddingManager:
     ) -> tuple:
         """Cached internal implementation that returns tuple for hashability."""
         if not text:
-            return tuple([0.0] * 384)
+            return tuple([0.0] * self._embedding_dims)
             
         try:
             text = self.preprocess_text(text)
@@ -146,11 +177,11 @@ class EmbeddingManager:
             MemoryLogger.warning(
                 "All embedding methods failed - returning zero vector"
             )
-            return tuple([0.0] * 384)
+            return tuple([0.0] * self._embedding_dims)
                 
         except Exception as e:
             MemoryLogger.error(f"Embedding generation failed: {str(e)}")
-            return tuple([0.0] * 384)
+            return tuple([0.0] * self._embedding_dims)
 
     async def _get_api_embedding(self, text: str) -> List[float]:
         """Get embedding via API with retry logic."""
@@ -177,10 +208,21 @@ class EmbeddingManager:
             MemoryLogger.error(f"API embedding failed: {str(e)}")
             raise
 
-    def calculate_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+    @async_lru_cache(
+        maxsize=5000, 
+        ttl=21600, 
+        key_func=lambda self, vec1, vec2: self._generate_similarity_cache_key(vec1, vec2)
+    )
+    async def calculate_similarity_cached(self, vec1: List[float], vec2: List[float]) -> float:
         """
-        Calculate cosine similarity between two vectors.
-        Handles edge cases gracefully.
+        Cached version of similarity calculation.
+        Uses custom key generation via decorator.
+        """
+        return self._calculate_similarity_internal(vec1, vec2)
+
+    def _calculate_similarity_internal(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Internal similarity calculation that gets cached.
         """
         try:
             if not vec1 or not vec2:
@@ -204,3 +246,17 @@ class EmbeddingManager:
         except Exception as e:
             MemoryLogger.error(f"Similarity calculation failed: {str(e)}")
             return 0.0
+
+    async def calculate_similarity_async(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Async version of similarity calculation with caching.
+        Use this when calling from async contexts.
+        """
+        return await self.calculate_similarity_cached(vec1, vec2)
+
+    def calculate_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """
+        Synchronous similarity calculation.
+        Always returns a float, never a Task.
+        """
+        return self._calculate_similarity_internal(vec1, vec2)

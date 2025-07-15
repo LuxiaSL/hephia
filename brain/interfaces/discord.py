@@ -29,8 +29,7 @@ class DiscordInterface(CognitiveInterface):
             cognitive_bridge: CognitiveBridge,
             notification_manager: NotificationManager,
         ):
-        super().__init__("discord", state_bridge, cognitive_bridge, notification_manager)
-        self.api = api_manager
+        super().__init__("discord", state_bridge, cognitive_bridge, notification_manager, api_manager)
         
     @brain_trace
     async def process_interaction(self, content: Dict[str, Any]) -> str:
@@ -50,22 +49,21 @@ class DiscordInterface(CognitiveInterface):
             message_content = message.get('content', '')
             author = message.get('author', 'Unknown')
             channel_data = content.get('channel', {})
-            channel = channel_data.get('name', 'Unknown')
-            
+            channel = channel_data.get('name', 'Unknown')            
             # Get cognitive context including state and recent activity
             context_parts = {}
-            async for key, value in self.get_cognitive_context():
+            async for key, value in self.get_cognitive_context(content):
                 context_parts[key] = value
 
+             # Build final context string from parts
+            formatted_context = context_parts.get('formatted_context', 'No context available')
+            other_updates = context_parts.get('updates', '')
+            context = f"{formatted_context}\n###\nRecent Updates:\n{other_updates}"
+            
+            # Log the entire context for debugging
+            BrainLogger.info(f"[{self.interface_id}] Received cognitive context: {context}")
+
             if Config.get_discord_reply_on_tag():
-                # Build final context string from parts
-                formatted_context = context_parts.get('formatted_context', 'No context available')
-                other_updates = context_parts.get('updates', '')
-                context = f"{formatted_context}\n###\nRecent Updates:\n{other_updates}"
-                
-                # Log the entire context for debugging
-                BrainLogger.info(f"[{self.interface_id}] Received cognitive context: {context}")
-                
                 # Get LLM response
                 prompt = await self._format_social_prompt(
                     message_content,
@@ -337,10 +335,44 @@ class DiscordInterface(CognitiveInterface):
 
     async def get_relevant_memories(self, metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
-        Retrieve memories relevant to current social context.
-        Focuses on interaction patterns and relationship context.
+        Retrieve memories relevant to current Discord social context.
+        Uses channel, author, and message content for targeted memory retrieval.
         """
-        query = f"social interaction discord conversation relationship"
+        # Start with a base query for Discord interactions
+        query_parts = ["discord", "social", "conversation"]
+        
+        if metadata:
+            # Extract Discord-specific context from the interaction
+            current_message = metadata.get('current_message', {})
+            channel_data = metadata.get('channel', {})
+            
+            # Add channel context - this is often the most relevant for Discord
+            channel_name = channel_data.get('name')
+            guild_name = channel_data.get('guild_name')
+            if channel_name:
+                query_parts.append(channel_name)
+            if guild_name:
+                query_parts.append(guild_name)
+            
+            # Add author context for relationship continuity
+            author = current_message.get('author')
+            if author:
+                query_parts.append(author)
+            
+            # Add message content keywords for topic relevance
+            message_content = current_message.get('content', '')
+            if message_content:
+                # Extract meaningful words (filter out common Discord artifacts)
+                content_words = [
+                    word for word in message_content.lower().split()
+                    if len(word) > 3 and word not in {'@hephia', 'https', 'http', 'www'}
+                ]
+                # Add first few content words to avoid query bloat
+                query_parts.extend(content_words[:3])
+        
+        # Create search query from context
+        query = " ".join(query_parts)
+        
         return await self.cognitive_bridge.retrieve_memories(
             query=query,
             limit=3

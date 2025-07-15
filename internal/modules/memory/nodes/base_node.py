@@ -60,7 +60,7 @@ class BaseMemoryNode(ABC):
         self.ghost_nodes = ghost_nodes or []
         self.ghost_states = ghost_states or []
         self.connections = connections or {}
-        self.last_connection_update = last_connection_update
+        self.last_connection_update = last_connection_update or time.time()
         self.last_accessed = time.time()
 
     def __post_init__(self):
@@ -84,7 +84,8 @@ class BaseMemoryNode(ABC):
             'ghost_nodes': json.dumps(self.ghost_nodes),
             'ghost_states': json.dumps(self.ghost_states),
             'connections': json.dumps(self.connections),
-            'last_connection_update': self.last_connection_update
+            'last_connection_update': self.last_connection_update,
+            'last_accessed': self.last_accessed
         }
 
     @classmethod
@@ -131,6 +132,21 @@ class BaseMemoryNode(ABC):
             node_id for node_id, weight in self.connections.items()
             if weight >= min_weight
         ]
+    
+    def get_connections_with_weights(self, min_weight: float = 0.0) -> Dict[str, float]:
+        """
+        Get connections as a dictionary with their weights, optionally filtered by minimum weight.
+        
+        Args:
+            min_weight: Minimum connection weight to include
+            
+        Returns:
+            Dict mapping node IDs to connection weights
+        """
+        return {
+            node_id: weight for node_id, weight in self.connections.items()
+            if weight >= min_weight
+        }
 
     # -------------------------------------------------------------------------
     # Strength & Decay

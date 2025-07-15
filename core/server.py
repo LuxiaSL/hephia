@@ -264,7 +264,7 @@ class HephiaServer:
                 response_text = await self.core_processor.handle_discord_message(message_context)
                 SystemLogger.debug(f"AI response: {response_text[:100]}...")
 
-                if response_text == "":
+                if response_text == "" or response_text is None or response_text == "N/A":
                     SystemLogger.warning("Received empty response from AI.")
                     return {"status": "no_response"}
 

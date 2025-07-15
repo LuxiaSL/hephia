@@ -46,6 +46,11 @@ class CognitiveBridge:
             "cognitive:context_update",
             self.update_cognitive_state
         )
+        global_event_dispatcher.add_listener(
+            "significance:request_metrics_evaluation",
+            lambda event: asyncio.create_task(self._handle_significance_evaluation_request(event))
+        )
+
 
     def update_cognitive_state(self, event: Event):
         try:
@@ -137,7 +142,12 @@ class CognitiveBridge:
             self.logger.error(f"Reflection error: {str(e)}")
             return []
 
-    async def retrieve_memories(self, query: str, limit: int = 5, context_state: Optional[Dict[str, Any]] = None, threshold: float = 0) -> List[Dict[str, Any]]:
+    async def retrieve_memories(self,
+                                query: str,
+                                limit: int = 5,
+                                context_state: Optional[Dict[str, Any]] = None,
+                                threshold: float = 0,
+                                dispatch_echo: bool = True) -> List[Dict[str, Any]]:
         """
         Helper method to retrieve memories using cognitive memory's retrieval system.
 
@@ -159,7 +169,8 @@ class CognitiveBridge:
                 comparison_state=context_state,
                 top_k=limit,
                 threshold=threshold,
-                return_details=True
+                return_details=True,
+                dispatch_echo=dispatch_echo
             )
             
             if not memories or not memories[0]:  # Check both memories and metrics
@@ -344,58 +355,202 @@ class CognitiveBridge:
                 {"message": f"Meditation failed: {str(e)}"}
             ))
             return {}
-
-    async def absorb_memory(self, memory_id: str, intensity: float) -> Dict[str, Any]:
+        
+    async def focus_on_state_with_memories(
+        self, 
+        state_query: str, 
+        intensity: float = 0.5, 
+        duration: int = 1
+    ) -> Dict[str, Any]:
         """
-        Deep focus on specific memory with amplified echo effects.
-        Abstracts memory interaction through the memory system orchestrator.
+        Focus meditation that finds memories related to the state and uses their
+        emotional patterns to create more targeted meditation effects.
+        
+        Args:
+            state_query: Abstract state or feeling to focus on
+            intensity: Desired meditation intensity 
+            duration: Meditation duration in cycles
+            
+        Returns:
+            Dict containing meditation results and emotional patterns found
         """
         try:
-            # Use memory system's meditation method instead of direct manipulation
-            meditation_result = await self.memory_system.meditate_on_memory(
-                memory_id=memory_id,
-                intensity=intensity,
-                duration=5  # Default duration for absorption
+            # Get current context
+            context = await self.internal_context.get_memory_context(is_cognitive=True)
+            
+            # Do mini-reflect to find relevant memories (smaller set than full reflect)
+            related_memories = await self.retrieve_memories(
+                query=state_query,
+                limit=5,  # Smaller set for focus vs absorb
+                context_state=context
             )
-
-            if not meditation_result:
-                return None
-
-            # Format result using meditation data
-            result = {
-                "content": meditation_result.get("content"),
-                "effects": ["Memory becoming clearer"],
-                "connected_effects": []
+            
+            if not related_memories:
+                # Fall back to basic meditation if no memories found
+                return self.meditate_on_state(state_query, intensity, duration)
+            
+            # Extract emotional patterns from memories
+            emotional_patterns = []
+            total_relevance = 0.0
+            
+            for memory in related_memories:
+                relevance = memory.get('relevance', 0.0)
+                total_relevance += relevance
+                
+                # Try to extract emotional context from memory if available
+                # This would come from the memory's processed_state when it was formed
+                if 'emotional_state' in memory.get('processed_state', {}):
+                    emotions = memory['processed_state']['emotional_state']
+                    for emotion in emotions:
+                        emotional_patterns.append({
+                            'valence': emotion.get('valence', 0.0),
+                            'arousal': emotion.get('arousal', 0.0),
+                            'intensity': emotion.get('intensity', 0.0),
+                            'weight': relevance
+                        })
+            
+            if not emotional_patterns:
+                # If no emotional patterns found, fall back to basic meditation
+                return self.meditate_on_state(state_query, intensity, duration)
+            
+            # Calculate weighted average emotional direction
+            total_weight = sum(p['weight'] for p in emotional_patterns)
+            if total_weight > 0:
+                avg_valence = sum(p['valence'] * p['weight'] for p in emotional_patterns) / total_weight
+                avg_arousal = sum(p['arousal'] * p['weight'] for p in emotional_patterns) / total_weight
+                avg_intensity = sum(p['intensity'] * p['weight'] for p in emotional_patterns) / total_weight
+            else:
+                avg_valence = avg_arousal = avg_intensity = 0.0
+            
+            # Create memory-informed meditation events
+            memory_informed_effects = []
+            
+            # Dispatch emotional meditation based on discovered patterns
+            global_event_dispatcher.dispatch_event(Event(
+                "cognitive:emotional:meditation",
+                {
+                    "type": "memory_informed",
+                    "state_query": state_query,
+                    "valence_direction": avg_valence,
+                    "arousal_direction": avg_arousal,
+                    "intensity": intensity * (1 + avg_intensity * 0.5),  # Boost based on memory intensity
+                    "duration": duration,
+                    "memory_count": len(related_memories)
+                }
+            ))
+            
+            memory_informed_effects.append(f"Drawing from {len(related_memories)} related memories")
+            memory_informed_effects.append(f"Emotional resonance: {avg_valence:.2f} valence, {avg_arousal:.2f} arousal")
+            
+            # Also dispatch mood meditation if the pattern suggests it
+            if abs(avg_valence) > 0.2:
+                mood_type = "elevation" if avg_valence > 0 else "deepening"
+                global_event_dispatcher.dispatch_event(Event(
+                    "cognitive:mood:meditation",
+                    {
+                        "type": mood_type,
+                        "intensity": intensity * abs(avg_valence),
+                        "duration": duration
+                    }
+                ))
+                memory_informed_effects.append(f"Mood influence: {mood_type}")
+            
+            return {
+                "state_query": state_query,
+                "memory_count": len(related_memories),
+                "emotional_patterns": emotional_patterns,
+                "average_direction": {
+                    "valence": avg_valence,
+                    "arousal": avg_arousal,
+                    "intensity": avg_intensity
+                },
+                "effects": memory_informed_effects,
+                "total_relevance": total_relevance
             }
+            
+        except Exception as e:
+            self.logger.error(f"Memory-informed focus meditation error: {str(e)}")
+            # Fall back to basic meditation on error
+            return self.meditate_on_state(state_query, intensity, duration)
 
-            # Process connected memories from meditation result
-            if "connected_memories" in meditation_result:
-                for connection in meditation_result["connected_memories"]:
-                    result["connected_effects"].append({
-                        "content": connection["content"],
-                        "strength": connection["connection_strength"],
-                        "depth": connection["depth"]
+    async def absorb_memory(
+        self, 
+        query: str, 
+        intensity: float = 0.8, 
+        max_memories: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Absorb memories based on a query topic rather than specific memory ID.
+        Retrieves relevant memories and performs meditation on the top results.
+        
+        Args:
+            query: Topic or theme to search for memories about
+            intensity: Meditation intensity for each memory
+            max_memories: Maximum number of memories to absorb
+            
+        Returns:
+            Dict containing absorbed memories and their collective effects
+        """
+        try:
+            # Get current context for memory retrieval
+            context = await self.internal_context.get_memory_context(is_cognitive=True)
+            
+            # Retrieve relevant memories using existing infrastructure
+            relevant_memories = await self.retrieve_memories(
+                query=query,
+                limit=max_memories,
+                context_state=context,
+                dispatch_echo=False  # No need to dispatch echoes here, done in meditation
+            )
+            
+            if not relevant_memories:
+                return None
+                
+            # Meditate on each retrieved memory
+            absorbed_memories = []
+            collective_effects = []
+            
+            for memory in relevant_memories:
+                meditation_result = await self.memory_system.meditate_on_memory(
+                    memory_id=memory['id'],
+                    intensity=intensity
+                )
+                
+                if meditation_result and 'error' not in meditation_result:
+                    absorbed_memories.append({
+                        'memory_id': memory['id'],
+                        'content': memory['content'],
+                        'relevance': memory.get('relevance', 0.0),
+                        'effects': meditation_result.get('echo_effects', [])
                     })
-
-            # Include echo effects if available
-            if "echo_effects" in meditation_result:
-                result["effects"].extend(meditation_result["echo_effects"])
-
-            return result
-
+                    
+                    # Collect effects for summary
+                    if meditation_result.get('echo_effects'):
+                        collective_effects.extend(meditation_result['echo_effects'])
+            
+            if not absorbed_memories:
+                return None
+                
+            return {
+                'query': query,
+                'absorbed_count': len(absorbed_memories),
+                'memories': absorbed_memories,
+                'collective_effects': collective_effects,
+                'intensity': intensity
+            }
+            
         except Exception as e:
             global_event_dispatcher.dispatch_event(Event(
                 "cognitive:error",
-                {"message": f"Memory absorption failed: {str(e)}"}
+                {"message": f"Memory absorption by query failed: {str(e)}"}
             ))
+            self.logger.error(f"Query-based absorption error: {str(e)}")
             return None
 
     async def _handle_memory_formation(self, event: Event):
         """Handle memory formation requests in a source-agnostic way."""
         try:
             event_data = event.data.get('event_data', {})
-            content = event_data.get('content')
-            context = event_data.get('context')
             
             # Request memory formation through the memory system
             global_event_dispatcher.dispatch_event(Event(
@@ -410,3 +565,195 @@ class CognitiveBridge:
                 "cognitive:error",
                 {"message": f"Memory formation failed: {str(e)}"}
             ))
+
+    async def _handle_significance_evaluation_request(self, event: Event) -> None:
+        """
+        Handle significance evaluation requests from SignificanceAnalyzer.
+        Coordinates with memory system to perform sophisticated metrics evaluation.
+        
+        Expected event data:
+        - request_id: Unique identifier for this evaluation request
+        - memory_data: MemoryData object as dict
+        - generated_content: LLM-generated memory content
+        - timeout: Maximum evaluation time
+        """
+        request_id = None
+        try:
+            request_id = event.data.get("request_id")
+            memory_data_dict = event.data.get("memory_data", {})
+            generated_content = event.data.get("generated_content", "")
+            timeout = event.data.get("timeout", 10.0)
+            
+            if not request_id:
+                self.logger.error("Significance evaluation request missing request_id")
+                return
+                
+            if not generated_content:
+                self.logger.warning(f"Significance evaluation {request_id} has no generated content")
+                await self._send_significance_response(
+                    request_id=request_id,
+                    significance_score=0.0,
+                    component_scores={},
+                    evaluation_method="error",
+                    error="No generated content provided"
+                )
+                return
+            
+            self.logger.debug(f"Processing significance evaluation request {request_id}")
+            
+            # Perform the metrics-based evaluation
+            evaluation_result = await self._evaluate_memory_significance(
+                memory_data_dict=memory_data_dict,
+                generated_content=generated_content,
+                timeout=timeout
+            )
+            
+            # Send response back to SignificanceAnalyzer
+            await self._send_significance_response(
+                request_id=request_id,
+                **evaluation_result
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Failed to handle significance evaluation request {request_id}: {e}")
+            if request_id:
+                await self._send_significance_response(
+                    request_id=request_id,
+                    significance_score=0.0,
+                    component_scores={},
+                    evaluation_method="error",
+                    error=str(e)
+                )
+
+    async def _evaluate_memory_significance(
+        self,
+        memory_data_dict: Dict[str, Any],
+        generated_content: str,
+        timeout: float = 10.0
+    ) -> Dict[str, Any]:
+        """
+        Coordinate with memory system to evaluate memory significance using sophisticated metrics.
+        Creates temporary node and uses existing metrics infrastructure.
+        
+        Args:
+            memory_data_dict: MemoryData as dictionary
+            generated_content: LLM-generated memory content
+            timeout: Maximum evaluation time
+            
+        Returns:
+            Dict containing significance_score, component_scores, evaluation_method, error
+        """
+        try:
+            # Get current memory context for comparison
+            current_context = await self.internal_context.get_memory_context(is_cognitive=True)
+            if not current_context:
+                return {
+                    "significance_score": 0.5,
+                    "component_scores": {},
+                    "evaluation_method": "fallback",
+                    "error": "No memory context available"
+                }
+            
+            # Use memory system's evaluation infrastructure
+            # This leverages the same temporary node + metrics pattern from _calculate_initial_strength
+            significance_score = await self._delegate_to_memory_system_evaluation(
+                generated_content=generated_content,
+                current_context=current_context,
+                source_type=memory_data_dict.get("source_type", "unknown"),
+                timeout=timeout
+            )
+            
+            # For now, return a simplified response
+            # The detailed component scores could be added later if needed
+            return {
+                "significance_score": significance_score,
+                "component_scores": {
+                    "overall": significance_score
+                },
+                "evaluation_method": "metrics",
+                "error": None
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Memory significance evaluation failed: {e}")
+            return {
+                "significance_score": 0.5,
+                "component_scores": {},
+                "evaluation_method": "error_fallback", 
+                "error": str(e)
+            }
+        
+    async def _delegate_to_memory_system_evaluation(
+        self,
+        generated_content: str,
+        current_context: Dict[str, Any],
+        source_type: str,
+        timeout: float
+    ) -> float:
+        """
+        Delegate to memory system for actual significance evaluation.
+        Now uses the dedicated evaluate_memory_significance method.
+        
+        Args:
+            generated_content: LLM-generated memory content
+            current_context: Current memory/cognitive context  
+            source_type: Type of memory source (for logging)
+            timeout: Maximum evaluation time
+            
+        Returns:
+            float: Significance score between 0.0 and 1.0
+        """
+        try:
+            # Use the new dedicated significance evaluation method
+            significance_score = await self.memory_system.evaluate_memory_significance(
+                generated_content=generated_content,
+                context=current_context,
+                source_type=source_type,
+                timeout=timeout
+            )
+            
+            self.logger.debug(f"Memory system significance evaluation: {significance_score:.3f} for {source_type}")
+            return significance_score
+            
+        except Exception as e:
+            self.logger.error(f"Memory system significance evaluation error for {source_type}: {e}")
+            return 0.5  # Neutral score on error
+
+    async def _send_significance_response(
+        self,
+        request_id: str,
+        significance_score: float,
+        component_scores: Dict[str, float],
+        evaluation_method: str,
+        error: Optional[str] = None
+    ) -> None:
+        """
+        Send significance evaluation response back to SignificanceAnalyzer.
+        
+        Args:
+            request_id: Unique identifier matching the original request
+            significance_score: Overall significance score (0.0 - 1.0)
+            component_scores: Breakdown by component (semantic, emotional, etc.)
+            evaluation_method: How the evaluation was performed
+            error: Error message if evaluation failed
+        """
+        try:
+            response_data = {
+                "request_id": request_id,
+                "significance_score": significance_score,
+                "component_scores": component_scores,
+                "evaluation_method": evaluation_method
+            }
+            
+            if error:
+                response_data["error"] = error
+                
+            global_event_dispatcher.dispatch_event(Event(
+                "significance:metrics_evaluation_response",
+                response_data
+            ))
+            
+            self.logger.debug(f"Sent significance response for {request_id}: {significance_score:.3f}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to send significance response for {request_id}: {e}")

@@ -1,0 +1,9 @@
+# brain/prompting/prompts/interfaces/exo/hud/stickys.yaml
+
+id: interfaces.exo.hud.stickys
+
+defaults:
+  combined: |
+    ${hud_header_str}
+    ${sticky_error_str}
+    ${sticky_notes_block_str}

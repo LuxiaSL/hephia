@@ -9,12 +9,15 @@ We rely on:
  - analyze_conflicts_for_synthesis(...) for deeper analysis
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Union
+
+import numpy as np
+from ...metrics.orchestrator import RetrievalMetricsOrchestrator
 
 def detect_cognitive_conflict(
     nodeA, nodeB,
     metrics: Dict[str, Any],
-    metrics_orchestrator=None
+    metrics_orchestrator: Optional[RetrievalMetricsOrchestrator] = None
 ) -> Dict[str, Any]:
     """
     Single source of truth for cognitive memory conflict detection.
@@ -33,14 +36,53 @@ def detect_cognitive_conflict(
     """
     # If metrics not provided, calculate them
     if not metrics and metrics_orchestrator:
+        from ...metrics.orchestrator import MetricsConfiguration
+        metrics_config = MetricsConfiguration()
+        metrics_config.detailed_metrics = True
         metrics = metrics_orchestrator.calculate_metrics(nodeA, nodeB)
+
+    component_metrics = metrics.get('component_metrics', {})
+    
+    # If component_metrics contains raw float values (dissonance scores), 
+    # convert them to dict format expected by analyze_conflicts_for_synthesis
+    if component_metrics and all(isinstance(v, (int, float, np.number)) for v in component_metrics.values()):
+        # This is dissonance data, not detailed metrics - create mock structure
+        mock_component_metrics = {}
+        for comp_name, dissonance_score in component_metrics.items():
+            if comp_name == 'semantic':
+                mock_component_metrics['semantic'] = {
+                    'embedding_similarity': 1.0 - float(dissonance_score),  # Invert dissonance
+                    'semantic_density': 0.5  # Default value
+                }
+            elif comp_name == 'emotional':
+                mock_component_metrics['emotional'] = {
+                    'valence_shift': float(dissonance_score),
+                    'intensity_delta': float(dissonance_score)
+                }
+            elif comp_name == 'state':
+                mock_component_metrics['state'] = {
+                    'state_conflicts': float(dissonance_score)
+                }
+            elif comp_name == 'temporal':
+                mock_component_metrics['temporal'] = {
+                    'temporal_drift': float(dissonance_score)
+                }
+            elif comp_name == 'strength':
+                mock_component_metrics['strength'] = {
+                    'strength_difference': float(dissonance_score)
+                }
+        
+        # Use mock structure for analysis
+        analysis_metrics = {'component_metrics': mock_component_metrics}
+    else:
+        # Use metrics as-is
+        analysis_metrics = metrics
     
     # Use existing analyze_conflicts_for_synthesis but with enhanced details
-    analysis = analyze_conflicts_for_synthesis(nodeA, nodeB, metrics)
-    
-    # Add semantic analysis
-    if 'semantic' in metrics.get('component_metrics', {}):
-        semantic = metrics['component_metrics']['semantic']
+    analysis = analyze_conflicts_for_synthesis(nodeA, nodeB, analysis_metrics)
+
+    if 'semantic' in analysis_metrics.get('component_metrics', {}):
+        semantic = analysis_metrics['component_metrics']['semantic']
         if semantic.get('semantic_density', 0) > 0.7:
             analysis['details']['semantic_context'] = {
                 'density': semantic['semantic_density'],

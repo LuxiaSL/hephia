@@ -69,8 +69,8 @@ class GhostManager:
             node = self.cognitive_network.nodes.get(node_id)
             if node is not None:
                 await self._evaluate_cognitive_node(node)
-    
-    async def consider_ghosting(self, node: Union[BodyMemoryNode, CognitiveMemoryNode]) -> bool:
+
+    async def consider_ghosting(self, network_type: str, node: Union[BodyMemoryNode, CognitiveMemoryNode]) -> bool:
         """
         Check if a node should be ghosted based on its strength.
         Returns True if node was ghosted, False otherwise.
@@ -79,10 +79,13 @@ class GhostManager:
             return False
         if node.strength >= self.ghost_threshold:
             return False
-        if isinstance(node, BodyMemoryNode):
+        if network_type == "body":
             await self._ghost_body_node(node)
-        else:
+        elif network_type == "cognitive":
             await self._ghost_cognitive_node(node)
+        else:
+            self.logger.error(f"[GhostManager] Invalid network type: {network_type}")
+            return False
         return True
 
     # -------------------------------------------------------------------------
@@ -131,7 +134,7 @@ class GhostManager:
             return
 
         if node.strength < self.ghost_threshold:
-            # thoughts on implementing a merge step here over a ghost but it's hard to inject and need to think about intent
+            # TODO: thoughts on implementing a merge step here over a ghost but it's hard to inject and need to think about intent
             await self._ghost_cognitive_node(node)
 
     async def _ghost_cognitive_node(self, node: CognitiveMemoryNode) -> None:
