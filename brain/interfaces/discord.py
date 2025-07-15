@@ -29,8 +29,7 @@ class DiscordInterface(CognitiveInterface):
             cognitive_bridge: CognitiveBridge,
             notification_manager: NotificationManager,
         ):
-        super().__init__("discord", state_bridge, cognitive_bridge, notification_manager)
-        self.api = api_manager
+        super().__init__("discord", state_bridge, cognitive_bridge, notification_manager, api_manager)
         
     @brain_trace
     async def process_interaction(self, content: Dict[str, Any]) -> str:

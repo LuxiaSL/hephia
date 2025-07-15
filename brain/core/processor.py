@@ -148,7 +148,8 @@ class CoreProcessor:
             self.interfaces['action'] = ActionInterface(
                 self.state_bridge,
                 self.cognitive_bridge,
-                self.notification_manager
+                self.notification_manager,
+                self.api
             )
             
             # Update memory manager with interfaces

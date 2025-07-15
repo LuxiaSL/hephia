@@ -125,6 +125,30 @@ class InternalLogger:
             logger.debug(f"Behavior: {behavior}")
         logger.info(f"Internal: Performed {behavior}")
 
+    @staticmethod
+    def error(message: str, exc_info: bool = None):
+        """Log error-level internal events."""
+        logger = logging.getLogger('hephia.internal')
+        logger.error(f"Internal Error: {strip_emojis(message)}", exc_info=exc_info)
+
+    @staticmethod
+    def warning(message: str):
+        """Log warning-level internal events."""
+        logger = logging.getLogger('hephia.internal')
+        logger.warning(f"Internal Warning: {strip_emojis(message)}")
+
+    @staticmethod
+    def debug(message: str):
+        """Log debug-level internal events."""
+        logger = logging.getLogger('hephia.internal')
+        logger.debug(f"Internal Debug: {strip_emojis(message)}")
+
+    @staticmethod
+    def info(message: str):
+        """Log info-level internal events."""
+        logger = logging.getLogger('hephia.internal')
+        logger.info(f"Internal Info: {strip_emojis(message)}")
+
 class BrainLogger:
     """Enhanced logger for cognitive operations."""
 

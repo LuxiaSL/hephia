@@ -28,8 +28,7 @@ class UserInterface(CognitiveInterface):
         cognitive_bridge: CognitiveBridge,
         notification_manager: NotificationManager
     ):
-        super().__init__("user", state_bridge, cognitive_bridge, notification_manager)
-        self.api = api_manager
+        super().__init__("user", state_bridge, cognitive_bridge, notification_manager, api_manager)
 
     @brain_trace
     async def process_interaction(self, content: Dict[str, Any]) -> str:
@@ -70,7 +69,37 @@ class UserInterface(CognitiveInterface):
             })
 
             await self.announce_cognitive_context([result, content.get('messages', [])], notification)
-            
+
+            # Apply cognitive influences before memory formation
+            brain_trace.interaction.cognitive("Applying cognitive influences")
+            try:
+                influences = await self.analyze_cognitive_influence(
+                    formatted_response=result,
+                    other_updates=other_updates,
+                    metadata={
+                        'conversation': content.get('messages', [])[-3:] if content.get('messages') else [],
+                        'interaction_type': 'conversation',
+                        'message_count': len(content.get('messages', []))
+                    },
+                    notification=notification
+                )
+                
+                if influences:
+                    # Dispatch cognitive influences to emotional processor
+                    global_event_dispatcher.dispatch_event_sync(Event(
+                        "cognitive:emotional:influence",
+                        {
+                            'influences': influences,
+                            'source_interface': self.interface_id,
+                            'trigger_context': 'user_conversation'
+                        }
+                    ))
+                    BrainLogger.info(f"Applied {len(influences)} cognitive influences from {self.interface_id}")
+
+            except Exception as e:
+                BrainLogger.error(f"Cognitive influence analysis failed for {self.interface_id}: {e}")
+                # Continue with normal flow even if cognitive influence fails
+
             await self._dispatch_memory_check(result, content.get('messages', []), context)
 
             return result

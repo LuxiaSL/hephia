@@ -11,6 +11,7 @@ Vectors accumulate and decay naturally, simulating the ebb and flow of emotional
 """
 
 from event_dispatcher import global_event_dispatcher, Event
+from loggers import InternalLogger
 from ..cognition.cognitive_bridge import CognitiveBridge
 from ...internal_context import InternalContext
 import time
@@ -112,16 +113,16 @@ class EmotionalStimulus:
             if abs(current) < min_change:
                 setattr(vector, attr, 0.0)
             else:
-                # Handle decay more safely - ensure we don't overflow
                 try:
-                    decay = -decay_rate if current > 0 else decay_rate
-                    new_value = current * (1 - decay)
+                    # Decay magnitude toward zero regardless of sign
+                    new_value = current * (1 - decay_rate)
                     # Bound values to prevent overflow
                     new_value = max(-1.0, min(1.0, new_value))
                     setattr(vector, attr, new_value)
                 except (OverflowError, FloatingPointError):
                     # If overflow occurs, gracefully decay to 0
                     setattr(vector, attr, 0.0)
+
 
         # Handle intensity decay similarly
         try:
@@ -272,6 +273,7 @@ class EmotionalProcessor:
 
         global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
         global_event_dispatcher.add_listener("cognitive:emotional:meditation", self.process_meditation)
+        global_event_dispatcher.add_listener("cognitive:emotional:influence", self.process_cognitive_influence)
 
     def update(self):
         """Updates the emotional state when ticked."""
@@ -305,7 +307,7 @@ class EmotionalProcessor:
             "emotion": aggregate_vector
         }))
 
-    async def process_event(self, event):
+    async def process_event(self, event: Event):
         """
         Processes an event through the emotional pipeline.
 
@@ -315,6 +317,10 @@ class EmotionalProcessor:
         Args:
             event (Event): The event to process
         """
+        if event.event_type == "cognitive:emotional:influence":
+            # Skip processing if this is a cognitive influence event
+            return
+        
         # Generate initial emotional vector
         vector_data, name = self._generate_emotional_vector(event.event_type, event.data)
         if not vector_data:
@@ -366,7 +372,7 @@ class EmotionalProcessor:
         }))
 
     
-    async def _process_influences(self, vector):
+    async def _process_influences(self, vector: EmotionalVector):
         """
         Processes mood and behavior influences on the given vector.
        
@@ -428,9 +434,9 @@ class EmotionalProcessor:
                
             self.current_stimulus.add_vector(influenced_vector)
 
-        # apply memory content influence
+        # TODO: apply memory content influence
         # to come: query across memory nodes for average network emotional resonance to influence vector by
-        # just as well, the direct cognitive influence via mediate_emotion and one_turn call. could be done via an event which then gets listened to here and files back in after.
+        # just as well, the direct cognitive influence via mediate_emotion and one_turn call. could be done via an event which then gets listened to here and files back in after? want to make sure we don't start a cycle.
 
     def _calculate_relative_influence(self, base_vector, influence_valence, influence_arousal, influence_type):
         """
@@ -566,7 +572,7 @@ class EmotionalProcessor:
         current_mood = self.internal_context.get_current_mood()
         if current_mood:
             return {
-                'valence': current_mood['mood_object'].valence * 0.5,  # Adjust scaling factor as needed
+                'valence': current_mood['mood_object'].valence * 0.5,
                 'arousal': current_mood['mood_object'].arousal * 0.5,
             }
         return None
@@ -782,3 +788,93 @@ class EmotionalProcessor:
 
         except Exception as e:
             print(f"Error processing meditation: {str(e)}")
+
+    async def process_cognitive_influence(self, event: Event):
+        """
+        Process cognitive influence events into emotional responses.
+        
+        Cognitive influences represent the emotional impact of thoughts and mental processes.
+        These are applied directly as EmotionalVectors to influence current emotional state.
+        
+        Args:
+            event (Event): Event containing list of influence dictionaries
+        """
+        try:
+            influences_data = event.data.get('influences', [])
+            if not influences_data:
+                InternalLogger.warning("Cognitive influence event received with no influences")
+                return
+
+            InternalLogger.info(f"Processing {len(influences_data)} cognitive influences")
+
+            applied_influences = []
+            
+            for influence_data in influences_data:
+                try:
+                    # Create EmotionalVector from influence data
+                    cognitive_vector = EmotionalVector(
+                        valence=influence_data.get('valence', 0.0),
+                        arousal=influence_data.get('arousal', 0.0),
+                        intensity=influence_data.get('intensity', 0.0),
+                        source_type='cognitive_influence',
+                        source_data=influence_data.get('source_data', {}),
+                        name=influence_data.get('name', 'cognitive')
+                    )
+                    
+                    # Apply cognitive-specific dampening
+                    category = self._categorize_vector(cognitive_vector.valence, cognitive_vector.arousal)
+                    cognitive_dampening = await self._calculate_dampening(category) * 0.9
+                    cognitive_vector.intensity *= cognitive_dampening
+                    
+                    # Skip very weak influences after dampening
+                    if cognitive_vector.intensity < 0.02:
+                        continue
+                    
+                    # Add to current stimulus
+                    self.current_stimulus.add_vector(cognitive_vector)
+                    applied_influences.append(cognitive_vector)
+                    
+                    # Dispatch individual cognitive influence event for logging/monitoring
+                    global_event_dispatcher.dispatch_event_sync(Event("emotion:cognitive", {
+                        "emotion": cognitive_vector,
+                        "source": influence_data.get('source_data', {}).get('interface', 'unknown'),
+                        "analysis_method": influence_data.get('source_data', {}).get('analysis_method', 'unknown')
+                    }))
+                    
+                except Exception as influence_error:
+                    InternalLogger.error(f"Error processing individual cognitive influence: {influence_error}")
+                    continue
+            
+            if applied_influences:
+                InternalLogger.info(f"Applied {len(applied_influences)} cognitive influences to emotional state")
+
+                # Process sequential influences on the applied vectors
+                for vector in applied_influences:
+                    await self._process_influences(vector)
+                
+                # Dispatch final cognitive influence completion event
+                final_state = EmotionalVector(
+                    valence=self.current_stimulus.valence,
+                    arousal=self.current_stimulus.arousal,
+                    intensity=self.current_stimulus.intensity,
+                    name=self._get_emotion_name_by_category(
+                        self._categorize_stimulus(self.current_stimulus)
+                    ),
+                    source_type='cognitive_aggregate',
+                    source_data={
+                        'applied_count': len(applied_influences),
+                        'source_interface': event.data.get('source_interface', 'unknown')
+                    }
+                )
+                
+                global_event_dispatcher.dispatch_event_sync(Event("emotion:cognitive_complete", {
+                    "emotion": final_state,
+                    "applied_influences": len(applied_influences),
+                    "source_interface": event.data.get('source_interface', 'unknown')
+                }))
+            else:
+                InternalLogger.debug("No cognitive influences were strong enough to apply after dampening")
+
+        except Exception as e:
+            InternalLogger.error(f"Error processing cognitive influence event: {e}")
+            # Ensure we don't crash the emotional system on cognitive influence errors

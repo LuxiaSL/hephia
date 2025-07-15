@@ -1183,7 +1183,8 @@ class MemorySystemOrchestrator:
         comparison_state: Dict[str, Any],
         top_k: int = 10,
         threshold: float = 0.0,
-        return_details: bool = False
+        return_details: bool = False,
+        dispatch_echo: bool = True
     ) -> Union[List[CognitiveMemoryNode], Tuple[List[CognitiveMemoryNode], List[Dict[str, Any]]]]:
         """
         Retrieve cognitive memories based on a query and a comparison state.
@@ -1208,20 +1209,23 @@ class MemorySystemOrchestrator:
             logger.debug("Sorting retrieval scores...")
             retrieval_scores.sort(key=lambda x: x[1], reverse=True)
             top_results = retrieval_scores[:top_k]
-            # Dispatch echo events for top results
-            for node, similarity, node_metrics in top_results:
-                global_event_dispatcher.dispatch_event(Event(
-                    "memory:echo_requested",
-                    {
-                        "node_id": node.node_id,
-                        "similarity": similarity,
-                        "given_state": comparison_state,
-                        "query_text": query,
-                        "query_embedding": query_embedding,
-                        "precalculated_metrics": node_metrics
-                    }
-                ))
+
             filtered_results = [res for res in top_results if res[1] >= threshold]
+            # Dispatch echo events for filtered top results
+            if dispatch_echo:
+                for node, similarity, node_metrics in filtered_results:
+                    global_event_dispatcher.dispatch_event(Event(
+                        "memory:echo_requested",
+                        {
+                            "node_id": node.node_id,
+                            "similarity": similarity,
+                            "given_state": comparison_state,
+                            "query_text": query,
+                            "query_embedding": query_embedding,
+                            "precalculated_metrics": node_metrics
+                        }
+                    ))
+            
             if return_details:
                 return ([n for n, _, _ in filtered_results], [m for _, _, m in filtered_results])
             else:
@@ -1393,8 +1397,7 @@ class MemorySystemOrchestrator:
     async def meditate_on_memory(
         self,
         memory_id: str,
-        intensity: float = 0.8,
-        duration: int = 5
+        intensity: float = 0.8
     ) -> Dict[str, Any]:
         """
         Deep focus on a specific memory with amplified echo effects.
@@ -1406,12 +1409,11 @@ class MemorySystemOrchestrator:
             node.last_accessed = time.time()
             context = await self.internal_context.get_memory_context(is_cognitive=True)
             base_intensity = min(1.0, max(0.1, intensity))
-            echo_intensity = base_intensity * 1.5
+            echo_intensity = base_intensity * 1.2
             echo_effects = await self.echo_manager.trigger_echo(
                 node=node,
                 intensity=echo_intensity,
-                comparison_state=context,
-                duration_multiplier=duration
+                comparison_state=context
             )
             connections = await self.cognitive_network.traverse_network(
                 start_node=node,
@@ -1421,7 +1423,6 @@ class MemorySystemOrchestrator:
                 "memory_id": node.node_id,
                 "content": getattr(node, "text_content", None),
                 "meditation_intensity": base_intensity,
-                "duration": duration,
                 "echo_effects": echo_effects,
                 "connected_memories": []
             }
@@ -1431,8 +1432,7 @@ class MemorySystemOrchestrator:
                     await self.echo_manager.trigger_echo(
                         node=connected,
                         intensity=base_intensity * connection_weight,
-                        comparison_state=context,
-                        duration_multiplier=max(1, duration // 2)
+                        comparison_state=context
                     )
                     result["connected_memories"].append({
                         "node_id": connected.node_id,

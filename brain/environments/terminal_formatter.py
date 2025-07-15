@@ -67,10 +67,43 @@ class TerminalFormatter:
         # Format emotional state as recent experience
         emotions_str = ""
         if emotional_state:
-            recent_emotions = ", ".join(
-                f"{e['name']} (strength: {e['intensity']:.2f})" for e in emotional_state
-            )
-            emotions_str = f"{recent_emotions}"
+            # Separate overall stimulus from individual vectors
+            overall_emotion = None
+            individual_emotions = []
+            
+            for emotion in emotional_state:
+                if emotion.get('type') == 'overall':
+                    overall_emotion = emotion
+                elif emotion.get('type') == 'individual':
+                    individual_emotions.append(emotion)
+                else:
+                    # Fallback for emotions without type metadata
+                    individual_emotions.append(emotion)
+                
+            emotion_parts = []
+            
+            # Format overall emotion as primary feeling
+            overall_str = ""
+            if overall_emotion:
+                overall_str = f"feeling {overall_emotion['name']} ({overall_emotion['intensity']:.2f})"
+            
+            # Format individual emotions as nuanced layers
+            individual_str = ""
+            if individual_emotions:
+                emotion_descriptors = []
+                for emotion in individual_emotions[:8]:  # Limit to 8 for readability
+                    emotion_descriptors.append(f"{emotion['name']} ({emotion['intensity']:.2f})")
+                individual_str = ", ".join(emotion_descriptors)
+            
+            # Combine with natural flow
+            if overall_str and individual_str:
+                emotions_str = f"{overall_str}, with traces of {individual_str}"
+            elif overall_str:
+                emotions_str = overall_str
+            elif individual_str:
+                emotions_str = f"experiencing {individual_str}"
+            else:
+                emotions_str = "emotionally stable"
 
         # Build core state string
         state_str = (

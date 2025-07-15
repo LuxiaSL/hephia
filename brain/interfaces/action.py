@@ -11,6 +11,7 @@ from brain.cognition.notification import Notification, NotificationManager
 from brain.interfaces.base import CognitiveInterface
 from core.state_bridge import StateBridge
 from internal.modules.cognition.cognitive_bridge import CognitiveBridge
+from api_clients import APIManager
 
 
 class ActionInterface(CognitiveInterface):
@@ -23,9 +24,10 @@ class ActionInterface(CognitiveInterface):
         self,
         state_bridge: StateBridge,
         cognitive_bridge: CognitiveBridge,
-        notification_manager: NotificationManager
+        notification_manager: NotificationManager,
+        api_manager: APIManager
     ):
-        super().__init__("action", state_bridge, cognitive_bridge, notification_manager)
+        super().__init__("action", state_bridge, cognitive_bridge, notification_manager, api_manager)
 
     async def _generate_summary(self, notifications: List[Notification]) -> str:
         """

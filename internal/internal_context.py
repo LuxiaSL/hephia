@@ -101,7 +101,8 @@ class InternalContext:
                 'name': emotion_name,
                 'intensity': float(stimulus.intensity),
                 'valence': float(stimulus.valence),
-                'arousal': float(stimulus.arousal)
+                'arousal': float(stimulus.arousal),
+                'type': 'overall'
             }]
             
             # Add individual active vectors if they're significant
@@ -111,7 +112,8 @@ class InternalContext:
                         'name': vector.name,
                         'intensity': float(vector.intensity),
                         'valence': float(vector.valence),
-                        'arousal': float(vector.arousal)
+                        'arousal': float(vector.arousal),
+                        'type': 'individual'
                     })
                     
             return emotional_state
@@ -134,7 +136,7 @@ class InternalContext:
             if use_timeframe:
                 # Always bypass cache: perform a fresh query by time window.
                 current_time = time.time()
-                start_time = current_time - Config.get_exo_min_interval() * 1.75
+                start_time = current_time - Config.get_exo_min_interval() * 2
                 recent_nodes = await self.internal.memory_system.query_by_time_window(
                     start_time,
                     current_time,

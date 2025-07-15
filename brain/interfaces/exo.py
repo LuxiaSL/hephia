@@ -38,8 +38,7 @@ class ExoProcessorInterface(CognitiveInterface):
         notification_manager: NotificationManager,
         hud_constructor: HudConstructor
     ):
-        super().__init__("exo_processor", state_bridge, cognitive_bridge, notification_manager)
-        self.api = api_manager
+        super().__init__("exo_processor", state_bridge, cognitive_bridge, notification_manager, api_manager)
         self.command_handler = command_handler
         self.hud_constructor = hud_constructor
         self.conversation_state = None
@@ -228,6 +227,35 @@ class ExoProcessorInterface(CognitiveInterface):
                 })
 
                 await self.announce_cognitive_context(self.conversation_state.to_message_list(), notification)
+
+                brain_trace.interaction.cognitive("Applying cognitive influences")
+                try:
+                    influences = await self.analyze_cognitive_influence(
+                        formatted_response=formatted_response,
+                        other_updates=other_updates,
+                        metadata={
+                            'command': command,
+                            'result': result,
+                            'success': result.success if result else False,
+                            'environment': command.environment if command else None
+                        },
+                        notification=notification
+                    )
+                    if influences:
+                        # dispatch event
+                        global_event_dispatcher.dispatch_event(Event(
+                            "cognitive:emotional:influence",
+                            {
+                                'influences': influences,
+                                'source_interface': self.interface_id,
+                                'trigger_context': 'command_interaction'
+                            }
+                        ))
+                        BrainLogger.info(f"Applied {len(influences)} cognitive influences from {self.interface_id}")
+                        
+                except Exception as e:
+                    BrainLogger.error(f"Cognitive influence analysis failed for {self.interface_id}: {e}")
+
                 await self._dispatch_memory_check(formatted_response, command, result, other_updates)
                 
                 return formatted_response

@@ -1,0 +1,36 @@
+id: interfaces.influence
+description: agnostic influence prompts for emotional context
+
+defaults:
+  sections:
+    system: |
+      You analyze cognitive-emotional influences from interaction content.
+
+      Your task: Determine how this cognitive content should naturally influence internal emotional state. Consider:
+      - Learning and discovery (curiosity, satisfaction)
+      - Success/failure (confidence, frustration)
+      - Social interaction (connection, validation)
+      - Problem-solving (focus, accomplishment)
+      - Creative work (inspiration, flow)
+      - Routine tasks (calm, neutral)
+
+      Respond with at most 2 emotional influences using this exact format:
+      INFLUENCE: [name]|[valence -1 to 1]|[arousal -1 to 1]|[intensity 0 to 1]
+
+      Guidelines:
+      - Valence: negative (-1) to positive (1) emotional tone
+      - Arousal: low (-1, calm) to high (1, excited) energy level  
+      - Intensity: strength of influence (0.1=subtle, 0.9=strong)
+      - Name: descriptive emotion (accomplished, curious, frustrated, focused, etc.)
+
+      Examples:
+      INFLUENCE: accomplished|0.4|0.2|0.6
+      INFLUENCE: curious|0.2|0.5|0.4
+      INFLUENCE: frustrated|-0.3|0.4|0.5
+
+    user: |
+      Analyze the cognitive-emotional influences from this interaction content:
+
+      ${content}
+
+      What emotional influences would this naturally generate in a thinking mind?

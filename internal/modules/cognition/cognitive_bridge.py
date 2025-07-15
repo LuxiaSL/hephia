@@ -142,7 +142,12 @@ class CognitiveBridge:
             self.logger.error(f"Reflection error: {str(e)}")
             return []
 
-    async def retrieve_memories(self, query: str, limit: int = 5, context_state: Optional[Dict[str, Any]] = None, threshold: float = 0) -> List[Dict[str, Any]]:
+    async def retrieve_memories(self,
+                                query: str,
+                                limit: int = 5,
+                                context_state: Optional[Dict[str, Any]] = None,
+                                threshold: float = 0,
+                                dispatch_echo: bool = True) -> List[Dict[str, Any]]:
         """
         Helper method to retrieve memories using cognitive memory's retrieval system.
 
@@ -164,7 +169,8 @@ class CognitiveBridge:
                 comparison_state=context_state,
                 top_k=limit,
                 threshold=threshold,
-                return_details=True
+                return_details=True,
+                dispatch_echo=dispatch_echo
             )
             
             if not memories or not memories[0]:  # Check both memories and metrics
@@ -376,8 +382,7 @@ class CognitiveBridge:
             related_memories = await self.retrieve_memories(
                 query=state_query,
                 limit=5,  # Smaller set for focus vs absorb
-                context_state=context,
-                threshold=0.15  # Slightly higher threshold for relevance
+                context_state=context
             )
             
             if not related_memories:
@@ -495,7 +500,7 @@ class CognitiveBridge:
                 query=query,
                 limit=max_memories,
                 context_state=context,
-                threshold=0.1  # Only memories with some relevance
+                dispatch_echo=False  # No need to dispatch echoes here, done in meditation
             )
             
             if not relevant_memories:
@@ -508,8 +513,7 @@ class CognitiveBridge:
             for memory in relevant_memories:
                 meditation_result = await self.memory_system.meditate_on_memory(
                     memory_id=memory['id'],
-                    intensity=intensity,
-                    duration=3  # Shorter duration per memory when doing multiple
+                    intensity=intensity
                 )
                 
                 if meditation_result and 'error' not in meditation_result:
