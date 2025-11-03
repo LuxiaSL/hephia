@@ -196,8 +196,21 @@ class BaseAPIClient(ABC):
 
 
 class OpenAIClient(BaseAPIClient):
-    """Client for OpenAI API interactions."""
-    
+    """Enhanced OpenAI client supporting both Responses and Chat Completions APIs."""
+
+    # Models that support Responses API well
+    RESPONSES_API_MODELS = {
+        "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro",
+        "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+        "gpt-4o", "gpt-4o-mini",
+        "o3", "o3-mini", "o4-mini"
+    }
+
+    # Models that have issues with json_schema in text.format
+    RESPONSES_NO_JSON_SCHEMA = {
+        "gpt-5-chat-latest"
+    }
+
     def __init__(self, api_key: str):
         super().__init__(
             api_key=api_key,
@@ -215,7 +228,229 @@ class OpenAIClient(BaseAPIClient):
         return headers
 
     def _extract_message_content(self, response: Dict[str, Any]) -> str:
-        return response["choices"][0]["message"]["content"]
+        """Extract assistant text from either Chat Completions or Responses API shapes."""
+        # Chat Completions shape
+        if isinstance(response, dict) and "choices" in response:
+            try:
+                return response["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                pass
+        
+        # Responses API shape
+        try:
+            output = response.get("output", [])
+            for item in reversed(output):
+                if item.get("type") == "message" and item.get("role") == "assistant":
+                    parts = item.get("content", [])
+                    texts = [p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")]
+                    if texts:
+                        return "".join(texts)
+            # Some Responses variants may include a top-level convenience field
+            if "output_text" in response and isinstance(response["output_text"], str):
+                return response["output_text"]
+        except Exception:
+            pass
+        
+        return ""
+
+    def _messages_to_responses_input(self, messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+        """DEPRECATED: Use _split_messages_for_responses. Kept for compatibility."""
+        return self._split_messages_for_responses(messages)[1]
+
+    def _split_messages_for_responses(self, messages: List[Dict[str, str]]) -> (Optional[str], List[Dict[str, Any]]):
+        """Convert messages to Responses API fields: (instructions, input[]).
+
+        - system messages -> concatenated instructions
+        - user messages -> role user with content type input_text
+        - assistant messages -> role assistant with content type output_text
+        """
+        instructions_parts: List[str] = []
+        input_items: List[Dict[str, Any]] = []
+
+        for msg in messages:
+            role = msg.get("role") or "user"
+            content = msg.get("content") or ""
+
+            if role == "system":
+                if content:
+                    instructions_parts.append(content)
+                continue
+
+            part_type = "input_text" if role == "user" else "output_text" if role == "assistant" else "input_text"
+            input_items.append({
+                "role": role if role in ("user", "assistant") else "user",
+                "content": [
+                    {"type": part_type, "text": content}
+                ]
+            })
+
+        instructions = "\n".join(instructions_parts) if instructions_parts else None
+        return instructions, input_items
+
+    def _should_use_responses_api(self, model: str, kwargs: Dict[str, Any]) -> bool:
+        """Determine if we should use Responses API based on model and parameters."""
+        model_name = model.split("/")[-1].lower()
+
+        for supported_model in self.RESPONSES_API_MODELS:
+            if model_name.startswith(supported_model.lower()):
+                # Special case: if using json_schema with problematic models, use Chat Completions
+                if any(no_json in model_name for no_json in self.RESPONSES_NO_JSON_SCHEMA):
+                    rf = kwargs.get("response_format") or {}
+                    if isinstance(rf, dict) and rf.get("type") == "json_schema":
+                        SystemLogger.debug(
+                            f"Model {model} doesn't support json_schema in Responses API, using Chat Completions"
+                        )
+                        return False
+
+                # If has GPT-5 specific params, prefer Responses API
+                if any(k in kwargs for k in ["reasoning_effort", "verbosity", "reasoning"]):
+                    return True
+
+                return True
+
+        return False
+
+    def _convert_response_format_to_text_format(self, response_format: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Convert Chat Completions response_format to Responses API text.format."""
+        if not response_format:
+            return None
+
+        format_type = response_format.get("type")
+
+        if format_type == "json_object":
+            return {"type": "text"}
+
+        if format_type == "json_schema":
+            json_schema = response_format.get("json_schema", {}) or {}
+            return {
+                "type": "json_schema",
+                "name": json_schema.get("name", "response"),
+                "schema": json_schema.get("schema", {}),
+                "strict": json_schema.get("strict", True)
+            }
+
+        return None
+
+    def _build_responses_payload(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Build payload for Responses API with all parameters."""
+        instructions, input_items = self._split_messages_for_responses(messages)
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": input_items,
+            "max_output_tokens": max_tokens
+        }
+
+        if instructions:
+            payload["instructions"] = instructions
+
+        if "response_format" in kwargs:
+            text_format = self._convert_response_format_to_text_format(kwargs["response_format"])
+            if text_format:
+                payload.setdefault("text", {})
+                payload["text"]["format"] = text_format
+
+        if "reasoning_effort" in kwargs:
+            if "reasoning" not in payload:
+                payload["reasoning"] = {}
+            payload["reasoning"]["effort"] = kwargs["reasoning_effort"]
+
+        if "verbosity" in kwargs:
+            payload["verbosity"] = kwargs["verbosity"]
+
+        for key in [
+            "stream", "store", "truncation", "tool_choice", "tools",
+            "parallel_tool_calls", "top_p", "metadata"
+        ]:
+            if key in kwargs:
+                payload[key] = kwargs[key]
+
+        # gpt-5 family defaults: minimal reasoning and low verbosity unless explicitly provided
+        model_name = model.split("/")[-1].lower()
+        if model_name.startswith("gpt-5"):
+            if "reasoning_effort" not in kwargs and "reasoning" not in payload:
+                payload["reasoning"] = {"effort": "minimal"}
+            payload.setdefault("text", {})
+            if "verbosity" not in payload["text"]:
+                payload["text"]["verbosity"] = "low"
+
+        return payload
+
+    def _build_chat_completions_payload(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Build payload for Chat Completions API."""
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+
+        if "max_completion_tokens" in kwargs:
+            payload["max_completion_tokens"] = kwargs["max_completion_tokens"]
+        elif any(model.startswith(prefix) for prefix in ["gpt-5", "gpt-4.1", "o3", "o4"]):
+            payload["max_completion_tokens"] = max_tokens
+        else:
+            payload["max_tokens"] = max_tokens
+
+        valid_params = [
+            "response_format", "stream", "stop", "logprobs", "top_logprobs",
+            "top_p", "frequency_penalty", "presence_penalty", "seed",
+            "tools", "tool_choice", "user", "logit_bias"
+        ]
+
+        for key in valid_params:
+            if key in kwargs:
+                payload[key] = kwargs[key]
+
+        return payload
+
+
+    def _responses_to_chat_completions(self, responses_obj: Dict[str, Any], model: str) -> Dict[str, Any]:
+        """Adapt a Responses API object to a Chat Completions–like response for backward compatibility."""
+        assistant_text = self._extract_message_content(responses_obj) or ""
+        usage = responses_obj.get("usage", {}) or {}
+        # Map usage fields if present
+        prompt_tokens = usage.get("input_tokens") if isinstance(usage, dict) else None
+        completion_tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
+        total_tokens = None
+        if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+            total_tokens = prompt_tokens + completion_tokens
+        chat_usage = None
+        if prompt_tokens is not None or completion_tokens is not None:
+            chat_usage = {
+                "prompt_tokens": prompt_tokens or 0,
+                "completion_tokens": completion_tokens or 0,
+                "total_tokens": total_tokens or ((prompt_tokens or 0) + (completion_tokens or 0))
+            }
+        adapted = {
+            "id": responses_obj.get("id", f"chatcmpl-{uuid.uuid4().hex[:12]}"),
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": assistant_text},
+                    "finish_reason": responses_obj.get("status", "stop")
+                }
+            ]
+        }
+        if chat_usage is not None:
+            adapted["usage"] = chat_usage
+        return adapted
 
     async def create_completion(
         self,
@@ -223,17 +458,53 @@ class OpenAIClient(BaseAPIClient):
         model: str,
         temperature: float = 0.7,
         max_tokens: int = 150,
-        return_content_only: bool = False
+        return_content_only: bool = False,
+        **kwargs
     ) -> Union[Dict[str, Any], str]:
-        """Create chat completion via OpenAI."""
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        }
-        response = await self._make_request("chat/completions", payload=payload)
-        return self._extract_message_content(response) if return_content_only else response
+        """Create completion with automatic API selection and proper parameter handling."""
+        use_responses = self._should_use_responses_api(model, kwargs)
+
+        if use_responses:
+            SystemLogger.debug(f"Using Responses API for model {model}")
+            try:
+                payload = self._build_responses_payload(messages, model, temperature, max_tokens, **kwargs)
+                responses_obj = await self._make_request("responses", payload=payload)
+                adapted = self._responses_to_chat_completions(responses_obj, model)
+                if return_content_only:
+                    return self._extract_message_content(adapted)
+                return adapted
+            except Exception as responses_err:
+                error_msg = str(responses_err)
+                SystemLogger.warning(
+                    f"Responses API failed for {model}: {error_msg[:200]}"
+                )
+                # If parameter-related error, fall through to Chat Completions
+                if not any(keyword in error_msg.lower() for keyword in [
+                    "invalid parameter", "not supported", "unknown parameter",
+                    "text.format", "json_schema"
+                ]):
+                    # Re-raise for non-parameter issues (auth, rate limit, etc.)
+                    raise
+
+        SystemLogger.debug(f"Using Chat Completions API for model {model}")
+        payload = self._build_chat_completions_payload(messages, model, temperature, max_tokens, **kwargs)
+
+        try:
+            response = await self._make_request("chat/completions", payload=payload)
+            if return_content_only:
+                return self._extract_message_content(response)
+            return response
+        except Exception as chat_err:
+            err_text = str(chat_err)
+            if "max_tokens" in err_text and "max_completion_tokens" in err_text:
+                SystemLogger.debug("Retrying with max_completion_tokens instead of max_tokens")
+                if "max_tokens" in payload:
+                    payload["max_completion_tokens"] = payload.pop("max_tokens")
+                    response = await self._make_request("chat/completions", payload=payload)
+                    if return_content_only:
+                        return self._extract_message_content(response)
+                    return response
+            raise
 
 
 class AnthropicClient(BaseAPIClient):

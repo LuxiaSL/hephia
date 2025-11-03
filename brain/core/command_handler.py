@@ -53,10 +53,28 @@ class CommandHandler:
                 llm_response,
                 self.environment_registry.get_available_commands()
             )
-            
+
+            # If normal preprocessing failed, try line-by-line fallback
             if error:
+                BrainLogger.debug("Preprocessing failed; attempting line-by-line fallback")
+                lines = [line.strip() for line in llm_response.splitlines() if line.strip()]
+                for line in lines:
+                    fallback_cmd, fallback_err = await self.command_preprocessor.preprocess_command(
+                        line,
+                        self.environment_registry.get_available_commands()
+                    )
+                    if fallback_cmd and not fallback_err:
+                        # Mark that we accepted a single-line fallback
+                        try:
+                            fallback_cmd.applied_fixes.append("line-fallback")
+                        except Exception:
+                            pass
+                        BrainLogger.debug(f"Line-by-line fallback succeeded with: {line}")
+                        return fallback_cmd, None
+
+                # If no line works, return the original formatted error
                 return None, TerminalFormatter.format_error(error)
-                
+
             return command, None
             
         except Exception as e:

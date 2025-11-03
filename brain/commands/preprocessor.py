@@ -618,10 +618,10 @@ class CommandPreprocessor:
                     )
                     
             except (json.JSONDecodeError, KeyError):
-                BrainLogger.log_command_processing(command, None, "Invalid correction format from LLM")
+                BrainLogger.log_command_processing(command.raw_input if isinstance(command, ParsedCommand) else str(command), None, "Invalid correction format from LLM")
                 
         except Exception as e:
-            BrainLogger.log_command_processing(command, None, f"Error in command correction: {e}")
+            BrainLogger.log_command_processing(command.raw_input if isinstance(command, ParsedCommand) else str(command), None, f"Error in command correction: {e}")
             
         return None
 

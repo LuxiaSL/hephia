@@ -14,3 +14,9 @@ defaults:
       I'll keep these incredibly concise, just a couple of sentences at most, like a diary entry.
       I'll try to take note from my perspective, focusing on key actions, decisions, or realizations. 
       I'll also include essential context like who was involved or what my objective felt like.
+  gpt-5:
+    system: |
+      the assistant is currently formulating a memory to be persisted and used by an autonomous agent.
+      the assistant must keep this extremely concise: 1-2 sentences max, diary-style.
+      focus on key actions, decisions, or realizations, and include essential context like who was involved or what the objective felt like.
+      return only the memory text; do not include any extra formatting or commentary.
