@@ -43,7 +43,7 @@ def validate_configuration() -> bool:
     }
 
     # Validate model configurations
-    for role in ['cognitive', 'validation', 'fallback', 'summary']:
+    for role in ['cognitive', 'validation', 'fallback', 'summary', 'pet', 'worker']:
         model_name = getattr(Config, f'get_{role}_model')()
         if model_name not in Config.AVAILABLE_MODELS:
             errors.append(f"Invalid {role} model configuration: {model_name}")
@@ -138,21 +138,23 @@ def print_cognitive_event(event):
     """Print cognitive event to console in a format similar to the GUI."""
     try:
         data = event.data
-        if data.get('source') == 'exo_processor':
+        source = data.get('source', '')
+        if source in ('exo_processor', 'mind'):
             print("\n" + "="*80)
-            print("COGNITIVE UPDATE:")
+            print("COGNITIVE UPDATE:" if source == 'exo_processor' else "MIND UPDATE:")
             print("="*80)
-            
+
             # Print recent messages
-            messages = data.get('raw_state', [])[-2:]
+            raw_state = data.get('raw_state', [])
+            messages = raw_state[-2:] if isinstance(raw_state, list) else []
             for msg in messages:
                 role = msg.get('role', '')
                 content = msg.get('content', '')
-                display_name = "EXO-PROCESSOR" if role == 'user' else Config.get_cognitive_model()
+                display_name = "USER" if role == 'user' else Config.get_pet_model()
                 print(f"\n{display_name}:")
                 print("-" * len(display_name))
                 print(content)
-            
+
             # Print summary
             summary = data.get('processed_state', 'No summary available')
             print("\nSUMMARY:")

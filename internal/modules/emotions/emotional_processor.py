@@ -12,7 +12,7 @@ Vectors accumulate and decay naturally, simulating the ebb and flow of emotional
 
 from event_dispatcher import global_event_dispatcher, Event
 from loggers import InternalLogger
-from ..cognition.cognitive_bridge import CognitiveBridge
+from ..cognition.cognitive_bridge import PetCognitiveBridge
 from ...internal_context import InternalContext
 import time
 import copy
@@ -252,13 +252,13 @@ class EmotionalProcessor:
         }
     }
 
-    def __init__(self, internal_context: InternalContext, cognitive_bridge: CognitiveBridge) -> None:
+    def __init__(self, internal_context: InternalContext, cognitive_bridge: PetCognitiveBridge) -> None:
         """
         Initializes the EmotionalProcessor with context access and processing capabilities.
 
         Args:
             internal_context (InternalContext): internal state access
-            cognitive_bridge (CognitiveBridge): active emotional mediation & logging
+            cognitive_bridge (PetCognitiveBridge): active emotional mediation & logging
         """
         self.internal_context = internal_context
         self.cognitive_bridge = cognitive_bridge

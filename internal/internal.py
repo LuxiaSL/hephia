@@ -12,7 +12,7 @@ from internal.modules.needs.needs_manager import NeedsManager
 from internal.modules.behaviors.behavior_manager import BehaviorManager
 from internal.modules.actions.action_manager import ActionManager
 from internal.modules.emotions.emotional_processor import EmotionalProcessor
-from internal.modules.cognition.cognitive_bridge import CognitiveBridge
+from internal.modules.cognition.cognitive_bridge import PetCognitiveBridge
 from internal.modules.emotions.mood_synthesizer import MoodSynthesizer
 from internal.modules.memory.memory_system import MemorySystemOrchestrator
 
@@ -39,7 +39,7 @@ class Internal:
         # Placeholders for async-initialized modules
         self.memory_system = None  # type: MemorySystemOrchestrator
         self.mood_synthesizer = None  # type: MoodSynthesizer
-        self.cognitive_bridge = None  # type: CognitiveBridge
+        self.cognitive_bridge = None  # type: PetCognitiveBridge
         self.emotional_processor = None  # type: EmotionalProcessor
 
         # Set up event listeners
@@ -64,7 +64,7 @@ class Internal:
 
         # Now initialize the modules that depend on memory_system and context.
         instance.mood_synthesizer = MoodSynthesizer(instance.context)
-        instance.cognitive_bridge = CognitiveBridge(instance.context, instance.memory_system)
+        instance.cognitive_bridge = PetCognitiveBridge(instance.context, instance.memory_system)
         instance.emotional_processor = EmotionalProcessor(instance.context, instance.cognitive_bridge)
 
         return instance

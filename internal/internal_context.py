@@ -222,10 +222,6 @@ class InternalContext:
                 'emotions': self.internal.emotional_processor.get_emotional_state(),
                 'mood': self.internal.mood_synthesizer.get_mood_state()
             }
-            if is_cognitive:
-                # For cognitive context, get additional info from cognitive_bridge
-                cog_state = self.internal.cognitive_bridge.get_cognitive_state()
-                raw_state['cognitive'] = cog_state.get('raw_state', {})
             # Processed state: get readable versions
             current_mood = self.internal.mood_synthesizer.get_current_mood()
             current_behavior = self.internal.behavior_manager.current_behavior
@@ -269,8 +265,6 @@ class InternalContext:
                 'needs': self.internal.needs_manager.get_needs_summary(),
                 'emotional_state': emotional_state
             }
-            if is_cognitive:
-                processed_state['cognitive'] = self.internal.cognitive_bridge.get_cognitive_state().get('processed_state', {})
             return {
                 'raw_state': raw_state,
                 'processed_state': processed_state

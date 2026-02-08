@@ -115,7 +115,7 @@ class StateBridge:
     async def update_cognitive_state(self, event: Event):
         """Update cognitive state and broadcast API context."""
         async with self.state_lock:
-            if self.persistent_state and event.data.get('source') == 'exo_processor':
+            if self.persistent_state and event.data.get('source') in ('exo_processor', 'mind'):
                 self.persistent_state.brain_state = event.data.get('raw_state', {})
                 self.last_cognitive_summary = event.data.get('processed_state', "")
         try:

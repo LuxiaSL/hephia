@@ -19,6 +19,7 @@ from core.state_bridge import StateBridge
 from core.event_bridge import EventBridge
 from event_dispatcher import global_event_dispatcher, Event
 from internal.internal import Internal
+from mind.mind import Mind
 from config import Config
 from api_clients import APIManager
 from loggers import SystemLogger
@@ -92,6 +93,7 @@ class HephiaServer:
 
         # Async components (set in create())
         self.internal: Optional[Internal] = None
+        self.mind: Optional[Mind] = None
         self.state_bridge: Optional[StateBridge] = None
         self.event_bridge: Optional[EventBridge] = None
 
@@ -107,6 +109,10 @@ class HephiaServer:
         """Asynchronously create and initialize a HephiaServer instance."""
         instance = cls()
         instance.internal = await Internal.create(instance.api)
+        instance.mind = Mind(
+            bridge=instance.internal.cognitive_bridge,
+            api_manager=instance.api,
+        )
         instance.state_bridge = StateBridge(internal=instance.internal)
         instance.event_bridge = EventBridge(state_bridge=instance.state_bridge)
         instance.setup_routes()
@@ -137,12 +143,36 @@ class HephiaServer:
 
         @self.app.post("/v1/chat/completions")
         async def handle_conversation(request: ChatRequest = Body(...)):
-            """Chat endpoint — stub until mind layer is built."""
-            # TODO: Wire to mind layer in Phase 3
-            raise HTTPException(
-                status_code=501,
-                detail="Chat not yet implemented — pending mind layer (Phase 3)"
-            )
+            """Chat endpoint — routes user messages through the Mind layer."""
+            try:
+                # Extract the last user message
+                user_message = ""
+                for msg in reversed(request.messages):
+                    if msg.role == "user":
+                        user_message = msg.content
+                        break
+
+                if not user_message:
+                    raise HTTPException(status_code=400, detail="No user message found")
+
+                response = await self.mind.process_message(user_message)
+
+                return {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": response.content,
+                        },
+                        "finish_reason": "stop",
+                    }],
+                    "model": Config.get_pet_model(),
+                    "usage": {},
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                self.logger.error(f"Chat endpoint error: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.app.get("/v1/actions/state")
         async def get_state():
@@ -241,6 +271,13 @@ class HephiaServer:
         try:
             SystemLogger.info("Initializing state bridge...")
             await self.state_bridge.initialize()
+
+            # Restore conversation state into Mind from persisted brain_state
+            if self.mind and self.state_bridge.persistent_state:
+                saved_conversation = self.state_bridge.persistent_state.brain_state
+                if isinstance(saved_conversation, list) and saved_conversation:
+                    self.mind.restore_conversation_state(saved_conversation)
+                    SystemLogger.info(f"Restored {len(saved_conversation)} conversation messages")
 
             SystemLogger.info("Adding internal timers...")
             self.timer.add_task(

@@ -124,6 +124,16 @@ class Config:
     def get_fallback_model(cls) -> str:
         """Get the fallback model from env or default."""
         return os.getenv("FALLBACK_MODEL", cls.FALLBACK_MODEL)
+
+    @classmethod
+    def get_pet_model(cls) -> str:
+        """Get the pet model from env or default."""
+        return os.getenv("PET_MODEL", cls.PET_MODEL)
+
+    @classmethod
+    def get_worker_model(cls) -> str:
+        """Get the worker model from env or default."""
+        return os.getenv("WORKER_MODEL", cls.WORKER_MODEL)
     
     @classmethod
     def get_chapter2_socket_path(cls) -> Optional[str]:
@@ -286,13 +296,29 @@ class Config:
             max_tokens=550,
             description="Local Inference Model",
             env_var="LOCAL_INFERENCE_BASE_URL"
-        )
+        ),
+        "haiku-4.5": ModelConfig(
+            provider=ProviderType.ANTHROPIC,
+            model_id="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            temperature=0.9,
+            description="Claude Haiku 4.5 via Anthropic"
+        ),
+        "opus-4.6": ModelConfig(
+            provider=ProviderType.ANTHROPIC,
+            model_id="claude-opus-4-6",
+            max_tokens=550,
+            temperature=0.9,
+            description="Claude Opus 4.6 via Anthropic"
+        ),
     }
 
     COGNITIVE_MODEL = "haiku"
     VALIDATION_MODEL = "mistral"
     SUMMARY_MODEL = "haiku"
     FALLBACK_MODEL = "haiku"
+    PET_MODEL = "haiku-4.5"
+    WORKER_MODEL = "opus-4.6"
 
     DISCORD_BOT_URL = "http://localhost:5518"
 
