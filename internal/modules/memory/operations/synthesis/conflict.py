@@ -1,7 +1,7 @@
 """
 conflict.py
 
-Contains conflict-related logic for cognitive merges. 
+Contains conflict-related logic for cognitive merges.
 Pulls in metrics from the orchestrator or prior detect_conflicts patterns.
 
 We rely on:
@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional, Union
 import numpy as np
 from ...metrics.orchestrator import RetrievalMetricsOrchestrator
 
+
 def detect_cognitive_conflict(
     nodeA, nodeB,
     metrics: Dict[str, Any],
@@ -21,12 +22,12 @@ def detect_cognitive_conflict(
 ) -> Dict[str, Any]:
     """
     Single source of truth for cognitive memory conflict detection.
-    
+
     Args:
         nodeA, nodeB: The nodes to check for conflicts
         metrics: Pre-calculated metrics if available
         metrics_orchestrator: Optional orchestrator to calculate metrics if not provided
-        
+
     Returns:
         Dict containing:
         - has_conflicts: bool
@@ -34,7 +35,6 @@ def detect_cognitive_conflict(
         - resolution_path: str
         - details: Dict with specific conflict info
     """
-    # If metrics not provided, calculate them
     if not metrics and metrics_orchestrator:
         from ...metrics.orchestrator import MetricsConfiguration
         metrics_config = MetricsConfiguration()
@@ -42,26 +42,21 @@ def detect_cognitive_conflict(
         metrics = metrics_orchestrator.calculate_metrics(nodeA, nodeB)
 
     component_metrics = metrics.get('component_metrics', {})
-    
-    # If component_metrics contains raw float values (dissonance scores), 
+
+    # If component_metrics contains raw float values (dissonance scores),
     # convert them to dict format expected by analyze_conflicts_for_synthesis
     if component_metrics and all(isinstance(v, (int, float, np.number)) for v in component_metrics.values()):
-        # This is dissonance data, not detailed metrics - create mock structure
         mock_component_metrics = {}
         for comp_name, dissonance_score in component_metrics.items():
             if comp_name == 'semantic':
                 mock_component_metrics['semantic'] = {
-                    'embedding_similarity': 1.0 - float(dissonance_score),  # Invert dissonance
-                    'semantic_density': 0.5  # Default value
+                    'embedding_similarity': 1.0 - float(dissonance_score),
+                    'semantic_density': 0.5
                 }
             elif comp_name == 'emotional':
                 mock_component_metrics['emotional'] = {
                     'valence_shift': float(dissonance_score),
                     'intensity_delta': float(dissonance_score)
-                }
-            elif comp_name == 'state':
-                mock_component_metrics['state'] = {
-                    'state_conflicts': float(dissonance_score)
                 }
             elif comp_name == 'temporal':
                 mock_component_metrics['temporal'] = {
@@ -71,14 +66,11 @@ def detect_cognitive_conflict(
                 mock_component_metrics['strength'] = {
                     'strength_difference': float(dissonance_score)
                 }
-        
-        # Use mock structure for analysis
+
         analysis_metrics = {'component_metrics': mock_component_metrics}
     else:
-        # Use metrics as-is
         analysis_metrics = metrics
-    
-    # Use existing analyze_conflicts_for_synthesis but with enhanced details
+
     analysis = analyze_conflicts_for_synthesis(nodeA, nodeB, analysis_metrics)
 
     if 'semantic' in analysis_metrics.get('component_metrics', {}):
@@ -88,8 +80,9 @@ def detect_cognitive_conflict(
                 'density': semantic['semantic_density'],
                 'embedding_similarity': semantic.get('embedding_similarity', 0)
             }
-    
+
     return analysis
+
 
 def detect_conflict(nodeA, nodeB, metrics: Dict[str, Any]) -> bool:
     """Quick check for conflicts between nodes using metrics."""
@@ -97,35 +90,29 @@ def detect_conflict(nodeA, nodeB, metrics: Dict[str, Any]) -> bool:
         return False
 
     cm = metrics['component_metrics']
-    
-    # Get core metrics
+
     semantic = cm.get('semantic', {})
     semantic_sim = semantic.get('embedding_similarity', 0.0)
     semantic_density = semantic.get('semantic_density', 0.0)
-    
+
     emotional = cm.get('emotional', {})
     valence_shift = emotional.get('valence_shift', 0.0)
     intensity_delta = emotional.get('intensity_delta', 0.0)
-    
-    state = cm.get('state', {})
-    state_conflicts = _extract_state_conflicts(state)
-    
+
     # Conflict conditions:
-    # 1. High semantic similarity but emotional/state conflicts
+    # 1. High semantic similarity but emotional conflicts
     if semantic_sim > 0.8 and semantic_density > 0.6:
         if valence_shift > 0.6 or intensity_delta > 0.7:
             return True
-        if state_conflicts > 0.7:
-            return True
-            
+
     # 2. Overall conflict threshold
     conflict_score = (
-        state_conflicts * 0.4 +
-        valence_shift * 0.3 +
-        (semantic_sim * intensity_delta) * 0.3
+        valence_shift * 0.5 +
+        (semantic_sim * intensity_delta) * 0.5
     )
-    
+
     return conflict_score > 0.75
+
 
 def analyze_conflicts_for_synthesis(
     child: Any,
@@ -137,33 +124,14 @@ def analyze_conflicts_for_synthesis(
     - Summarize overall conflict severity
     - Provide "resolution_path" suggestions (like direct_merge, reflection, etc.)
     - Indicate if we need additional strength for the new synthesis node
-
-    Args:
-        child, parent: CognitiveMemoryNode-like objects
-        metrics: Pre-calculated retrieval metrics from orchestrator
-
-    Returns:
-        Dict with analysis:
-         {
-           'has_conflicts': bool,
-           'severity': float,
-           'requires_reflection': bool,
-           'resolution_path': str,
-           'additional_strength': float,
-           'details': {...} # deeper conflict analysis
-         }
     """
-    # Basic yes/no conflict check
     has_conflicts = detect_conflict(child, parent, metrics)
-    
-    # Deeper analysis
+
     conflict_details = _analyze_complex_conflicts(child, parent, metrics)
-    
-    # If no conflicts found in basic check, severity might be small
+
     severity = conflict_details['severity'] if has_conflicts else 0.0
     requires_reflection = conflict_details['requires_reflection'] if has_conflicts else False
 
-    # Additional strength for the new node can scale with conflict severity
     additional_strength = _calculate_synthesis_strength(severity, metrics.get('component_metrics', {}))
 
     return {
@@ -175,9 +143,10 @@ def analyze_conflicts_for_synthesis(
         'details': conflict_details
     }
 
+
 def _calculate_synthesis_strength(conflict_severity: float, cm: Dict[str, Any]) -> float:
     """
-    Helper that calculates how much 'extra' strength might be allocated 
+    Helper that calculates how much 'extra' strength might be allocated
     to the new node if we do a conflict-based synthesis.
     """
     base_strength = conflict_severity * 0.4
@@ -188,14 +157,15 @@ def _calculate_synthesis_strength(conflict_severity: float, cm: Dict[str, Any]) 
 
     emotional_boost = intensity * 0.3
     semantic_boost = semantic_density * 0.2
-    
+
     total = base_strength + emotional_boost + semantic_boost
     return min(1.0, total)
 
+
 def _analyze_complex_conflicts(nodeA, nodeB, metrics: Dict[str, Any]) -> Dict[str, Any]:
     """
-    More detailed analysis of potential memory conflicts for borderline merges:
-    - Evaluate semantic drift, emotional inversions, temporal patterns, state transitions
+    Detailed analysis of potential memory conflicts for borderline merges:
+    - Evaluate semantic drift, emotional inversions, temporal patterns
     - Summarize conflict severity & recommended resolution path
     """
     if 'component_metrics' not in metrics:
@@ -207,36 +177,33 @@ def _analyze_complex_conflicts(nodeA, nodeB, metrics: Dict[str, Any]) -> Dict[st
         }
 
     cm = metrics['component_metrics']
-    divergences = []
+    divergences: List[Dict[str, Any]] = []
 
-    # Check semantic drift 
+    # Semantic analysis
     semantic = cm.get('semantic', {})
     semantic_density = semantic.get('semantic_density', 0.0)
-    
-    # Only check cluster metrics if they were requested during calculation
-    cluster_metrics = semantic.get('cluster_metrics', {})
-    if cluster_metrics and semantic_density > 0.7:
-        semantic_spread = cluster_metrics.get('semantic_spread', 0.0)
-        if semantic_spread > 0.4:
-            divergences.append({
-                'type': 'semantic_drift',
-                'severity': semantic_spread,
-                'context': 'High density + spreading semantic field'
-            })
+    embedding_sim = semantic.get('embedding_similarity', 0.0)
+
+    if semantic_density > 0.7 and embedding_sim < 0.4:
+        divergences.append({
+            'type': 'semantic_drift',
+            'severity': 1.0 - embedding_sim,
+            'context': 'High density content with low embedding similarity'
+        })
 
     # Emotional mismatch
     emotional = cm.get('emotional', {})
     vector_sim = emotional.get('vector_similarity', 1.0)
     valence_shift = emotional.get('valence_shift', 0.0)
     intensity_delta = emotional.get('intensity_delta', 0.0)
-    
+
     if vector_sim < 0.4 and valence_shift > 0.5:
         divergences.append({
             'type': 'emotional_inversion',
             'severity': valence_shift,
             'context': 'Opposing emotional valence in high-sim context'
         })
-    
+
     if intensity_delta > 0.7:
         divergences.append({
             'type': 'emotional_intensity_shift',
@@ -246,12 +213,11 @@ def _analyze_complex_conflicts(nodeA, nodeB, metrics: Dict[str, Any]) -> Dict[st
 
     # Temporal pattern analysis
     temporal = cm.get('temporal', {})
-    # Only check patterns if analyze_temporal_patterns was called
     if 'patterns' in temporal:
         patterns = temporal.get('patterns', {})
         interval_consistency = patterns.get('interval_consistency', 1.0)
         recent_density = patterns.get('recent_density', 0.0)
-        
+
         if interval_consistency < 0.4 and recent_density > 0.6:
             divergences.append({
                 'type': 'temporal_pattern_break',
@@ -259,35 +225,10 @@ def _analyze_complex_conflicts(nodeA, nodeB, metrics: Dict[str, Any]) -> Dict[st
                 'context': 'Breaking established temporal patterns'
             })
 
-    # State transitions and conflicts
-    state = cm.get('state', {})
-    # Check needs satisfaction and shifts
-    needs = state.get('needs', {})
-    satisfaction_sim = needs.get('satisfaction_similarity', 1.0)
-    state_shifts = needs.get('state_shifts', 0.0)
-    
-    if satisfaction_sim < 0.3 or state_shifts > 0.7:
-        divergences.append({
-            'type': 'state_transition_stress',
-            'severity': max(1 - satisfaction_sim, state_shifts),
-            'context': 'Significant state transition detected'
-        })
-        
-    # Check behavior transitions
-    behavior = state.get('behavior', {})
-    transition_sig = behavior.get('transition_significance', 0.0)
-    if transition_sig > 0.7:
-        divergences.append({
-            'type': 'behavior_transition',
-            'severity': transition_sig,
-            'context': 'Major behavior pattern shift'
-        })
-
     # Compute overall severity
     total_severity = sum(d['severity'] for d in divergences)
     severity = total_severity / max(len(divergences), 1) if divergences else 0.0
 
-    # If severity is high or multiple divergences, reflection needed
     requires_reflection = (severity > 0.6 or len(divergences) >= 3)
 
     return {
@@ -297,68 +238,23 @@ def _analyze_complex_conflicts(nodeA, nodeB, metrics: Dict[str, Any]) -> Dict[st
         'key_divergences': divergences
     }
 
+
 def _suggest_resolution_path(divergences: List[Dict[str, Any]], severity: float) -> str:
-    """
-    Suggest approach for resolving memory conflicts.
-    """
+    """Suggest approach for resolving memory conflicts."""
     if not divergences:
         return "direct_merge"
 
-    # Tally up the conflict categories
     semantic_issues = sum(1 for d in divergences if 'semantic' in d['type'])
     emotional_issues = sum(1 for d in divergences if 'emotional' in d['type'])
     temporal_issues = sum(1 for d in divergences if 'temporal' in d['type'])
-    state_issues = sum(1 for d in divergences if 'state' in d['type'])
 
     if semantic_issues > emotional_issues and severity > 0.7:
         return "conscious_reflection"
     elif emotional_issues >= semantic_issues and severity > 0.6:
         return "emotional_processing"
-    elif temporal_issues > 1 or state_issues > 1:
+    elif temporal_issues > 1:
         return "temporal_integration"
     elif severity > 0.8:
         return "deep_consolidation"
     else:
         return "gradual_integration"
-
-def _extract_state_conflicts(state_metrics: Dict[str, Any]) -> float:
-    """
-    Interprets state sub-metrics to detect conflicts between nodes.
-    Returns a float [0..1] indicating severity of state conflicts.
-    """
-    conflict_score = 0.0
-    
-    # Behavior mismatch
-    behavior = state_metrics.get('behavior', {})
-    if not behavior.get('matching', True):
-        conflict_score += 0.3
-    if behavior.get('transition_significance', 0) > 0.7:
-        conflict_score += 0.2
-
-    # Needs
-    needs = state_metrics.get('needs', {})
-    satisfaction_diff = 1.0 - needs.get('satisfaction_similarity', 1.0)
-    if satisfaction_diff > 0.6:
-        conflict_score += 0.25
-    if needs.get('urgency_levels', 0) > 0.7:
-        conflict_score += 0.25
-    if needs.get('state_shifts', 0) > 0.5:
-        conflict_score += 0.2
-
-    # Mood
-    mood = state_metrics.get('mood', {})
-    if mood.get('similarity', 1.0) < 0.3:
-        conflict_score += 0.2
-    if mood.get('intensity_delta', 0) > 0.6:
-        conflict_score += 0.2
-
-    # Emotional
-    emotional = state_metrics.get('emotional', {})
-    if emotional.get('emotional_complexity', 1.0) < 0.3:
-        conflict_score += 0.15
-    if emotional.get('valence_shift', 0) > 0.6:
-        conflict_score += 0.25
-    if emotional.get('intensity_delta', 0) > 0.7:
-        conflict_score += 0.2
-
-    return min(1.0, conflict_score)

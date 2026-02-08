@@ -62,15 +62,14 @@ class ConnectionThresholds:
 @dataclass
 class ConnectionWeights:
     """Weight configuration for connection scoring."""
-    semantic_weight: float = 0.4         # Weight for semantic similarity
-    emotional_weight: float = 0.2        # Weight for emotional resonance  
-    state_weight: float = 0.2            # Weight for state similarity
-    temporal_weight: float = 0.2         # Weight for temporal proximity
+    semantic_weight: float = 0.5         # Weight for semantic similarity
+    emotional_weight: float = 0.25       # Weight for emotional resonance
+    temporal_weight: float = 0.25        # Weight for temporal proximity
 
     def __post_init__(self):
         """Validate weights sum to 1.0"""
         total = (self.semantic_weight + self.emotional_weight +
-                 self.state_weight + self.temporal_weight)
+                 self.temporal_weight)
         if not math.isclose(total, 1.0, rel_tol=1e-9):
             raise ValueError(f"Weights must sum to 1.0, got {total}")
 
@@ -92,7 +91,7 @@ class ConnectionHealth:
     last_updated: float
     update_count: int = 0
     strength_history: List[float] = field(default_factory=list)
-    max_history: int = 10  # Keep last N strength values
+    max_history: int = 3  # Keep last N strength values
 
     def add_strength(self, value: float) -> None:
         """Add strength value to history with limiting."""
@@ -808,34 +807,6 @@ class BaseConnectionManager(Generic[T], ABC):
 
         except Exception as e:
             self.logger.error(f"Failed to preserve ghost connection: {e}")
-
-    async def _update_reciprocal_connections(
-        self,
-        node: T,
-        new_weights: Dict[str, float]
-    ) -> List[str]:
-        """
-        Update reciprocal connections to maintain consistency.
-        
-        Args:
-            node: Node whose connections were updated.
-            new_weights: New connection weights.
-            
-        Returns:
-            List of node IDs that had their connections updated.
-        """
-        try:
-            updated_nodes = []
-            for other_id, weight in new_weights.items():
-                other = self._get_node_by_id(other_id)
-                if other and not getattr(other, 'ghosted', False):
-                    other.connections[str(node.node_id)] = weight
-                    other.last_connection_update = time.time()
-                    updated_nodes.append(other_id)
-            return updated_nodes
-        except Exception as e:
-            self.logger.error(f"Failed to update reciprocal connections: {e}")
-            return []
 
     @abstractmethod
     def _get_node_by_id(self, node_id: str) -> Optional[T]:

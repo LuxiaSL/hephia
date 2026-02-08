@@ -331,7 +331,6 @@ class MemorySystemOrchestrator:
                 metrics_config = MetricsConfiguration(
                     enabled_components=[
                         MetricComponent.EMOTIONAL,
-                        MetricComponent.STATE,
                     ],
                     detailed_metrics=True,
                     include_strength=False
@@ -604,32 +603,31 @@ class MemorySystemOrchestrator:
         is_cognitive = isinstance(node, CognitiveMemoryNode)
         
         if evaluation_purpose == "significance":
-            # Significance evaluation emphasizes novelty and relevance
             if is_cognitive:
                 return {
-                    'novelty': 0.8,        # Higher emphasis on semantic novelty
-                    'emotional': 0.1,      # Low emotional impact
-                    'state': 0.1,          # Low state relevance
+                    'novelty': 0.85,
+                    'emotional': 0.15,
+                    'state': 0.0,
                 }
             else:  # BodyMemoryNode
                 return {
-                    'novelty': 0.0,         # No semantic component for body nodes
-                    'emotional': 0.55,      # Higher emotional weight
-                    'state': 0.45,          # Higher state importance
+                    'novelty': 0.0,
+                    'emotional': 1.0,
+                    'state': 0.0,
                 }
         else:
-            # Strength evaluation (original weights)
+            # Strength evaluation
             if is_cognitive:
                 return {
-                    'novelty': 0.75,       # Semantic similarity importance
-                    'emotional': 0.15,     # Emotional impact
-                    'state': 0.1,         # State comparison
+                    'novelty': 0.8,
+                    'emotional': 0.2,
+                    'state': 0.0,
                 }
             else:  # BodyMemoryNode
                 return {
-                    'novelty': 0.0,         # Less emphasis on semantic
-                    'emotional': 0.45,      # Higher emotional weight
-                    'state': 0.55,          # Higher state importance
+                    'novelty': 0.0,
+                    'emotional': 1.0,
+                    'state': 0.0,
                 }
         
     async def evaluate_memory_significance(
@@ -693,17 +691,14 @@ class MemorySystemOrchestrator:
                     enabled_components=[
                         MetricComponent.SEMANTIC,
                         MetricComponent.EMOTIONAL,
-                        MetricComponent.STATE
                     ],
                     detailed_metrics=True,
                     include_strength=False,
                     component_weights={
-                        # Significance evaluation weights (emphasize novelty and relevance)
-                        MetricComponent.SEMANTIC: 0.55,      # Higher weight on semantic novelty
-                        MetricComponent.EMOTIONAL: 0.2,     # Moderate emotional impact
-                        MetricComponent.STATE: 0.25,         # Moderate state relevance
-                        MetricComponent.TEMPORAL: 0.0,      # No weight on temporal relevance
-                        MetricComponent.STRENGTH: 0.0       # No strength influence
+                        MetricComponent.SEMANTIC: 0.65,
+                        MetricComponent.EMOTIONAL: 0.35,
+                        MetricComponent.TEMPORAL: 0.0,
+                        MetricComponent.STRENGTH: 0.0
                     }
                 )
                 self.logger.debug(f"[SIG_DEBUG] Metrics config created with components: {[c.name for c in significance_metrics_config.enabled_components]}")
@@ -1143,7 +1138,7 @@ class MemorySystemOrchestrator:
             return 0.5
 
     def _calculate_state_significance(self, metrics_list: List[Dict]) -> float:
-        """Calculate state significance using StateMetricsCalculator metrics."""
+        """Calculate state significance from metrics (legacy, weight zeroed out)."""
         try:
             self.logger.debug(f"[STATE_DEBUG] Processing {len(metrics_list)} metric entries")
             state_scores = []

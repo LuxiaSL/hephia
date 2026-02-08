@@ -1,8 +1,8 @@
 """
-\\metrics\\orchestrator.py
+metrics/orchestrator.py
 
 Orchestrates the complete metrics calculation process for memory retrieval.
-Coordinates semantic, emotional, state, temporal, and strength calculations.
+Coordinates semantic, emotional, temporal, and strength calculations.
 
 Key capabilities:
 - Unified metrics calculation
@@ -12,7 +12,6 @@ Key capabilities:
 - Result normalization and weighting
 """
 
-import time
 import asyncio
 import hashlib
 import concurrent.futures as cf
@@ -23,9 +22,8 @@ from enum import Enum, auto
 
 import numpy as np
 
-from .semantic import SemanticMetricsCalculator 
+from .semantic import SemanticMetricsCalculator
 from .emotional import EmotionalMetricsCalculator
-from .state import StateMetricsCalculator
 from .temporal import TemporalMetricsCalculator
 from .strength import StrengthMetricsCalculator
 from ..nodes.cognitive_node import CognitiveMemoryNode
@@ -36,24 +34,24 @@ from ..async_lru_cache import async_lru_cache
 
 from loggers.loggers import MemoryLogger
 
+
 class MetricComponent(Enum):
     """Available metric calculation components."""
     SEMANTIC = auto()
     EMOTIONAL = auto()
-    STATE = auto()
     TEMPORAL = auto()
     STRENGTH = auto()
+
 
 @dataclass
 class MetricsConfiguration:
     """Configuration for metrics calculation."""
-    enabled_components: List[MetricComponent] = None
-    component_weights: Dict[MetricComponent, float] = None
-    semantic_options: Dict[str, Any] = None
-    emotional_options: Dict[str, Any] = None
-    state_options: Dict[str, Any] = None
-    temporal_options: Dict[str, Any] = None
-    strength_options: Dict[str, Any] = None
+    enabled_components: Optional[List[MetricComponent]] = None
+    component_weights: Optional[Dict[MetricComponent, float]] = None
+    semantic_options: Optional[Dict[str, Any]] = None
+    emotional_options: Optional[Dict[str, Any]] = None
+    temporal_options: Optional[Dict[str, Any]] = None
+    strength_options: Optional[Dict[str, Any]] = None
     detailed_metrics: bool = False
     include_strength: bool = True
 
@@ -61,22 +59,22 @@ class MetricsConfiguration:
         """Set defaults if not provided."""
         if self.enabled_components is None:
             self.enabled_components = list(MetricComponent)
-            
+
         if self.component_weights is None:
+            # Redistributed from 5 components to 4 (state removed)
+            # Old: semantic 0.425, emotional 0.2, state 0.225, temporal 0.1, strength 0.05
             self.component_weights = {
-                MetricComponent.SEMANTIC: 0.425,
-                MetricComponent.EMOTIONAL: 0.2, 
-                MetricComponent.STATE: 0.225,
-                MetricComponent.TEMPORAL: 0.1,
-                MetricComponent.STRENGTH: 0.05
+                MetricComponent.SEMANTIC: 0.525,
+                MetricComponent.EMOTIONAL: 0.25,
+                MetricComponent.TEMPORAL: 0.15,
+                MetricComponent.STRENGTH: 0.075
             }
-            
-        # Initialize empty option dicts if None
+
         self.semantic_options = self.semantic_options or {}
         self.emotional_options = self.emotional_options or {}
-        self.state_options = self.state_options or {}
         self.temporal_options = self.temporal_options or {}
         self.strength_options = self.strength_options or {}
+
 
 class RetrievalMetricsOrchestrator:
     """
@@ -84,49 +82,35 @@ class RetrievalMetricsOrchestrator:
     Acts as the central point for configuring and executing
     memory similarity calculations.
     """
-    
+
     def __init__(
         self,
-        body_memory_reference=None,
+        body_memory_reference: Any = None,
         embedding_manager: Optional[EmbeddingManager] = None,
         config: Optional[MetricsConfiguration] = None
     ):
-        """
-        Initialize orchestrator with required components.
-        
-        Args:
-            embedding_manager: Optional, for semantic analysis
-            body_memory_reference: Optional reference to body memory system
-            config: Optional custom configuration
-        """
         self.config = config or MetricsConfiguration()
         self.logger = MemoryLogger
         self.body_memory_reference = body_memory_reference
         self.embedding_manager = embedding_manager
-        
+
         # Initialize calculators
-        self.calculators = {}
-        
-        if (MetricComponent.SEMANTIC in self.config.enabled_components and 
-            self.embedding_manager is not None):
+        self.calculators: Dict[MetricComponent, Any] = {}
+
+        if (MetricComponent.SEMANTIC in self.config.enabled_components and
+                self.embedding_manager is not None):
             self.calculators[MetricComponent.SEMANTIC] = SemanticMetricsCalculator(
                 embedding_manager=self.embedding_manager
             )
-            
+
         if MetricComponent.EMOTIONAL in self.config.enabled_components:
             self.calculators[MetricComponent.EMOTIONAL] = EmotionalMetricsCalculator()
-            
-        if MetricComponent.STATE in self.config.enabled_components:
-            self.calculators[MetricComponent.STATE] = StateMetricsCalculator(
-                emotional_calculator=self.calculators.get(MetricComponent.EMOTIONAL),
-                **self.config.state_options
-            )
-            
+
         if MetricComponent.TEMPORAL in self.config.enabled_components:
             self.calculators[MetricComponent.TEMPORAL] = TemporalMetricsCalculator(
                 **self.config.temporal_options
             )
-            
+
         if MetricComponent.STRENGTH in self.config.enabled_components:
             self.calculators[MetricComponent.STRENGTH] = StrengthMetricsCalculator()
 
@@ -138,56 +122,50 @@ class RetrievalMetricsOrchestrator:
         query_embedding: List[float],
         body_node_id: Optional[str] = None
     ) -> str:
-        """
-        Generate a stable cache key for metrics calculation.
-        Uses content hashing to ensure consistency across calls.
-        """
+        """Generate a stable cache key for metrics calculation."""
         try:
-            # Create a stable representation of the calculation inputs
             key_components = []
-            
-            # Node identifier
+
             if hasattr(target_node, 'node_id') and target_node.node_id:
                 key_components.append(f"node:{target_node.node_id}")
             else:
-                # Fallback to content hash for nodes without IDs
-                node_content = getattr(target_node, 'text_content', '') or str(getattr(target_node, 'raw_state', {}))
+                node_content = getattr(target_node, 'text_content', '') or str(
+                    getattr(target_node, 'raw_state', {})
+                )
                 node_hash = hashlib.md5(node_content.encode('utf-8')).hexdigest()[:8]
                 key_components.append(f"content:{node_hash}")
-            
-            # Comparison state hash
+
             if comparison_state:
                 state_str = str(sorted(comparison_state.items()))
                 state_hash = hashlib.md5(state_str.encode('utf-8')).hexdigest()[:8]
                 key_components.append(f"state:{state_hash}")
-            
-            # Query content hash
+
             if query_text:
                 query_hash = hashlib.md5(query_text.encode('utf-8')).hexdigest()[:8]
                 key_components.append(f"query:{query_hash}")
-            
-            # Embedding hash (first few values as representative)
+
             if query_embedding and len(query_embedding) > 0:
-                emb_sample = str(query_embedding[:5])  # First 5 values as signature
+                emb_sample = str(query_embedding[:5])
                 emb_hash = hashlib.md5(emb_sample.encode('utf-8')).hexdigest()[:6]
                 key_components.append(f"emb:{emb_hash}")
-            
-            # Body node reference
+
             if body_node_id:
                 key_components.append(f"body:{body_node_id}")
-            
+
             return "|".join(key_components)
-            
+
         except Exception as e:
-            # Fallback to a basic key if hashing fails
             self.logger.log_error(f"Cache key generation failed: {e}")
             return f"fallback:{hash((str(target_node), str(comparison_state), query_text))}"
 
     @async_lru_cache(
-        maxsize=2000, 
-        ttl=7200, 
-        key_func=lambda self, target_node, comparison_state, query_text, query_embedding, body_node_id=None, preserved_signature=None, override_config=None: 
-            self._generate_cache_key(target_node, comparison_state, query_text, query_embedding, body_node_id)
+        maxsize=2000,
+        ttl=7200,
+        key_func=lambda self, target_node, comparison_state, query_text, query_embedding,
+        body_node_id=None, preserved_signature=None, override_config=None:
+            self._generate_cache_key(
+                target_node, comparison_state, query_text, query_embedding, body_node_id
+            )
     )
     async def calculate_metrics(
         self,
@@ -199,10 +177,7 @@ class RetrievalMetricsOrchestrator:
         preserved_signature: Optional[EmotionalStateSignature] = None,
         override_config: Optional[MetricsConfiguration] = None
     ) -> Union[float, Dict[str, Any]]:
-        """
-        Calculate comprehensive retrieval metrics with intelligent caching.
-        Uses custom cache key generation via decorator.
-        """
+        """Calculate comprehensive retrieval metrics with intelligent caching."""
         return await self._calculate_metrics_internal(
             target_node, comparison_state, query_text, query_embedding,
             body_node_id, preserved_signature, override_config
@@ -218,43 +193,31 @@ class RetrievalMetricsOrchestrator:
         preserved_signature: Optional[EmotionalStateSignature] = None,
         override_config: Optional[MetricsConfiguration] = None
     ) -> Union[float, Dict[str, Any]]:
-        """
-        Internal implementation of metrics calculation.
-        This is the actual computation that gets cached.
-        """
+        """Internal implementation of metrics calculation."""
         try:
             config = override_config or self.config
-            metrics = {}
+            metrics: Dict[str, Any] = {}
 
-            tasks = []
-            components = []
-            
+            tasks: List[Any] = []
+            components: List[MetricComponent] = []
+
             if MetricComponent.SEMANTIC in config.enabled_components:
                 tasks.append(self._calculate_semantic_metrics(
                     target_node, query_text, query_embedding, config.semantic_options
                 ))
                 components.append(MetricComponent.SEMANTIC)
-                
+
             loop = asyncio.get_event_loop()
             with cf.ThreadPoolExecutor() as executor:
                 if MetricComponent.EMOTIONAL in config.enabled_components:
                     tasks.append(loop.run_in_executor(
-                    executor,
-                    self._calculate_emotional_metrics,
-                    target_node, comparison_state, body_node_id,
-                    preserved_signature, config.emotional_options
-                ))
-                components.append(MetricComponent.EMOTIONAL)
-                
-                if MetricComponent.STATE in config.enabled_components:
-                    tasks.append(loop.run_in_executor(
                         executor,
-                        self._calculate_state_metrics,
+                        self._calculate_emotional_metrics,
                         target_node, comparison_state, body_node_id,
-                        preserved_signature, config.state_options
+                        preserved_signature, config.emotional_options
                     ))
-                    components.append(MetricComponent.STATE)
-                    
+                    components.append(MetricComponent.EMOTIONAL)
+
                 if MetricComponent.TEMPORAL in config.enabled_components:
                     tasks.append(loop.run_in_executor(
                         executor,
@@ -262,9 +225,9 @@ class RetrievalMetricsOrchestrator:
                         target_node, config.temporal_options
                     ))
                     components.append(MetricComponent.TEMPORAL)
-                    
-                if (MetricComponent.STRENGTH in config.enabled_components and 
-                    config.include_strength):
+
+                if (MetricComponent.STRENGTH in config.enabled_components and
+                        config.include_strength):
                     tasks.append(loop.run_in_executor(
                         executor,
                         self._calculate_strength_metrics,
@@ -272,17 +235,17 @@ class RetrievalMetricsOrchestrator:
                     ))
                     components.append(MetricComponent.STRENGTH)
 
-                # Run all tasks concurrently
                 all_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             for i, component in enumerate(components):
                 if isinstance(all_results[i], Exception):
-                    self.logger.log_error(f"{component.name} metrics failed: {str(all_results[i])}")
+                    self.logger.log_error(
+                        f"{component.name} metrics failed: {str(all_results[i])}"
+                    )
                     metrics[component.name.lower()] = {'error': str(all_results[i])}
                 else:
                     metrics[component.name.lower()] = all_results[i]
-                    
-            # Return detailed metrics or compute final score
+
             if config.detailed_metrics:
                 return {
                     'final_score': self._compute_final_score(metrics, config),
@@ -291,7 +254,7 @@ class RetrievalMetricsOrchestrator:
                 }
             else:
                 return self._compute_final_score(metrics, config)
-                
+
         except Exception as e:
             self.logger.log_error(f"Metrics calculation failed: {str(e)}")
             if config.detailed_metrics:
@@ -301,76 +264,90 @@ class RetrievalMetricsOrchestrator:
                     'component_metrics': {}
                 }
             return 0.0
-        
+
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache performance statistics from decorators."""
-        stats = {}
-        
+        stats: Dict[str, Any] = {}
+
         try:
-            # Get stats from decorated methods
             if hasattr(self.calculate_metrics, 'cache_info'):
                 stats['metrics_cache'] = self.calculate_metrics.cache_info()
-                
-            if self.embedding_manager and hasattr(self.embedding_manager.calculate_similarity_cached, 'cache_info'):
-                stats['embedding_cache'] = self.embedding_manager.calculate_similarity_cached.cache_info()
-                
-            if hasattr(self.calculators.get(MetricComponent.SEMANTIC), '_calculate_text_relevance_cached'):
+
+            if self.embedding_manager and hasattr(
+                self.embedding_manager.calculate_similarity_cached, 'cache_info'
+            ):
+                stats['embedding_cache'] = (
+                    self.embedding_manager.calculate_similarity_cached.cache_info()
+                )
+
+            if hasattr(self.calculators.get(MetricComponent.SEMANTIC),
+                       '_calculate_text_relevance_cached'):
                 semantic_calc = self.calculators[MetricComponent.SEMANTIC]
                 if hasattr(semantic_calc._calculate_text_relevance_cached, 'cache_info'):
-                    stats['semantic_cache'] = semantic_calc._calculate_text_relevance_cached.cache_info()
-            
+                    stats['semantic_cache'] = (
+                        semantic_calc._calculate_text_relevance_cached.cache_info()
+                    )
+
             if hasattr(self, 'body_memory_reference') and self.body_memory_reference:
                 try:
                     body_network = getattr(self.body_memory_reference, 'body_network', None)
                     if body_network and hasattr(body_network, 'connection_manager'):
                         body_conn_mgr = body_network.connection_manager
-                        if hasattr(body_conn_mgr, '_calculate_connection_weight_cached') and hasattr(body_conn_mgr._calculate_connection_weight_cached, 'cache_info'):
-                            stats['body_connection_cache'] = body_conn_mgr._calculate_connection_weight_cached.cache_info()
+                        if (hasattr(body_conn_mgr, '_calculate_connection_weight_cached') and
+                                hasattr(body_conn_mgr._calculate_connection_weight_cached,
+                                        'cache_info')):
+                            stats['body_connection_cache'] = (
+                                body_conn_mgr._calculate_connection_weight_cached.cache_info()
+                            )
                 except Exception as e:
                     stats['body_connection_cache_error'] = str(e)
-            
+
             stats['cache_enabled'] = True
-            
+
         except Exception as e:
             stats = {'cache_enabled': False, 'error': str(e)}
-        
+
         return stats
 
     async def clear_all_caches(self) -> Dict[str, bool]:
         """Clear all decorator-managed caches."""
-        results = {}
-        
+        results: Dict[str, Any] = {}
+
         try:
-            # Clear decorator caches
             if hasattr(self.calculate_metrics, 'cache_clear'):
                 await self.calculate_metrics.cache_clear()
                 results['metrics_cache'] = True
-                
-            if self.embedding_manager and hasattr(self.embedding_manager.calculate_similarity_cached, 'cache_clear'):
+
+            if self.embedding_manager and hasattr(
+                self.embedding_manager.calculate_similarity_cached, 'cache_clear'
+            ):
                 await self.embedding_manager.calculate_similarity_cached.cache_clear()
                 results['embedding_cache'] = True
-                
-            if hasattr(self.calculators.get(MetricComponent.SEMANTIC), '_calculate_text_relevance_cached'):
+
+            if hasattr(self.calculators.get(MetricComponent.SEMANTIC),
+                       '_calculate_text_relevance_cached'):
                 semantic_calc = self.calculators[MetricComponent.SEMANTIC]
                 if hasattr(semantic_calc._calculate_text_relevance_cached, 'cache_clear'):
                     await semantic_calc._calculate_text_relevance_cached.cache_clear()
                     results['semantic_cache'] = True
-            
+
             if hasattr(self, 'body_memory_reference') and self.body_memory_reference:
                 try:
                     body_network = getattr(self.body_memory_reference, 'body_network', None)
                     if body_network and hasattr(body_network, 'connection_manager'):
                         body_conn_mgr = body_network.connection_manager
-                        if hasattr(body_conn_mgr, '_calculate_connection_weight_cached') and hasattr(body_conn_mgr._calculate_connection_weight_cached, 'cache_clear'):
+                        if (hasattr(body_conn_mgr, '_calculate_connection_weight_cached') and
+                                hasattr(body_conn_mgr._calculate_connection_weight_cached,
+                                        'cache_clear')):
                             await body_conn_mgr._calculate_connection_weight_cached.cache_clear()
                             results['body_connection_cache'] = True
                 except Exception as e:
                     results['body_connection_cache_error'] = str(e)
-                
+
         except Exception as e:
             self.logger.log_error(f"Cache clearing failed: {e}")
             results['error'] = str(e)
-        
+
         return results
 
     async def _calculate_semantic_metrics(
@@ -382,7 +359,6 @@ class RetrievalMetricsOrchestrator:
     ) -> Dict[str, float]:
         """Calculate semantic metrics with error handling."""
         try:
-            # Return default metrics for nodes without text content
             if not hasattr(node, 'text_content') or node.text_content is None:
                 return {
                     'embedding_similarity': 0.0,
@@ -390,7 +366,7 @@ class RetrievalMetricsOrchestrator:
                     'semantic_density': 0.0,
                     'semantic_cohesion': 0.0
                 }
-                
+
             calculator = self.calculators[MetricComponent.SEMANTIC]
             return await calculator.calculate_metrics(
                 text_content=node.text_content,
@@ -423,30 +399,6 @@ class RetrievalMetricsOrchestrator:
             self.logger.log_error(f"Emotional metrics failed: {str(e)}")
             return {'error': str(e)}
 
-    def _calculate_state_metrics(
-        self,
-        node: Any,
-        comparison_state: Dict[str, Any],
-        body_node_id: Optional[str],
-        preserved_signature: Optional[EmotionalStateSignature],
-        options: Dict[str, Any]
-    ) -> Dict[str, Dict[str, float]]:
-        """Calculate state metrics with error handling."""
-        try:
-            calculator = self.calculators[MetricComponent.STATE]
-            return calculator.calculate_metrics(
-                node_state={
-                    'raw_state': node.raw_state,
-                    'processed_state': node.processed_state
-                },
-                comparison_state=comparison_state,
-                preserved_signature=preserved_signature,
-                **options
-            )
-        except Exception as e:
-            self.logger.log_error(f"State metrics failed: {str(e)}")
-            return {'error': str(e)}
-
     def _calculate_temporal_metrics(
         self,
         node: Any,
@@ -474,15 +426,14 @@ class RetrievalMetricsOrchestrator:
         """Calculate strength/network metrics with error handling."""
         try:
             calculator = self.calculators[MetricComponent.STRENGTH]
-            # Get connected node strengths if possible
-            connected_strengths = []
+            connected_strengths: List[float] = []
             if hasattr(node, '_get_node_by_id'):
                 connected_strengths = [
-                    n.strength for n in 
+                    n.strength for n in
                     [node._get_node_by_id(nid) for nid in node.connections.keys()]
                     if n is not None
                 ]
-            
+
             return calculator.calculate_metrics(
                 node_strength=node.strength,
                 connections=node.connections,
@@ -507,69 +458,55 @@ class RetrievalMetricsOrchestrator:
         try:
             score = 0.0
             total_weight = 0.0
-            
+
             for component, weight in config.component_weights.items():
                 if component.name.lower() not in metrics:
                     continue
-                    
+
                 component_metrics = metrics[component.name.lower()]
                 if isinstance(component_metrics, dict):
                     if 'error' in component_metrics:
                         continue
-                        
+
                     if component == MetricComponent.SEMANTIC:
-                        # Step 1: Pure relevance (varies by query)
+                        # Relevance (varies by query)
                         embedding_sim = component_metrics.get('embedding_similarity', 0.0)
                         text_relevance = component_metrics.get('text_relevance', 0.0)
-                        
+
                         relevance_score = (
                             embedding_sim * 0.65 +
                             text_relevance * 0.35
                         )
-                        
-                        # Step 2: Quality multiplier (intrinsic to memory) 
+
+                        # Quality multiplier (intrinsic to memory)
                         semantic_density = component_metrics.get('semantic_density', 0.0)
                         semantic_cohesion = component_metrics.get('semantic_cohesion', 0.5)
-                        
+
                         quality_multiplier = 0.5 + (
                             semantic_density * 0.375 +
-                            semantic_cohesion * 0.125 
+                            semantic_cohesion * 0.125
                         )
-                        
-                        # Step 3: Quality-weighted relevance
+
                         component_score = relevance_score * quality_multiplier
                     elif component == MetricComponent.EMOTIONAL:
                         component_score = component_metrics.get('vector_similarity', 0.0)
-                    elif component == MetricComponent.STATE:
-                        # Average sub-components
-                        sub_scores = []
-                        for sub_dict in component_metrics.values():
-                            if isinstance(sub_dict, dict):
-                                sub_scores.extend(
-                                    v for v in sub_dict.values() 
-                                    if isinstance(v, (int, float))
-                                )
-                        component_score = (
-                            sum(sub_scores) / len(sub_scores) 
-                            if sub_scores else 0.0
-                        )
                     else:
                         # Use first numeric value as score
                         component_score = next(
-                            (v for v in component_metrics.values() 
+                            (v for v in component_metrics.values()
                              if isinstance(v, (int, float))),
                             0.0
                         )
-                        
+
                     score += component_score * weight
                     total_weight += weight
-                    
+
             return score / total_weight if total_weight > 0 else 0.0
-            
+
         except Exception as e:
             self.logger.log_error(f"Final score computation failed: {str(e)}")
             return 0.0
-        
+
     async def compare_nodes(
         self,
         nodeA: Union[CognitiveMemoryNode, BodyMemoryNode],
@@ -578,47 +515,34 @@ class RetrievalMetricsOrchestrator:
     ) -> Dict[str, float]:
         """
         Pairwise comparison of two nodes without using an external query.
-        Each node computes its detailed metrics using the other node's state
-        as the comparison_state. The result is a dissonance score per component.
-        
-        Returns:
-            Dict mapping component names ('semantic', 'emotional', etc.) to a
-            float representing the average absolute difference in that component.
+        Returns a dissonance score per component.
         """
-        # Ensure detailed metrics are enabled so we get component breakdowns.
         config = override_config or self.config
-        # Force detailed_metrics on for this computation.
         config.detailed_metrics = True
 
-        # Helper function to get embedding dimension safely
         def get_embedding_dim(node: Union[CognitiveMemoryNode, BodyMemoryNode]) -> int:
             if hasattr(node, 'embedding') and node.embedding:
                 if isinstance(node.embedding, list):
                     return len(node.embedding)
                 elif hasattr(node.embedding, 'shape'):
-                    return node.embedding.shape[0]  # For numpy arrays
+                    return node.embedding.shape[0]
             return self.embedding_manager._embedding_dims
-        
-        # Helper function to get safe embedding
-        def get_safe_embedding(node: Union[CognitiveMemoryNode, BodyMemoryNode], target_dim: int) -> List[float]:
+
+        def get_safe_embedding(
+            node: Union[CognitiveMemoryNode, BodyMemoryNode], target_dim: int
+        ) -> List[float]:
             if hasattr(node, 'embedding'):
-                validated_embedding = self._validate_embedding(node.embedding, getattr(node, 'node_id', 'unknown'))
-                if len(validated_embedding) == target_dim:
-                    return validated_embedding
-            # Return zero vector of correct dimension
+                validated = self._validate_embedding(
+                    node.embedding, getattr(node, 'node_id', 'unknown')
+                )
+                if len(validated) == target_dim:
+                    return validated
             return [0.0] * target_dim
 
-        # Get embedding dimensions
         dim_a = get_embedding_dim(nodeA)
         dim_b = get_embedding_dim(nodeB)
-
         target_dim = max(dim_a, dim_b, self.embedding_manager._embedding_dims)
 
-        # For pairwise, we pass empty query info. The idea is that the node's own data
-        # and the other node's stored state (e.g., raw_state) will drive the comparison.
-        # For semantic comparison, use the other node's embedding
-
-        # maybe disregard? see how it affects results
         metricsA = await self.calculate_metrics(
             target_node=nodeA,
             comparison_state=getattr(nodeB, 'raw_state', {}),
@@ -629,40 +553,32 @@ class RetrievalMetricsOrchestrator:
         metricsB = await self.calculate_metrics(
             target_node=nodeB,
             comparison_state=getattr(nodeA, 'raw_state', {}),
-            query_text= getattr(nodeA, 'text_content', ""),
+            query_text=getattr(nodeA, 'text_content', ""),
             query_embedding=get_safe_embedding(nodeA, target_dim),
             override_config=config
         )
 
-        # Extract detailed component metrics.
         detailedA = metricsA.get('component_metrics', {})
         detailedB = metricsB.get('component_metrics', {})
 
-        dissonance = {}
-        # Iterate over the expected components.
+        dissonance: Dict[str, float] = {}
         for component in config.component_weights.keys():
             comp_key = component.name.lower()
             compA_val = detailedA.get(comp_key, {})
             compB_val = detailedB.get(comp_key, {})
-            # Compute a difference value between the two component dicts.
             raw_diff = self._compare_component_dicts(compA_val, compB_val)
             dissonance[comp_key] = float(raw_diff)
         return dissonance
 
     def _compare_component_dicts(self, dataA: Any, dataB: Any) -> float:
         """
-        Recursively compare two data structures (expected to be dicts or numeric values)
-        and return an average absolute difference.
-        
-        Ensures all return values are Python floats, not numpy types.
+        Recursively compare two data structures and return an average absolute difference.
         """
-        # If both are numeric values, return absolute difference as Python float
         if isinstance(dataA, (int, float, np.number)) and isinstance(dataB, (int, float, np.number)):
             return float(abs(float(dataA) - float(dataB)))
-        
-        # If both are dicts, compare recursively key by key.
+
         if isinstance(dataA, dict) and isinstance(dataB, dict):
-            differences = []
+            differences: List[float] = []
             all_keys = set(dataA.keys()) | set(dataB.keys())
             for key in all_keys:
                 diff = self._compare_component_dicts(
@@ -671,72 +587,44 @@ class RetrievalMetricsOrchestrator:
                 )
                 differences.append(diff)
             return float(sum(differences) / len(differences)) if differences else 0.0
-        
-        # For any non-numeric and non-dict types, return 0 difference as Python float
+
         return 0.0
-    
+
     def _validate_embedding(self, embedding: Any, node_id: str = "unknown") -> List[float]:
-        """
-        Validate and normalize an embedding to ensure it's a proper list of floats.
-        
-        Args:
-            embedding: The embedding to validate
-            node_id: Node ID for logging purposes
-            
-        Returns:
-            List[float]: Validated embedding
-        """
+        """Validate and normalize an embedding to a proper list of floats."""
         try:
             if embedding is None:
                 self.logger.warning(f"Node {node_id} has None embedding, using zero vector")
                 return [0.0] * self.embedding_manager._embedding_dims
-                
+
             if isinstance(embedding, list):
-                # Ensure all elements are floats
                 return [float(x) for x in embedding]
-                
             elif hasattr(embedding, 'tolist'):
-                # Convert numpy array to list
                 return [float(x) for x in embedding.tolist()]
-                
             elif hasattr(embedding, '__iter__'):
-                # Convert any iterable to list of floats
                 return [float(x) for x in embedding]
-                
             else:
-                self.logger.error(f"Node {node_id} has invalid embedding type: {type(embedding)}")
+                self.logger.error(
+                    f"Node {node_id} has invalid embedding type: {type(embedding)}"
+                )
                 return [0.0] * self.embedding_manager._embedding_dims
-                
+
         except Exception as e:
             self.logger.error(f"Failed to validate embedding for node {node_id}: {e}")
             return [0.0] * self.embedding_manager._embedding_dims
 
-    def update_configuration(
-        self,
-        new_config: MetricsConfiguration
-    ) -> None:
-        """
-        Update orchestrator configuration and reinitialize calculators as needed.
-        
-        Args:
-            new_config: New configuration to apply
-        """
-        # Store old config for comparison
+    def update_configuration(self, new_config: MetricsConfiguration) -> None:
+        """Update orchestrator configuration and reinitialize calculators as needed."""
         old_components = set(self.config.enabled_components)
-        
-        # Update config
         self.config = new_config
-        
-        # Check for calculator changes
         new_components = set(new_config.enabled_components)
+
         removed = old_components - new_components
         added = new_components - old_components
-        
-        # Remove disabled calculators
+
         for component in removed:
             self.calculators.pop(component, None)
-            
-        # Initialize new calculators
+
         for component in added:
             if component == MetricComponent.SEMANTIC:
                 self.calculators[component] = SemanticMetricsCalculator(
@@ -744,11 +632,6 @@ class RetrievalMetricsOrchestrator:
                 )
             elif component == MetricComponent.EMOTIONAL:
                 self.calculators[component] = EmotionalMetricsCalculator()
-            elif component == MetricComponent.STATE:
-                self.calculators[component] = StateMetricsCalculator(
-                    emotional_calculator=self.calculators.get(MetricComponent.EMOTIONAL),
-                    **self.config.state_options
-                )
             elif component == MetricComponent.TEMPORAL:
                 self.calculators[component] = TemporalMetricsCalculator(
                     **self.config.temporal_options

@@ -22,8 +22,6 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Dict, List, Set, Optional, Any, Callable, Tuple, Union, TYPE_CHECKING
 import weakref
-from concurrent.futures import ThreadPoolExecutor
-
 from loggers.loggers import MemoryLogger
 from ...nodes.base_node import BaseMemoryNode
 
@@ -176,11 +174,7 @@ class ConnectionUpdateQueue:
         
         # Metrics and monitoring
         self.metrics = QueueMetrics()
-        self._request_history: deque = deque(maxlen=1000)  # Keep last 1000 for analysis
-        
-        # Thread pool for CPU-bound operations
-        self._thread_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="connection_queue")
-        
+
         # Deduplication tracking
         self._active_requests: Dict[str, float] = {}  # node_id -> timestamp
         self._recent_completions: Dict[str, float] = {}  # node_id -> completion_time
@@ -222,10 +216,7 @@ class ConnectionUpdateQueue:
                     await self._processor_task
                 except asyncio.CancelledError:
                     pass
-        
-        # Shutdown thread pool
-        self._thread_pool.shutdown(wait=True, cancel_futures=True)
-        
+
         self.logger.info("ConnectionUpdateQueue stopped")
 
     async def enqueue_update(
