@@ -1,9 +1,26 @@
 # Hephia Desktop Pet: Revised Implementation Specification
 
-**Version:** 2.0
+**Version:** 2.1
 **Date:** February 8, 2026
-**Status:** Planning
+**Status:** Backend Complete — Ready for Frontend
 **Based on:** Direct codebase analysis of current Hephia (53,244 LOC)
+
+### Completion Status
+
+| Phase | Status | Branch |
+|-------|--------|--------|
+| Phase 1: Strip | **Done** | `pet` — `ca5f894` |
+| Phase 2: Simplify Memory Metrics | **Done** | `pet` — `357a321` |
+| Phase 3: Build Mind Layer + Bridge | **Done** | `pet` — `7b8a71a` |
+| Phase 4: Server + API | **Done** | `pet` — `3160528` |
+| Phase 5: Connect + Verify | **Done** | `pet` — `22deca4` |
+| Orchestrator Cleanup | **Done** | `pet` — `ef7ecd6` |
+| Phase 6: Visual Frontend (Tauri) | **Next** | — |
+| Phase 7: Polish & Integration | Pending | — |
+
+**Bugs found and fixed during cleanup:**
+- `Internal.start()` was never called in server startup — all timer callbacks (needs, emotions, memory) were no-ops behind `is_active` guard. Fixed.
+- Memory orchestrator self-started an infinite `_run_periodic_updates()` loop in `create()` AND was being called again by the timer. Converted to single-pass `run_maintenance_cycle()`, removed self-starting task.
 
 ---
 
@@ -103,14 +120,14 @@ The memory system is the crown jewel. We keep all behavioral mechanisms (echo, g
 | `networks/base_network.py` | 370 | Keep |
 | `networks/body_network.py` | 322 | Keep |
 | `networks/cognitive_network.py` | 330 | Keep |
-| `networks/connections/base_manager.py` | 1,116 | **Simplify** — reduce connection health tracking granularity, simplify update batching |
+| `networks/connections/base_manager.py` | 1,116 | **Keep as-is** — health history already bounded (`max_history=3`), locking infrastructure is load-bearing |
 | `networks/connections/cognitive_manager.py` | 301 | Keep |
 | `networks/connections/body_manager.py` | 266 | Keep |
-| `networks/connections/queue_manager.py` | 603 | **Simplify** — reduce queue complexity, keep batching |
+| `networks/connections/queue_manager.py` | 603 | **Keep as-is** — priority scheduling, dedup, and concurrency control serve real purposes for long-running operation |
 | `networks/connections/node_lock_manager.py` | 411 | Keep (prevents race conditions) |
-| **Subtotal** | **3,719** | **→ ~2,800** |
+| **Subtotal** | **3,719** | **~3,719 (no changes needed)** |
 
-Primary simplification: `base_manager.py` has extensive connection health history tracking and statistical analysis. Reduce to last-3-values history (currently unbounded). `queue_manager.py` has priority/reason tracking per update — simplify to FIFO with batch flush.
+*Reviewed during cleanup: `base_manager.py` health history was already bounded at 3. `queue_manager.py` priority/dedup/concurrency features are load-bearing for long-running operation. Simplification would remove useful features without meaningful benefit.*
 
 #### 2.2.3 Operations (Keep all lifecycle mechanisms)
 
@@ -168,27 +185,29 @@ Primary simplification: `base_manager.py` has extensive connection health histor
 
 | Component | Lines | Action |
 |-----------|-------|--------|
-| `memory_system.py` | 1,637 | **Rewrite** as simpler coordinator (~700). Current orchestrator handles too many concerns (event listening, LLM calls for formation, significance evaluation, retrieval, reflection, meditation). Split into focused pieces. |
+| `memory_system.py` | 1,637 | **Done** — cleaned to 978 lines. Removed 8 dead methods, vestigial event listeners, synthetic baseline bloat, verbose debug logging. Converted infinite maintenance loop to single-pass `run_maintenance_cycle()`. |
 
-**New orchestrator responsibilities (only):**
+**Current orchestrator responsibilities:**
 - Initialize networks, operations managers, metrics
-- Coordinate periodic updates (ghost cycle, consolidation cycle)
-- Provide clean retrieval interface
-- Delegate memory formation to the mind layer
+- Single-pass maintenance cycle (ghost, consolidation, network health) — called by timer
+- Body memory formation from internal state events
+- Significance evaluation for cognitive memory gating
+- Clean retrieval interface (query, recent, random, time-window)
+- Conflict resolution handler
 
 #### 2.2.7 Memory System Summary
 
 | Layer | Current | Target | Reduction |
 |-------|---------|--------|-----------|
 | Nodes | 1,268 | 1,150 | 9% |
-| Networks + Connections | 3,719 | 2,800 | 25% |
+| Networks + Connections | 3,719 | 3,719 | 0% (already clean) |
 | Operations (lifecycle) | 1,863 | 1,700 | 9% |
 | Metrics | 2,737 | 1,430 | 48% |
 | Database + Support | 1,824 | 1,750 | 4% |
-| Orchestrator | 1,637 | 700 | 57% |
-| **Total** | **13,048** | **~9,530** | **27%** |
+| Orchestrator | 1,637 | **978** | **40%** (done) |
+| **Total** | **13,048** | **~10,727** | **18%** |
 
-*Note: Previous analysis estimated ~6,500 lines target. Revised upward after reading the connection management and lifecycle code — more of it is load-bearing than initially assessed. The 9,530 target preserves all behavioral mechanisms while cutting research instrumentation.*
+*Revised after detailed code review: connection managers (base_manager, queue_manager) are already well-bounded and load-bearing — no simplification needed. Orchestrator cut deeper than the 700-line target suggested because dead code removal was the right approach over structural rewrite. Remaining code is all actively called.*
 
 ### 2.3 New Cognitive Bridge (~300 lines, replaces 758)
 
@@ -506,75 +525,31 @@ hephia/
 
 ## Part 5: Implementation Phases
 
-### Phase 1: Strip & Restructure (1-2 weeks)
+### Phase 1: Strip (Done — `ca5f894`)
 
-**Goal:** Remove everything we're dropping, move remaining code to new structure, verify nothing broke.
+Removed brain/, client/tui/, tools/, Discord code. Kept internal state + memory intact.
 
-| Task | Effort |
-|------|--------|
-| Create `pet` branch | Trivial |
-| Remove brain/ (except ported pieces) | Medium |
-| Remove client/tui/, tools/, Discord code | Small |
-| Move internal state to soul/internal/ | Medium |
-| Move memory system to soul/memory/ | Medium |
-| Verify memory system still initializes and runs | Medium |
-| Write basic smoke tests for echo/ghost/merge | Medium |
+### Phase 2: Simplify Memory Metrics (Done — `357a321`)
 
-**Milestone:** Stripped codebase compiles and memory system passes smoke tests.
+Dropped SpaCy NLP pipeline, state metrics calculator, cluster analysis. Replaced semantic density with simple heuristic.
 
-### Phase 2: Simplify Memory System (2-3 weeks)
+### Phase 3: Build Mind Layer + Bridge (Done — `7b8a71a`)
 
-**Goal:** Simplify metrics, connection management, orchestrator. Verify behaviors survived.
+Built mind layer (pet model, worker model, conversation, memory formation), rewrote cognitive bridge as thin interface.
 
-| Task | Effort |
-|------|--------|
-| Replace semantic density NLP pipeline with simple heuristic | Medium |
-| Drop state metrics calculator, update orchestrator weights | Small |
-| Simplify connection base_manager (bounded health history) | Medium |
-| Simplify queue_manager (FIFO with batch flush) | Medium |
-| Rewrite memory_system.py orchestrator | Large |
-| Refactor conflict detection shim code | Small |
-| Verify echo → emotional state propagation works | Medium |
-| Verify ghosting → revival cycle works | Medium |
-| Verify merge + conflict synthesis flow works | Medium |
+### Phase 4: Server + API (Done — `3160528`)
 
-**Milestone:** Memory system at target size, all lifecycle behaviors verified.
+Routes, services, WebSocket streaming, notes system, worker queue, settings. Trimmed dead API providers.
 
-### Phase 3: Build Mind Layer + Bridge (2-3 weeks)
+### Phase 5: Connect + Verify (Done — `22deca4`)
 
-**Goal:** Pet can think, talk, and remember.
+Wired memory maintenance timer, introspection runner, formation counter reset. Fixed `Internal.start()` not being called. Converted orchestrator maintenance to single-pass.
 
-| Task | Effort |
-|------|--------|
-| Write PetCognitiveBridge | Medium |
-| Port memory formation pipeline | Medium |
-| Port significance analysis (simplified) | Small |
-| Port introspection (meditation/reflection core) | Medium |
-| Build pet model interface | Medium |
-| Build worker model interface | Medium |
-| Build task router | Small |
-| Build conversation state management | Small |
-| Write personality prompts | Medium |
-| Write state-to-natural-language templates | Small |
+### Orchestrator Cleanup (Done — `ef7ecd6`)
 
-**Milestone:** Can chat with pet via CLI, memories form, echo affects mood, pet introspects.
+Removed 8 dead methods, vestigial event listeners, synthetic baseline bloat, ~100 lines debug logging. `memory_system.py`: 1,633 → 978 lines. Confirmed `base_manager.py` and `queue_manager.py` don't need simplification.
 
-### Phase 4: Server + API (1-2 weeks)
-
-**Goal:** Soul server exposes everything the frontend needs.
-
-| Task | Effort |
-|------|--------|
-| FastAPI app with WebSocket state streaming | Medium |
-| REST endpoints (state, chat, actions, memory, worker) | Medium |
-| Port notes system (simplified) | Small |
-| Port API clients (trimmed providers) | Small |
-| Wire server to all soul systems | Medium |
-| Config system for pet settings | Small |
-
-**Milestone:** Can interact with pet via HTTP/WebSocket, all state surfaceable.
-
-### Phase 5: Visual Frontend (2-4 weeks)
+### Phase 6: Visual Frontend (Next — 2-4 weeks)
 
 **Goal:** Pet lives on the desktop.
 
@@ -592,7 +567,7 @@ hephia/
 
 **Milestone:** Animated pet on desktop that reacts to state, chats, and remembers.
 
-### Phase 6: Polish & Integration (1-2 weeks)
+### Phase 7: Polish & Integration (1-2 weeks)
 
 **Goal:** Shippable.
 
