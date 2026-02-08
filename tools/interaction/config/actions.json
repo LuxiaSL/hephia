@@ -1,6 +1,0 @@
-{
-    "base_url": "http://localhost:5517",
-    "timeout": 30.0,
-    "max_retries": 3
-  }
-  

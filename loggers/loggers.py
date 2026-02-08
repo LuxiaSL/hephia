@@ -8,7 +8,6 @@ import logging
 import json
 import re
 from typing import Dict, Any, List, Optional, Union
-from brain.commands.model import ParsedCommand
 
 def strip_emojis(text: str) -> str:
     emoji_pattern = re.compile("["
@@ -189,7 +188,7 @@ class BrainLogger:
     @staticmethod
     def log_command_processing(
         raw_input: str,
-        processed: Optional[Union[str, 'ParsedCommand']],
+        processed: Optional[Union[str, Any]],
         validation_result: Optional[str]
     ):
         logger = logging.getLogger('hephia.brain')
