@@ -149,6 +149,8 @@ class HephiaServer:
                     self.mind.restore_conversation_state(saved_conversation)
                     SystemLogger.info(f"Restored {len(saved_conversation)} conversation messages")
 
+            await self.internal.start()
+
             SystemLogger.info("Adding internal timers...")
             self.timer.add_task(
                 name="needs_update",

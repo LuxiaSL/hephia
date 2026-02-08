@@ -146,7 +146,7 @@ class Internal:
     
     async def update_memories(self):
         if self.is_active:
-            await self.memory_system._run_periodic_updates()
+            await self.memory_system.run_maintenance_cycle()
 
     def on_need_change(self, event):
         """Handle need change events."""
