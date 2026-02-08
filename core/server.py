@@ -23,6 +23,7 @@ from core.websockets.tui_stream import TUIStreamManager
 from event_dispatcher import global_event_dispatcher, Event
 from internal.internal import Internal
 from mind.mind import Mind
+from mind.introspection import IntrospectionRunner
 from config import Config
 from api_clients import APIManager
 from loggers import SystemLogger
@@ -45,6 +46,7 @@ class HephiaServer:
         # Async components (set in create())
         self.internal: Optional[Internal] = None
         self.mind: Optional[Mind] = None
+        self.introspection: Optional[IntrospectionRunner] = None
         self.state_bridge: Optional[StateBridge] = None
         self.event_bridge: Optional[EventBridge] = None
         self.tui_stream: Optional[TUIStreamManager] = None
@@ -59,6 +61,10 @@ class HephiaServer:
         instance.mind = Mind(
             bridge=instance.internal.cognitive_bridge,
             api_manager=instance.api,
+        )
+        instance.introspection = IntrospectionRunner(
+            bridge=instance.internal.cognitive_bridge,
+            conversation=instance.mind.conversation,
         )
         instance.state_bridge = StateBridge(internal=instance.internal)
         instance.event_bridge = EventBridge(state_bridge=instance.state_bridge)
@@ -153,6 +159,17 @@ class HephiaServer:
                 name="emotions_update",
                 interval=Config.EMOTION_UPDATE_TIMER,
                 callback=self.internal.update_emotions,
+            )
+
+            self.timer.add_task(
+                name="memory_maintenance",
+                interval=Config.MEMORY_UPDATE_TIMER,  # 180s
+                callback=self.internal.update_memories,
+            )
+            self.timer.add_task(
+                name="introspection",
+                interval=600,  # every 10 minutes
+                callback=self.introspection.maybe_introspect,
             )
 
             # Worker queue cleanup timer

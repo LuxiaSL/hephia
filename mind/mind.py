@@ -51,6 +51,12 @@ class Mind:
         )
         self.memory_formation = MemoryFormationPipeline(bridge, api_manager)
 
+        # Listen for successful memory formations to reset the turn counter
+        global_event_dispatcher.add_listener(
+            "mind:memory_formed",
+            self._on_memory_formed,
+        )
+
     async def process_message(self, user_message: str) -> MindResponse:
         """
         Process a user message through the full mind pipeline.
@@ -157,3 +163,12 @@ class Mind:
     def restore_conversation_state(self, state: List[Dict[str, str]]) -> None:
         """Restore conversation from persisted state."""
         self.conversation.from_state(state)
+
+    # ---- Event Handlers ----
+
+    def _on_memory_formed(self, event: Event) -> None:
+        """Reset conversation formation counter after a memory is formed."""
+        self.conversation.reset_formation_counter()
+        self.logger.debug(
+            f"Formation counter reset (memory: {event.data.get('node_id', '?')})"
+        )
