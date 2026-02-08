@@ -32,14 +32,11 @@ def validate_configuration() -> bool:
 
     # Map providers to their environment variable names
     provider_env_vars: dict[ProviderType, str] = {
-        ProviderType.OPENPIPE: "OPENPIPE_API_KEY",
         ProviderType.OPENAI: "OPENAI_API_KEY",
         ProviderType.ANTHROPIC: "ANTHROPIC_API_KEY",
         ProviderType.GOOGLE: "GOOGLE_API_KEY",
         ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
-        ProviderType.PERPLEXITY: "PERPLEXITY_API_KEY",
-        ProviderType.CHAPTER2: "CHAPTER2_SOCKET_PATH",
-        ProviderType.LOCAL: "LOCAL_INFERENCE_BASE_URL"
+        ProviderType.LOCAL: "LOCAL_INFERENCE_BASE_URL",
     }
 
     # Validate model configurations

@@ -14,13 +14,10 @@ import json
 
 class ProviderType(Enum):
     """Available LLM providers."""
-    OPENPIPE = "openpipe"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
     OPENROUTER = "openrouter"
-    PERPLEXITY = "perplexity"
-    CHAPTER2 = "chapter2"
     LOCAL = "local"
 
 @dataclass
@@ -136,17 +133,6 @@ class Config:
         return os.getenv("WORKER_MODEL", cls.WORKER_MODEL)
     
     @classmethod
-    def get_chapter2_socket_path(cls) -> Optional[str]:
-        """Get the Chapter 2 socket path from env or default."""
-        default_socket = "/tmp/chapter2.sock" if platform.system() != "Windows" else None
-        return os.getenv("CHAPTER2_SOCKET_PATH", default_socket)
-
-    @classmethod
-    def get_chapter2_http_port(cls) -> int:
-        """Get the Chapter 2 HTTP port from env or default."""
-        return int(os.getenv("CHAPTER2_HTTP_PORT", "5519"))
-
-    @classmethod
     def get_use_local_embedding(cls) -> bool:
         """Get the embedding type configuration from env or default."""
         return os.getenv("USE_LOCAL_EMBEDDING", "True").lower() in ("true", "1", "yes")
@@ -170,11 +156,6 @@ class Config:
     @classmethod
     def get_log_prompts(cls) -> bool:
         return os.getenv("LOG_PROMPTS", "False").lower() in ("true", "1", "yes")
-    
-    @classmethod
-    def get_advanced_c2_logging(cls) -> bool:
-        """Return whether advanced Chapter2 logging is enabled"""
-        return os.getenv('ADVANCED_C2_LOGGING', 'False').lower() in ('true', '1', 'yes')
     
     @classmethod
     def get_exo_max_turns(cls) -> int:
@@ -235,19 +216,6 @@ class Config:
             max_tokens=250,
             description="Mistral 7B via OpenRouter"
         ),
-        "perplexity": ModelConfig(
-            provider=ProviderType.PERPLEXITY,
-            model_id="sonar-pro",
-            max_tokens=600,
-            description="Sonar via Perplexity"
-        ),
-        "hephia": ModelConfig(
-            provider=ProviderType.OPENPIPE,
-            model_id="openpipe:70b-full",
-            max_tokens=250,
-            temperature=0.8,
-            description="Custom Hephia Model via OpenPipe (not available yet)"
-        ),
         "llama-70b-instruct": ModelConfig(
             provider=ProviderType.OPENROUTER,
             model_id="meta-llama/llama-3.1-70b-instruct",
@@ -283,12 +251,6 @@ class Config:
             model_id="arliai/qwq-32b-arliai-rpr-v1:free",
             max_tokens=550,
             description="QwQ 32B ArliAI RPR via OpenRouter"
-        ),
-        "chapter2": ModelConfig(
-            provider=ProviderType.CHAPTER2,
-            model_id="foo",
-            max_tokens=550,
-            description="Arago"
         ),
         "local-model": ModelConfig(
             provider=ProviderType.LOCAL,
