@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "paths": {
+      "$lib/*": ["./src/lib/*"],
+      "$creature/*": ["./src/creature/*"],
+      "$state/*": ["./src/state/*"]
+    },
+    "types": ["svelte"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte", "playground/**/*.ts"],
+  "exclude": ["node_modules", "src-tauri"]
+}

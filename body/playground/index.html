@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hephia Creature Playground</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #111;
+      color: #ddd;
+      font-family: -apple-system, system-ui, sans-serif;
+      font-size: 14px;
+      display: flex;
+      height: 100vh;
+    }
+    .canvas-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* Checkered background to verify transparency */
+      background-image:
+        linear-gradient(45deg, #1a1a1a 25%, transparent 25%),
+        linear-gradient(-45deg, #1a1a1a 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #1a1a1a 75%),
+        linear-gradient(-45deg, transparent 75%, #1a1a1a 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+      background-color: #222;
+    }
+    canvas {
+      border: 1px solid #333;
+    }
+    .controls {
+      width: 300px;
+      background: #0a0a0f;
+      border-left: 1px solid #333;
+      padding: 16px;
+      overflow-y: auto;
+    }
+    .controls h2 { font-size: 16px; margin-bottom: 12px; }
+    .controls h3 { font-size: 12px; color: #888; text-transform: uppercase; margin: 16px 0 8px; }
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .control-row label { width: 80px; font-size: 12px; color: #aaa; }
+    .control-row input[type="range"] { flex: 1; }
+    .control-row .value { width: 40px; text-align: right; font-size: 12px; font-family: monospace; color: #666; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .preset-btn {
+      padding: 4px 10px;
+      border: 1px solid #333;
+      border-radius: 4px;
+      background: #1a1a25;
+      color: #ddd;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .preset-btn:hover { background: #2a2a38; }
+  </style>
+</head>
+<body>
+  <div class="canvas-area">
+    <canvas id="creature" width="256" height="256"></canvas>
+  </div>
+  <div class="controls">
+    <h2>Creature Playground</h2>
+    <p style="font-size:12px;color:#666;margin-bottom:16px;">
+      Adjust parameters to preview creature states. Same renderer as the real app.
+    </p>
+
+    <div class="presets">
+      <button class="preset-btn" id="preset-happy-idle">Happy Idle</button>
+      <button class="preset-btn" id="preset-sad-sleep">Sad Sleep</button>
+      <button class="preset-btn" id="preset-excited-chase">Excited Chase</button>
+      <button class="preset-btn" id="preset-calm-relax">Calm Relax</button>
+      <button class="preset-btn" id="preset-lonely-walk">Lonely Walk</button>
+    </div>
+
+    <h3>Mood</h3>
+    <div class="control-row">
+      <label>Valence</label>
+      <input type="range" id="mood-valence" min="-100" max="100" value="0" />
+      <span class="value" id="mood-valence-val">0.00</span>
+    </div>
+    <div class="control-row">
+      <label>Arousal</label>
+      <input type="range" id="mood-arousal" min="-100" max="100" value="0" />
+      <span class="value" id="mood-arousal-val">0.00</span>
+    </div>
+
+    <h3>Needs (Satisfaction)</h3>
+    <div class="control-row">
+      <label>Hunger</label>
+      <input type="range" id="need-hunger" min="0" max="100" value="50" />
+      <span class="value" id="need-hunger-val">0.50</span>
+    </div>
+    <div class="control-row">
+      <label>Thirst</label>
+      <input type="range" id="need-thirst" min="0" max="100" value="50" />
+      <span class="value" id="need-thirst-val">0.50</span>
+    </div>
+    <div class="control-row">
+      <label>Boredom</label>
+      <input type="range" id="need-boredom" min="0" max="100" value="50" />
+      <span class="value" id="need-boredom-val">0.50</span>
+    </div>
+    <div class="control-row">
+      <label>Loneliness</label>
+      <input type="range" id="need-loneliness" min="0" max="100" value="50" />
+      <span class="value" id="need-loneliness-val">0.50</span>
+    </div>
+    <div class="control-row">
+      <label>Stamina</label>
+      <input type="range" id="need-stamina" min="0" max="100" value="50" />
+      <span class="value" id="need-stamina-val">0.50</span>
+    </div>
+
+    <h3>Behavior</h3>
+    <div class="control-row">
+      <label>Behavior</label>
+      <select id="behavior" style="flex:1;padding:4px;background:#1a1a25;color:#ddd;border:1px solid #333;border-radius:4px;">
+        <option value="idle">Idle</option>
+        <option value="walk">Walk</option>
+        <option value="chase">Chase</option>
+        <option value="sleep">Sleep</option>
+        <option value="relax">Relax</option>
+        <option value="attentive">Attentive</option>
+      </select>
+    </div>
+
+    <h3>Emotion Flash</h3>
+    <button class="preset-btn" id="flash-positive">Flash Positive</button>
+    <button class="preset-btn" id="flash-negative">Flash Negative</button>
+    <button class="preset-btn" id="flash-surprise">Flash Surprise</button>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

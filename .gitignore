@@ -15,8 +15,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -26,6 +26,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+node_modules/
 
 # Virtual environment
 venv/
@@ -60,3 +61,10 @@ data/
 .coverage
 
 tools/semantic_pipeline/
+
+# Tauri / Rust build artifacts
+body/src-tauri/target/
+body/src-tauri/gen/
+
+# Conversation logs (not specs)
+pet_split.md

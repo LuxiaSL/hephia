@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri-v2/main/schema.json",
+  "productName": "Hephia",
+  "version": "0.1.0",
+  "identifier": "com.hephia.body",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "overlay",
+        "url": "/src/overlay/index.html",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "width": 192,
+        "height": 192,
+        "visible": false,
+        "title": "Hephia"
+      }
+    ],
+    "trayIcon": {
+      "id": "main-tray",
+      "iconPath": "icons/tray-icon.png",
+      "iconAsTemplate": true,
+      "tooltip": "Hephia"
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

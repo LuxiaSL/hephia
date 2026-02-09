@@ -21,7 +21,7 @@ from aiorwlock import RWLock
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List, Set, Optional, Any, AsyncGenerator, Union
+from typing import Dict, List, Set, Optional, Any, AsyncGenerator
 
 from loggers.loggers import MemoryLogger
 from ..reentrant_lock import shared_reentrant_lock
@@ -110,15 +110,13 @@ class NodeLockManager:
         self._active_operations: Dict[str, LockOperation] = {}
         self._operation_semaphore = asyncio.Semaphore(max_concurrent_operations)
         
-        # Deadlock detection
-        self._lock_waiters: Dict[str, Set[str]] = {}  # node_id -> set of operation_ids waiting
+        # Operation tracking for diagnostics
         self._operation_locks: Dict[str, Set[str]] = {}  # operation_id -> set of node_ids held
         
         # Statistics
         self._stats = {
             'locks_acquired': 0,
             'locks_released': 0,
-            'deadlocks_detected': 0,
             'global_fallbacks': 0,
             'timeouts': 0,
             'operations_completed': 0
@@ -226,110 +224,63 @@ class NodeLockManager:
     async def _try_acquire_granular_locks(self, operation: LockOperation) -> bool:
         """
         Attempt to acquire all locks for an operation using granular locking.
-        
+
+        Deadlock prevention: locks are always acquired in sorted node_id order,
+        which guarantees no circular waits across concurrent operations.
+
         Returns:
             bool: True if all locks acquired successfully, False otherwise
         """
         try:
             # Sort requests by node_id for consistent ordering (deadlock prevention)
             sorted_requests = sorted(operation.requests, key=lambda r: r.node_id)
-            
-            # Track this operation as waiting for locks
-            for request in sorted_requests:
-                if request.node_id not in self._lock_waiters:
-                    self._lock_waiters[request.node_id] = set()
-                self._lock_waiters[request.node_id].add(operation.operation_id)
-            
+
             # Acquire locks in order
             acquired_locks = []
-            
+
             for request in sorted_requests:
                 try:
                     lock = self._get_node_lock(request.node_id)
-                    
-                    # Check for potential deadlock before acquiring
-                    if self._would_cause_deadlock(operation.operation_id, request.node_id):
-                        self.logger.warning(f"Potential deadlock detected for operation {operation.operation_name}")
-                        self._stats['deadlocks_detected'] += 1
-                        
-                        # Release any locks we've already acquired
-                        await self._release_acquired_locks(acquired_locks)
-                        return False
-                    
+
                     # Acquire the lock with timeout
                     if request.lock_type == LockType.READ:
                         lock_coro = lock.reader_lock.acquire()
                     else:
                         lock_coro = lock.writer_lock.acquire()
-                    
+
                     await asyncio.wait_for(lock_coro, timeout=request.timeout)
-                    
+
                     request.acquired_at = time.time()
                     acquired_locks.append((lock, request))
                     self._stats['locks_acquired'] += 1
-                    
+
                     # Update tracking
                     if operation.operation_id not in self._operation_locks:
                         self._operation_locks[operation.operation_id] = set()
                     self._operation_locks[operation.operation_id].add(request.node_id)
-                    
-                    # Remove from waiters
-                    self._lock_waiters.get(request.node_id, set()).discard(operation.operation_id)
-                    
+
                 except asyncio.TimeoutError:
-                    self.logger.error(f"Timeout acquiring lock for node {request.node_id}")
+                    self.logger.error(f"Timeout acquiring lock for node {request.node_id} in {operation.operation_name}")
                     self._stats['timeouts'] += 1
-                    
+
                     # Release any locks we've already acquired
                     await self._release_acquired_locks(acquired_locks)
                     return False
-                    
+
                 except Exception as e:
                     self.logger.error(f"Error acquiring lock for node {request.node_id}: {e}")
-                    
+
                     # Release any locks we've already acquired
                     await self._release_acquired_locks(acquired_locks)
                     return False
-            
+
             # Store acquired locks for later release
             operation._acquired_locks = acquired_locks
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Error in granular lock acquisition: {e}")
             return False
-
-    def _would_cause_deadlock(self, operation_id: str, node_id: str) -> bool:
-        """
-        Simple deadlock detection based on waiting patterns.
-        
-        This is a conservative check - it may report false positives but
-        should avoid actual deadlocks.
-        """
-        try:
-            # If we're already holding locks and there are other operations waiting
-            # for nodes we want, and we're waiting for nodes they hold, potential deadlock
-            our_held_nodes = self._operation_locks.get(operation_id, set())
-            other_waiters = self._lock_waiters.get(node_id, set()) - {operation_id}
-            
-            for other_op_id in other_waiters:
-                other_held_nodes = self._operation_locks.get(other_op_id, set())
-                
-                # If they hold nodes we want and we hold nodes they might want
-                if our_held_nodes & other_held_nodes:
-                    return True
-                    
-                # Check for circular wait patterns
-                for our_node in our_held_nodes:
-                    other_waiters_for_our_node = self._lock_waiters.get(our_node, set())
-                    if other_op_id in other_waiters_for_our_node:
-                        return True
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"Error in deadlock detection: {e}")
-            return True  # Conservative: assume deadlock to be safe
 
     async def _release_acquired_locks(self, acquired_locks: List[tuple]) -> None:
         """Release a list of acquired locks."""
@@ -347,14 +298,9 @@ class NodeLockManager:
         """Release all locks held by an operation."""
         if hasattr(operation, '_acquired_locks'):
             await self._release_acquired_locks(operation._acquired_locks)
-            
+
         # Clean up tracking
         self._operation_locks.pop(operation.operation_id, None)
-        for request in operation.requests:
-            waiters = self._lock_waiters.get(request.node_id, set())
-            waiters.discard(operation.operation_id)
-            if not waiters:
-                self._lock_waiters.pop(request.node_id, None)
 
     @asynccontextmanager
     async def _acquire_global_fallback_lock(self, operation: LockOperation) -> AsyncGenerator[None, None]:
@@ -374,7 +320,6 @@ class NodeLockManager:
             **self._stats,
             'active_operations': len(self._active_operations),
             'node_locks_created': len(self._node_locks),
-            'waiting_operations': sum(len(waiters) for waiters in self._lock_waiters.values())
         }
 
     def cleanup_unused_locks(self) -> int:
@@ -389,7 +334,6 @@ class NodeLockManager:
         
         for node_id in expired_nodes:
             self._node_locks.pop(node_id, None)
-            self._lock_waiters.pop(node_id, None)
         
         cleaned_count = initial_count - len(self._node_locks)
         if cleaned_count > 0:
