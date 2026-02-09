@@ -53,6 +53,8 @@ class NeedsManager:
         Sets up event listeners for needs-related events.
         """
         global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
+        global_event_dispatcher.add_listener("action:completed", self._handle_action_completed)
+        global_event_dispatcher.add_listener("mind:conversation_turn", self._handle_conversation)
 
     def _handle_memory_echo(self, event):
         """
@@ -77,6 +79,36 @@ class NeedsManager:
                 shift = (remembered - current) * echo_data.get('intensity', 0.3) * 0.4
                 self.alter_need(need_name, shift)
 
+    def _handle_action_completed(self, event):
+        """Apply afterglow to needs affected by completed actions."""
+        action_name = event.data.get('action_name', '')
+
+        # Map actions to the needs they satisfy
+        action_need_map = {
+            'feed': 'hunger',
+            'give_water': 'thirst',
+            'play': 'boredom',
+            'rest': 'stamina',
+        }
+
+        need_name = action_need_map.get(action_name)
+        if need_name and need_name in self.needs:
+            self.needs[need_name].apply_afterglow(
+                Config.AFTERGLOW_FACTOR,
+                Config.AFTERGLOW_DURATION,
+            )
+
+    def _handle_conversation(self, event):
+        """Reduce loneliness and boredom when conversation happens."""
+        self.alter_need('loneliness', -Config.CONVERSATION_LONELINESS_REDUCTION)
+        self.alter_need('boredom', -Config.CONVERSATION_BOREDOM_REDUCTION)
+        # Afterglow on loneliness — the warmth of chatting lingers
+        if 'loneliness' in self.needs:
+            self.needs['loneliness'].apply_afterglow(
+                Config.AFTERGLOW_FACTOR,
+                Config.AFTERGLOW_DURATION,
+            )
+
     def update_needs(self, needs_to_update=None):
         """
         Updates specified needs.
@@ -86,6 +118,9 @@ class NeedsManager:
         """
         if needs_to_update is None:
             needs_to_update = self.needs.keys()
+
+        # Apply cross-talk: other needs' satisfaction affects this need's rate
+        self._apply_crosstalk()
 
         for need_name in needs_to_update:
             need = self.needs.get(need_name)
@@ -100,6 +135,25 @@ class NeedsManager:
                     }))
             else:
                 raise ValueError(f"Need '{need_name}' does not exist.")
+
+        # Reset context modifiers after update
+        self._reset_crosstalk()
+
+    def _apply_crosstalk(self):
+        """Set context modifiers on needs based on cross-talk coupling."""
+        needs_summary = self.get_needs_summary()
+        for source, threshold, target, modifier in Config.NEED_CROSSTALK:
+            if source in needs_summary and target in self.needs:
+                satisfaction = needs_summary[source]['satisfaction']
+                if satisfaction < threshold:
+                    # The less satisfied the source, the stronger the coupling
+                    strength = 1.0 - (satisfaction / threshold)
+                    self.needs[target]._context_modifier += modifier * strength
+
+    def _reset_crosstalk(self):
+        """Reset all context modifiers to neutral."""
+        for need in self.needs.values():
+            need._context_modifier = 1.0
 
     def alter_need(self, need_name, amount):
         """

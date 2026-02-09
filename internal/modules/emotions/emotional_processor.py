@@ -10,6 +10,7 @@ Emotional Processing Pipeline:
 Vectors accumulate and decay naturally, simulating the ebb and flow of emotional experience.
 """
 
+from config import Config
 from event_dispatcher import global_event_dispatcher, Event
 from loggers import InternalLogger
 from ..cognition.cognitive_bridge import PetCognitiveBridge
@@ -274,6 +275,7 @@ class EmotionalProcessor:
         global_event_dispatcher.add_listener("memory:echo", self._handle_memory_echo)
         global_event_dispatcher.add_listener("cognitive:emotional:meditation", self.process_meditation)
         global_event_dispatcher.add_listener("cognitive:emotional:influence", self.process_cognitive_influence)
+        global_event_dispatcher.add_listener("mind:conversation_turn", self._handle_conversation)
 
     def update(self):
         """Updates the emotional state when ticked."""
@@ -335,6 +337,14 @@ class EmotionalProcessor:
             source_data=event.data,
             name=name
         )
+
+        # Mood coloring — current mood biases how stimuli are interpreted
+        mood_data = self.internal_context.get_current_mood()
+        if mood_data:
+            mood_obj = mood_data.get('mood_object')
+            if mood_obj:
+                valence_bias = mood_obj.valence * Config.MOOD_VALENCE_BIAS_FACTOR
+                initial_vector.valence = max(-1.0, min(1.0, initial_vector.valence + valence_bias))
 
         # Apply dampening
         category = self._categorize_vector(initial_vector.valence, initial_vector.arousal)
@@ -499,7 +509,7 @@ class EmotionalProcessor:
         new_value = data['new_value']
         change = new_value - old_value
 
-        if abs(change) < 5:  # Ignore minor changes
+        if abs(change) < Config.EMOTION_NEED_CHANGE_THRESHOLD:
             return None, None
 
         direction = 'increase' if change > 0 else 'decrease'
@@ -715,6 +725,35 @@ class EmotionalProcessor:
         
         # Process influences on echo vector
         await self._process_influences(echo_vector)
+
+    async def _handle_conversation(self, event):
+        """Generate warmth/engagement emotional vector from conversation."""
+        conversation_vector = EmotionalVector(
+            valence=0.3,
+            arousal=0.2,
+            intensity=0.4,
+            source_type='conversation',
+            source_data=event.data,
+            name='engaged'
+        )
+
+        # Mood coloring — current mood tints the conversation experience
+        mood_data = self.internal_context.get_current_mood()
+        if mood_data:
+            mood_obj = mood_data.get('mood_object')
+            if mood_obj:
+                valence_bias = mood_obj.valence * Config.MOOD_VALENCE_BIAS_FACTOR
+                conversation_vector.valence = max(-1.0, min(1.0, conversation_vector.valence + valence_bias))
+
+        # Dampening — repeated conversation turns have diminishing emotional novelty
+        category = self._categorize_vector(conversation_vector.valence, conversation_vector.arousal)
+        dampening = await self._calculate_dampening(category)
+        conversation_vector.intensity *= dampening
+
+        self.current_stimulus.add_vector(conversation_vector)
+        global_event_dispatcher.dispatch_event_sync(Event("emotion:new", {
+            "emotion": conversation_vector
+        }))
 
     async def process_meditation(self, event):
         """Processes meditation events for emotional influence."""

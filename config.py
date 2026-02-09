@@ -348,5 +348,55 @@ class Config:
         'loneliness': 0.0002
     }
 
+    # --- Layer 1: Temporal Dynamics ---
+
+    # Mood inertia — blend rate toward target (0 = frozen, 1 = instant snap)
+    MOOD_BLEND_RATE = 0.3
+
+    # Need urgency curve: rate *= (1 + CURVE_K * (value/max)^CURVE_N)
+    # Applied to hunger, thirst, boredom, loneliness only (not stamina)
+    NEED_CURVE_K = 2.0      # max multiplier at full urgency: 1 + K = 3x
+    NEED_CURVE_N = 2.0      # exponent controlling curve steepness
+
+    # Post-satisfaction afterglow (temporary rate reduction after action)
+    AFTERGLOW_FACTOR = 0.4   # rate multiplied by this during afterglow
+    AFTERGLOW_DURATION = 60   # seconds for afterglow to fully decay
+
+    # Behavior characteristic durations (seconds before transition urgency builds)
+    BEHAVIOR_CHARACTERISTIC_TIMES = {
+        'idle': 300,      # 5 min before restlessness
+        'walk': 180,      # 3 min walk sessions
+        'chase': 60,      # 1 min bursts
+        'sleep': 600,     # 10 min deep sleep
+        'relax': 240,     # 4 min rest
+    }
+
+    # --- Layer 2: Cross-System Coupling ---
+
+    # Emotion threshold — minimum need change to generate emotional vector
+    EMOTION_NEED_CHANGE_THRESHOLD = 1.5
+
+    # Mood coloring — how much mood biases incoming stimulus valence
+    MOOD_VALENCE_BIAS_FACTOR = 0.15
+
+    # Conversation impact on needs (per turn)
+    CONVERSATION_LONELINESS_REDUCTION = 3.0
+    CONVERSATION_BOREDOM_REDUCTION = 1.5
+
+    # Need cross-talk coupling strengths (modifier on target need's rate)
+    # Format: (source_need, condition, target_need, modifier)
+    # condition is satisfaction threshold below which coupling activates
+    NEED_CROSSTALK = [
+        # low stamina → faster boredom (too tired to self-entertain)
+        ('stamina', 0.4, 'boredom', 0.15),
+        # high loneliness → faster hunger (comfort-seeking)
+        ('loneliness', 0.4, 'hunger', 0.10),
+        # high boredom → faster loneliness (nothing to distract)
+        ('boredom', 0.4, 'loneliness', 0.10),
+    ]
+
+    # Mood influence on behavior transition weights
+    MOOD_BEHAVIOR_INFLUENCE = 0.3  # strength of mood bias on transitions
+
     VERSION = "0.3"
 

@@ -9,6 +9,7 @@ from .sleep import SleepBehavior
 from .relax import RelaxBehavior
 from ..needs.needs_manager import NeedsManager
 from ...internal_context import InternalContext
+from config import Config
 from event_dispatcher import global_event_dispatcher, Event
 import time
 import random
@@ -28,6 +29,16 @@ class BehaviorManager:
     Future integrations with cognitive systems will allow for more
     deliberate behavior control and learning.
     """
+
+    # Energy level per behavior: 1.0 = high energy, -1.0 = low energy
+    # Used by mood influence — valence biases active/restful, arousal biases energy tier
+    BEHAVIOR_ENERGY = {
+        'chase': 1.0,
+        'walk': 0.5,
+        'idle': 0.0,
+        'relax': -0.5,
+        'sleep': -1.0,
+    }
 
     BEHAVIOR_PATTERNS = {
         'idle': {
@@ -110,6 +121,7 @@ class BehaviorManager:
         self.current_behavior: Optional[Behavior] = None
         self.locked_until = 0
         self.locked_by = None
+        self.behavior_start_time = time.time()
 
         self.behaviors = {
             'idle': IdleBehavior(self),
@@ -179,6 +191,7 @@ class BehaviorManager:
             
         self.current_behavior = self.behaviors[new_behavior_name]
         self.current_behavior.start()
+        self.behavior_start_time = time.time()
 
         global_event_dispatcher.dispatch_event_sync(Event("behavior:changed", {
             "old_name": old_behavior.name if old_behavior else None,
@@ -246,13 +259,12 @@ class BehaviorManager:
         """
 
         if self.is_locked():
-            print("Behavior is locked; returning current behavior.")
             return self.current_behavior.name
-        
+
         current = self.current_behavior.name
         pattern = self.BEHAVIOR_PATTERNS[current]
 
-        # Step 1: Check force_threshold conditions
+        # Step 1: Check force_threshold conditions (unchanged)
         for behavior, data in self.BEHAVIOR_PATTERNS.items():
             if 'force_threshold' in data:
                 threshold = data['force_threshold']
@@ -260,7 +272,13 @@ class BehaviorManager:
                 if current_value <= threshold['value']:
                     return behavior
 
-        # Step 2: Calculate transition weights
+        # Step 2: Duration factor — longer in current behavior increases transition urgency
+        elapsed = time.time() - self.behavior_start_time
+        char_time = Config.BEHAVIOR_CHARACTERISTIC_TIMES.get(current, 300)
+        duration_factor = min(2.0, 1.0 + (elapsed / char_time))
+        stay_factor = max(0.3, 1.0 / duration_factor)  # inverse — less likely to stay over time
+
+        # Step 3: Calculate transition weights
         transition_weights = {}
         for next_behavior, rules in pattern['transitions'].items():
             current_value = current_needs[rules['trigger']]['satisfaction']
@@ -268,19 +286,28 @@ class BehaviorManager:
             if current_value <= rules['min_threshold']:
                 if 'condition' in rules and not rules['condition'](current_needs):
                     continue
-                transition_weights[next_behavior] = probability * random.random()
+                weight = probability * duration_factor * random.random()
+
+                # Mood influence: valence biases active/restful, arousal biases energy level
+                if current_mood:
+                    mood_obj = current_mood.get('mood_object')
+                    if mood_obj:
+                        energy = self.BEHAVIOR_ENERGY.get(next_behavior, 0.0)
+                        influence = Config.MOOD_BEHAVIOR_INFLUENCE
+                        weight *= (1.0 + mood_obj.valence * energy * influence)
+                        weight *= (1.0 + mood_obj.arousal * energy * influence)
+
+                transition_weights[next_behavior] = weight
 
         if not transition_weights:
-            # Default to current behavior or choose a safe fallback
             return current
 
-        # Step 3: Add weight for staying in current behavior
-        transition_weights[current] = pattern['base_weight'] * random.random()
-        
-        # Step 4: Determine the highest-weighted behavior
+        # Step 4: Weight for staying in current behavior (reduced by duration)
+        transition_weights[current] = pattern['base_weight'] * stay_factor * random.random()
+
+        # Step 5: Select highest-weighted behavior
         try:
-            selected_behavior = max(transition_weights.items(), key=lambda x: x[1])[0]
-            return selected_behavior
+            return max(transition_weights.items(), key=lambda x: x[1])[0]
         except Exception as e:
             print(f"Error selecting behavior from weights: {e}")
             raise e

@@ -17,6 +17,7 @@ Future integrations:
 - Cognitive shaping of mood over time, indirectly via emotion influence & direct via mood influence
 """
 
+from config import Config
 from event_dispatcher import global_event_dispatcher, Event
 from ...internal_context import InternalContext
 
@@ -51,7 +52,6 @@ class MoodSynthesizer:
         self.context = internal_context
         self.current_mood = Mood()
         self.current_mood_name = 'neutral'
-        self.decay_half_life = 300  # 5 minutes in seconds
         self.weights = {
             'emotions': 0.5,
             'needs': 0.3,
@@ -102,17 +102,22 @@ class MoodSynthesizer:
         if new_mood.valence == 0 and new_mood.arousal == 0:
             new_mood = Mood(valence=0.0, arousal=0.0)  # Explicitly set to neutral
 
-        # Check if mood has changed in terms of valence and arousal
+        # Blend toward target — mood has inertia, larger changes blend slower
         if new_mood.valence != self.current_mood.valence or new_mood.arousal != self.current_mood.arousal:
-            self.current_mood = new_mood
-            new_name = self._map_mood_to_name(new_mood)  # Map mood object to its descriptive name
-            
-            # If the mood name has also updated
+            delta = abs(new_mood.valence - self.current_mood.valence) + abs(new_mood.arousal - self.current_mood.arousal)
+            alpha = Config.MOOD_BLEND_RATE / (1.0 + delta)
+
+            self.current_mood.valence += alpha * (new_mood.valence - self.current_mood.valence)
+            self.current_mood.arousal += alpha * (new_mood.arousal - self.current_mood.arousal)
+
+            # Clamp
+            self.current_mood.valence = max(-1.0, min(1.0, self.current_mood.valence))
+            self.current_mood.arousal = max(-1.0, min(1.0, self.current_mood.arousal))
+
+            new_name = self._map_mood_to_name(self.current_mood)
             if new_name != self.current_mood_name:
                 old_name = self.current_mood_name
                 self.current_mood_name = new_name
-                
-                # Dispatch the mood change event with consistent dictionary formatting
                 global_event_dispatcher.dispatch_event_sync(Event("mood:changed", {
                     "old_name": old_name,
                     "new_name": new_name
