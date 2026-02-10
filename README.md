@@ -8,7 +8,7 @@ the "soul" is a Python server running internal state simulation and memory. the 
 
 for more info or to chat:
 - discord: `luxia`
-- email: [lucia@kaleidoscope.glass](mailto:lucia@kaleidoscope.glass)
+- email: [mail.luxia@gmail.com](mailto:mail.luxia@gmail.com)
 - dm me on twitter [@slLuxia](https://twitter.com/slLuxia)
 
 ## requirements
