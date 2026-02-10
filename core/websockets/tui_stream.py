@@ -67,6 +67,34 @@ class TUIStreamManager:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
 
+    async def broadcast_thought_bubble(
+        self,
+        source: str,
+        content: str,
+        action: Optional[str] = None,
+    ) -> None:
+        """Broadcast a thought bubble event to all connected clients."""
+        if not self.active_connections:
+            return
+
+        message = {
+            "event_type": "THOUGHT_BUBBLE",
+            "payload": {
+                "source": source,
+                "content": content,
+                "action": action,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                self.logger.warning(f"Error broadcasting thought bubble: {e}")
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
+
     async def broadcast_state_update(self) -> None:
         """Broadcast a state refresh to all connected TUI clients."""
         if not self.active_connections:

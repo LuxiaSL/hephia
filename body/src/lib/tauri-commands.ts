@@ -144,6 +144,12 @@ export async function dismissThoughtBubble(): Promise<void> {
 // Backend lifecycle
 // ---------------------------------------------------------------------------
 
+export async function writeEnvKeys(
+  keys: Record<string, string>,
+): Promise<void> {
+  return invoke('write_env_keys', { keys });
+}
+
 export async function startBackend(): Promise<void> {
   return invoke('start_backend');
 }

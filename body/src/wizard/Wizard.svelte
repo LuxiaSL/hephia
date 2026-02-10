@@ -5,6 +5,7 @@
     startBackend,
     updateSettings,
     markWizardComplete,
+    writeEnvKeys,
   } from '$lib/tauri-commands';
   import type { EnvironmentStatus, PetSettings } from '$lib/types';
 
@@ -57,9 +58,15 @@
     launching = true;
     error = '';
     try {
-      // TODO: Write API keys to backend .env file
-      // This needs a Rust command to write to the soul server's config
-      // For now we assume keys are set in the environment
+      // Write API keys to .env file
+      const envKeys: Record<string, string> = {};
+      if (anthropicKey.trim()) envKeys['ANTHROPIC_API_KEY'] = anthropicKey.trim();
+      if (openaiKey.trim()) envKeys['OPENAI_API_KEY'] = openaiKey.trim();
+      if (openrouterKey.trim()) envKeys['OPENROUTER_API_KEY'] = openrouterKey.trim();
+
+      if (Object.keys(envKeys).length > 0) {
+        await writeEnvKeys(envKeys);
+      }
 
       // Start the backend (treat "already running" as success)
       try {

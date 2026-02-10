@@ -149,13 +149,14 @@ fn get_dashboard_position(app: &tauri::AppHandle) -> (f64, f64) {
 
 /// Register global hotkeys.
 pub fn register_hotkeys(app: &tauri::App) -> Result<(), String> {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
     let app_handle = app.handle().clone();
 
     // Ctrl+Shift+H: toggle pet visibility
     let handle1 = app_handle.clone();
-    app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+H", move |_app, _shortcut, _event| {
+    app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+H", move |_app, _shortcut, event| {
+        if event.state != ShortcutState::Pressed { return; }
         if let Some(overlay) = handle1.get_webview_window("overlay") {
             if overlay.is_visible().unwrap_or(false) {
                 let _ = overlay.hide();
@@ -167,13 +168,15 @@ pub fn register_hotkeys(app: &tauri::App) -> Result<(), String> {
 
     // Ctrl+Shift+C: open chat
     let handle2 = app_handle.clone();
-    app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+C", move |_app, _shortcut, _event| {
+    app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+C", move |_app, _shortcut, event| {
+        if event.state != ShortcutState::Pressed { return; }
         let _ = show_chat_window(&handle2);
     }).map_err(|e| format!("Failed to register chat hotkey: {}", e))?;
 
     // Ctrl+Shift+P: toggle passthrough
     let handle3 = app_handle.clone();
-    app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+P", move |_app, _shortcut, _event| {
+    app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+P", move |_app, _shortcut, event| {
+        if event.state != ShortcutState::Pressed { return; }
         let h = handle3.clone();
         tauri::async_runtime::spawn(async move {
             let state = h.state::<crate::AppState>();

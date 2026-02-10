@@ -269,6 +269,77 @@ pub async fn dismiss_thought_bubble(app: tauri::AppHandle) -> Result<(), String>
 }
 
 // ---------------------------------------------------------------------------
+// Config file management (for wizard)
+// ---------------------------------------------------------------------------
+
+/// Write API keys to the backend .env file.
+/// Reads existing .env (preserving comments and other keys), updates/adds the
+/// provided keys, and writes back.
+#[tauri::command]
+pub async fn write_env_keys(
+    app: tauri::AppHandle,
+    keys: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    use std::collections::HashMap;
+    use std::io::Write;
+
+    let project_dir = crate::backend::BackendManager::detect_project_dir(&app)?;
+    let env_path = project_dir.join(".env");
+
+    // Read existing .env content (or start fresh)
+    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
+
+    // Parse existing lines, tracking which keys we've seen
+    let mut updated_keys: HashMap<String, bool> = HashMap::new();
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in existing.lines() {
+        let trimmed = line.trim();
+        // Check if this line sets one of the keys we want to update
+        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            if let Some(eq_pos) = trimmed.find('=') {
+                let key = trimmed[..eq_pos].trim();
+                if let Some(new_value) = keys.get(key) {
+                    // Replace this line with the new value
+                    lines.push(format!("{}={}", key, new_value));
+                    updated_keys.insert(key.to_string(), true);
+                    continue;
+                }
+            }
+        }
+        lines.push(line.to_string());
+    }
+
+    // Append any keys that weren't already in the file
+    let mut appended = false;
+    for (key, value) in &keys {
+        if value.is_empty() {
+            continue; // Skip empty keys
+        }
+        if !updated_keys.contains_key(key.as_str()) {
+            if !appended && !lines.is_empty() {
+                lines.push(String::new()); // blank line separator
+            }
+            lines.push(format!("{}={}", key, value));
+            appended = true;
+        }
+    }
+
+    // Write back
+    let content = lines.join("\n");
+    let mut file = std::fs::File::create(&env_path)
+        .map_err(|e| format!("Failed to write .env: {}", e))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("Failed to write .env: {}", e))?;
+    // Ensure trailing newline
+    file.write_all(b"\n")
+        .map_err(|e| format!("Failed to write .env: {}", e))?;
+
+    info!("Wrote {} API key(s) to {}", keys.len(), env_path.display());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Backend lifecycle (for wizard)
 // ---------------------------------------------------------------------------
 

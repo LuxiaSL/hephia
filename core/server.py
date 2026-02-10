@@ -136,6 +136,16 @@ class HephiaServer:
             "internal:action",
             lambda event: asyncio.create_task(self.tui_stream.broadcast_state_update()),
         )
+        global_event_dispatcher.add_listener(
+            "mind:introspection",
+            lambda event: asyncio.create_task(
+                self.tui_stream.broadcast_thought_bubble(
+                    source="introspection",
+                    content=f"Thinking about {event.data.get('topic', 'something')}... "
+                            f"({event.data.get('memory_count', 0)} memories surfaced)",
+                )
+            ),
+        )
 
     async def _startup(self) -> None:
         try:

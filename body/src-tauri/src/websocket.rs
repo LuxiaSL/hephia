@@ -165,15 +165,35 @@ async fn connection_lifecycle(
 }
 
 /// Listen for state updates from /ws. Returns when disconnected.
+/// Handles both state updates and thought bubble messages.
 async fn state_listen(mut stream: WsStream, app: &tauri::AppHandle) {
     while let Some(msg) = stream.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                match serde_json::from_str::<ipc::SoulStatePayload>(&text) {
-                    Ok(state) => ipc::emit_state(app, state),
-                    Err(e) => {
-                        warn!("Failed to parse state message: {}", e);
+                // Peek at event_type to route accordingly
+                if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
+                    match envelope.get("event_type").and_then(|v| v.as_str()) {
+                        Some("THOUGHT_BUBBLE") => {
+                            // Route to thought bubble handler
+                            if let Some(payload) = envelope.get("payload") {
+                                let source = payload.get("source").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                let action = payload.get("action").and_then(|v| v.as_str());
+                                ipc::emit_thought_bubble(app, source, content, action);
+                            }
+                        }
+                        _ => {
+                            // Normal state update
+                            match serde_json::from_value::<ipc::SoulStatePayload>(envelope) {
+                                Ok(state) => ipc::emit_state(app, state),
+                                Err(e) => {
+                                    warn!("Failed to parse state message: {}", e);
+                                }
+                            }
+                        }
                     }
+                } else {
+                    warn!("Failed to parse WebSocket message as JSON");
                 }
             }
             Ok(Message::Close(_)) => {

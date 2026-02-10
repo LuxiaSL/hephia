@@ -51,6 +51,7 @@ fn main() {
             commands::open_chat,
             commands::open_dashboard,
             commands::dismiss_thought_bubble,
+            commands::write_env_keys,
             commands::start_backend,
             commands::stop_backend,
             commands::check_environment,

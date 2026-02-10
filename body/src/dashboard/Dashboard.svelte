@@ -8,12 +8,16 @@
     performAction,
     getSettings,
     updateSettings,
+    getStateSnapshot,
+    submitWorkerTask,
+    getWorkerStatus,
   } from '$lib/tauri-commands';
   import type {
     SystemContext,
     SoulStatePayload,
     ActionInfo,
     PetSettings,
+    WorkerTaskStatus,
   } from '$lib/types';
 
   let activeTab = 'state';
@@ -25,6 +29,14 @@
   let actionsLoading = false;
   let actionsError = '';
   let executingAction = '';
+
+  // Worker tab state
+  let workerInput = '';
+  let workerSubmitting = false;
+  let workerError = '';
+  let workerTasks: WorkerTaskStatus[] = [];
+  let workerPollTimers: Map<string, number> = new Map();
+  let expandedTask: string | null = null;
 
   // Settings tab state
   let settings: PetSettings | null = null;
@@ -41,15 +53,35 @@
     { id: 'settings', label: 'Settings' },
   ];
 
+  /** Ensure all SystemContext fields are present with safe defaults. */
+  function normalizeContext(raw: Record<string, any>): SystemContext {
+    return {
+      mood: raw.mood ?? { name: 'neutral', valence: 0, arousal: 0 },
+      needs: raw.needs ?? {},
+      behavior: raw.behavior ?? { name: 'idle' },
+      emotional_state: raw.emotional_state ?? [],
+    };
+  }
+
   systemContext.subscribe((v) => (context = v));
 
   onMount(async () => {
     unlisten = await setupIPCListeners({
       onState: (payload: SoulStatePayload) => {
         const ctx = payload.payload?.system_context;
-        if (ctx) systemContext.set(ctx);
+        if (ctx) systemContext.set(normalizeContext(ctx));
       },
     });
+
+    // Fetch initial state immediately rather than waiting for next broadcast
+    try {
+      const snapshot = await getStateSnapshot();
+      if (snapshot) {
+        systemContext.set(normalizeContext(snapshot as Record<string, any>));
+      }
+    } catch {
+      // Backend might not be ready yet — IPC listener will pick up state later
+    }
   });
 
   onDestroy(() => {
@@ -129,6 +161,80 @@
     }
     settingsSaving = false;
   }
+
+  // --- Worker ---
+
+  async function handleWorkerSubmit() {
+    const task = workerInput.trim();
+    if (!task) return;
+
+    workerSubmitting = true;
+    workerError = '';
+    try {
+      const resp = await submitWorkerTask(task);
+      workerInput = '';
+
+      // Create initial status entry
+      const status: WorkerTaskStatus = {
+        task_id: resp.task_id,
+        status: 'pending',
+        result: null,
+        error: null,
+        created_at: Date.now() / 1000,
+        completed_at: null,
+      };
+      workerTasks = [status, ...workerTasks];
+
+      // Start polling for this task
+      startPolling(resp.task_id);
+    } catch (e) {
+      workerError = `Failed to submit task: ${e}`;
+    }
+    workerSubmitting = false;
+  }
+
+  function startPolling(taskId: string) {
+    const timer = window.setInterval(async () => {
+      try {
+        const status = await getWorkerStatus(taskId);
+        workerTasks = workerTasks.map((t) =>
+          t.task_id === taskId ? status : t,
+        );
+
+        // Stop polling when task is done
+        if (status.status === 'completed' || status.status === 'failed') {
+          stopPolling(taskId);
+        }
+      } catch {
+        stopPolling(taskId);
+      }
+    }, 2000);
+    workerPollTimers.set(taskId, timer);
+  }
+
+  function stopPolling(taskId: string) {
+    const timer = workerPollTimers.get(taskId);
+    if (timer !== undefined) {
+      window.clearInterval(timer);
+      workerPollTimers.delete(taskId);
+    }
+  }
+
+  function toggleExpand(taskId: string) {
+    expandedTask = expandedTask === taskId ? null : taskId;
+  }
+
+  function formatTime(ts: number): string {
+    return new Date(ts * 1000).toLocaleTimeString();
+  }
+
+  // Clean up poll timers on destroy
+  onDestroy(() => {
+    for (const timer of workerPollTimers.values()) {
+      window.clearInterval(timer);
+    }
+    workerPollTimers.clear();
+  });
 </script>
 
 <div class="dashboard-root">
@@ -256,7 +362,78 @@
     {:else if activeTab === 'worker'}
       <!-- WORKER TAB -->
       <div class="tab-panel">
-        <p class="placeholder">Worker task history — coming in a future update</p>
+        <div class="worker-submit">
+          <div class="worker-input-row">
+            <input
+              type="text"
+              class="worker-input"
+              bind:value={workerInput}
+              placeholder="Describe a task..."
+              on:keydown={(e) => { if (e.key === 'Enter' && !workerSubmitting) handleWorkerSubmit(); }}
+              disabled={workerSubmitting}
+            />
+            <button
+              class="btn btn-primary btn-sm"
+              on:click={handleWorkerSubmit}
+              disabled={workerSubmitting || !workerInput.trim()}
+            >
+              {workerSubmitting ? 'Submitting...' : 'Submit'}
+            </button>
+          </div>
+          {#if workerError}
+            <div class="error-msg">{workerError}</div>
+          {/if}
+        </div>
+
+        {#if workerTasks.length === 0}
+          <div class="empty">No tasks submitted yet. Describe something for the worker model to do.</div>
+        {:else}
+          <div class="worker-tasks">
+            {#each workerTasks as task}
+              <div class="worker-task-card" class:expanded={expandedTask === task.task_id}>
+                <div class="task-header" on:click={() => toggleExpand(task.task_id)}>
+                  <div class="task-meta">
+                    <span
+                      class="task-status"
+                      class:pending={task.status === 'pending'}
+                      class:running={task.status === 'running'}
+                      class:completed={task.status === 'completed'}
+                      class:failed={task.status === 'failed'}
+                    >
+                      {task.status}
+                    </span>
+                    <span class="task-id">{task.task_id.slice(0, 8)}</span>
+                  </div>
+                  <span class="task-time">{formatTime(task.created_at)}</span>
+                </div>
+
+                {#if expandedTask === task.task_id}
+                  <div class="task-details">
+                    {#if task.status === 'pending' || task.status === 'running'}
+                      <div class="task-progress">
+                        <div class="progress-bar-track">
+                          <div class="progress-bar-fill" class:indeterminate={true}></div>
+                        </div>
+                        <span class="progress-label">
+                          {task.status === 'pending' ? 'Queued...' : 'Working...'}
+                        </span>
+                      </div>
+                    {:else if task.status === 'completed' && task.result}
+                      <div class="task-result">{task.result}</div>
+                    {:else if task.status === 'failed' && task.error}
+                      <div class="task-error">{task.error}</div>
+                    {/if}
+                    {#if task.completed_at}
+                      <div class="task-completed-time">
+                        Completed at {formatTime(task.completed_at)}
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
 
     {:else if activeTab === 'settings'}
@@ -363,6 +540,7 @@
     border-bottom: 1px solid var(--border-subtle);
     background: var(--bg-secondary);
     flex-shrink: 0;
+    -webkit-app-region: no-drag;
   }
 
   .tab {
@@ -383,6 +561,7 @@
   .tab-content {
     flex: 1;
     overflow-y: auto;
+    -webkit-app-region: no-drag;
   }
 
   .tab-panel {
@@ -542,10 +721,138 @@
     color: var(--success);
   }
 
+  /* Worker tab */
+  .worker-submit { margin-bottom: 16px; }
+
+  .worker-input-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .worker-input {
+    flex: 1;
+  }
+
+  .worker-tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .worker-task-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .task-header:hover { background: var(--bg-hover); }
+
+  .task-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .task-status {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .task-status.pending { background: rgba(234, 179, 8, 0.15); color: var(--warning); }
+  .task-status.running { background: rgba(99, 102, 241, 0.15); color: var(--accent-primary); }
+  .task-status.completed { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+  .task-status.failed { background: rgba(239, 68, 68, 0.15); color: var(--error); }
+
+  .task-id {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .task-time {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .task-details {
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .task-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .progress-bar-track {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: 2px;
+  }
+
+  .progress-bar-fill.indeterminate {
+    width: 40%;
+    animation: progress-slide 1.2s ease-in-out infinite;
+  }
+
+  @keyframes progress-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+  }
+
+  .progress-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .task-result {
+    padding-top: 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+
+  .task-error {
+    padding-top: 10px;
+    font-size: 13px;
+    color: var(--error);
+  }
+
+  .task-completed-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+
   /* Common */
   .empty { color: var(--text-muted); font-size: 13px; }
   .loading { color: var(--text-muted); text-align: center; padding: 40px; }
-  .placeholder { color: var(--text-muted); text-align: center; padding: 40px; }
   .error-msg {
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid var(--error);

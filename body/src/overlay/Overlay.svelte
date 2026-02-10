@@ -11,7 +11,7 @@
 
   let canvas: HTMLCanvasElement;
   let unlisten: (() => void) | null = null;
-  let animFrameId: number = 0;
+  let loopTimerId: number = 0;
   let lastTime = 0;
   let renderer: CreatureRenderer | null = null;
 
@@ -90,14 +90,15 @@
       },
     });
 
-    // Start render loop
+    // Start render loop — use setInterval instead of requestAnimationFrame
+    // so the pet keeps animating when the overlay loses focus (alt-tab, etc.)
     lastTime = performance.now();
-    animFrameId = requestAnimationFrame(renderLoop);
+    loopTimerId = window.setInterval(() => renderLoop(performance.now()), 16);
   });
 
   onDestroy(() => {
     if (unlisten) unlisten();
-    if (animFrameId) cancelAnimationFrame(animFrameId);
+    if (loopTimerId) window.clearInterval(loopTimerId);
     if (renderer) renderer.destroy();
   });
 
@@ -125,7 +126,7 @@
       renderer.render(dt);
     }
 
-    animFrameId = requestAnimationFrame(renderLoop);
+    // loop continues via setInterval — no need to re-schedule
   }
 
   /** Move the Tauri overlay window via Rust command. Only caches position on success. */
