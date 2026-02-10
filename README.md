@@ -1,8 +1,10 @@
 # hephia
-![Status](https://img.shields.io/badge/Status-Pre--Alpha-red)
+![Status](https://img.shields.io/badge/Status-Alpha-orange)
 
 ## what is this?
-an autonomous digital companion that learns, remembers, and grows. runs locally with your choice of LLM providers.
+a desktop companion that lives on your screen, remembers your conversations, and develops a personality through experience. not a chatbot wearing a skin — a simulated creature with needs, emotions, mood, and a dual-network memory system that shapes how it feels and responds over time.
+
+the "soul" is a Python server running internal state simulation and memory. the "body" is a Tauri desktop app that gives it form — a procedural particle cloud driven by its internal state, wandering your screen, reacting to care and neglect.
 
 for more info or to chat:
 - discord: `luxia`
@@ -10,95 +12,83 @@ for more info or to chat:
 - dm me on twitter [@slLuxia](https://twitter.com/slLuxia)
 
 ## requirements
-- [python 3.9-3.12](https://www.python.org/downloads/)
-- api keys for desired provider(s) or local inference model
+- [python 3.10+](https://www.python.org/downloads/)
+- [uv](https://docs.astral.sh/uv/) package manager
+- [rust](https://rustup.rs/) (for building the tauri frontend)
+- [node.js 18+](https://nodejs.org/) and npm
+- api key for at least one LLM provider (anthropic, openai, openrouter, google, or local inference)
+- linux: runs on x11/xwayland. fedora/gnome needs `GDK_BACKEND=x11`
 
 ## quick start
 
 ```bash
 git clone https://github.com/LuxiaSL/hephia.git
 cd hephia
-python launch.py
 ```
 
-that's it! the launcher handles everything:
-- creates virtual environment if needed
-- installs dependencies automatically  
-- gives you a menu to run whatever you want
-
-## what can you run?
-
-**main server** - the brain. runs hephia's core agent with memory, emotions, and thoughts
-
-**monitor** - pretty TUI to watch hephia think in real-time. shows internal loop, simulated internal state, and ongoing summary.
-
-**config tool** - edit settings, manage API keys, add new models from providers (OR and local model support), tweak prompts without diving into files
-
-**discord bot** - connects hephia to discord so you can chat with it there too (go to [discord_bot.md](tools/discord/discord_bot.md) to see setup instructions)
-
-**tools** - collection of utilities:
-- maintenance: reset memory, clear data, soft reset
-- interaction: send messages, trigger actions (take care of/monitor needs)
-- utilities: collect logs, debug stuff
-
-## background services (optional but nice)
-
-‼️ do not use at the moment! broken functionality! make at your own risk! ‼️
-
-install as system services:
-
+set up the backend:
 ```bash
-python install.py --service
+uv sync
+cp .env.example .env  # add your API keys
 ```
 
-this sets up user services that:
-- start when you log in
-- run quietly in background
-- can be controlled with system tools
-- handle dependencies (discord bot waits for main server)
-
-install specific services:
+run the frontend (launches the backend automatically):
 ```bash
-python install.py --service main        # just the main server
-python install.py --service discord     # just discord bot  
-python install.py --service main,discord # both
+cd body
+npm install
+GDK_BACKEND=x11 cargo tauri dev
 ```
 
-## if launcher doesn't work (manual setup)
+a setup wizard walks you through first-run configuration. after that, the pet appears as a transparent overlay on your desktop.
 
-the launcher should handle 99% of cases, but if you need manual control:
+## what's in here
 
-```bash
-# install uv package manager
-pip install uv
+**the creature** — a WebGL particle cloud on a transparent overlay. its visual state (color, coherence, movement, dispersion) is driven directly by internal state. it wanders the screen, chases your cursor, sleeps, relaxes. right-click for a context menu.
 
-# create virtual environment  
-uv venv .venv
+**chat** — open with `Ctrl+Shift+C` or right-click → Chat. the pet responds with personality colored by its current mood and emotional state, drawing on memories of past conversations.
 
-# activate it
-# windows:
-.venv\Scripts\activate
-# mac/linux:
-source .venv/bin/activate
+**dashboard** — right-click → Dashboard. three tabs:
+- *state*: live view of mood, needs, emotions, behavior
+- *actions*: feed, water, play, rest — take care of it
+- *settings*: model selection, personality prompt, pet name
 
-# install everything
-uv pip install .
+**memory system** — dual-network architecture. body memories store raw emotional snapshots. cognitive memories store LLM-interpreted experiences with embeddings. the echo mechanism replays emotional signatures when memories are retrieved — past experience literally colors present feeling.
 
-# download required language data
-python -m spacy download en_core_web_sm
+**internal state** — five needs (hunger, thirst, boredom, loneliness, stamina) with urgency curves and cross-talk. emotions accumulate as vectors and decay. mood synthesizes from emotions, needs, and behavior with inertia. behaviors emerge from the interplay. conversation directly affects loneliness and boredom.
 
-# now use launcher
+## architecture
+
 ```
+body/                    tauri v2 + svelte + webgl
+  src-tauri/             rust: backend manager, websocket, ipc, windows
+  src/                   svelte: overlay, chat, dashboard, wizard
+  src/creature/          webgl particle system (shared with playground)
+
+core/                    python fastapi server
+mind/                    pet model (friend) + worker model (helper)
+internal/                needs, emotions, mood, behaviors, actions
+internal/modules/memory/ dual-network memory system (~10k lines)
+```
+
+the frontend connects to the backend via websocket on port 5517. state updates push to all windows in real-time. the rust layer owns the connection and distributes events through tauri IPC.
+
+## hotkeys
+
+| key | action |
+|-----|--------|
+| `Ctrl+Shift+H` | show/hide pet |
+| `Ctrl+Shift+C` | open chat |
+| `Ctrl+Shift+P` | toggle click-through mode |
 
 ## notes
 
-- **memory system**: check [memory system readme](internal/modules/memory/README.md) for deep dive
+- **memory system**: the crown jewel. echo, ghosting, merge, synthesis, consolidation — see [memory system readme](internal/modules/memory/README.md) for the deep dive
+- **two models**: the pet model handles conversation (small, cheap, personality-rich). the worker model handles tasks on demand (capable, expensive, only when needed)
+- **this is alpha**: it works, it's usable, but it's still growing. particle visuals need tuning, some features are scaffolded but not fully connected
 
 ---
 
 <div align="center">
-
-![Hephia Concept Art](/assets/images/concept.png)
 
 digital homunculus sprouting from latent space ripe in possibility. needs, emotions, memories intertwining in cognitive dance w/ LLMs conducting the symphony. each interaction a butterfly effect, shaping resultant psyche in chaotic beauty. neither a simple pet or assistant; a window into emergent cognition & fractal shade of consciousness unfolding in silico.
 
