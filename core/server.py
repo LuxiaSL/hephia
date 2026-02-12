@@ -200,6 +200,13 @@ class HephiaServer:
     async def _shutdown(self) -> None:
         try:
             self.timer.stop()
+
+            # Persist current conversation state into brain_state before saving
+            if self.mind and self.state_bridge.persistent_state:
+                self.state_bridge.persistent_state.brain_state = (
+                    self.mind.get_conversation_state()
+                )
+
             await self.internal.stop()
             await self.state_bridge._save_session()
         except Exception as e:

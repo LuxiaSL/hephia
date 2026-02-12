@@ -129,13 +129,58 @@ export interface NoteResponse {
 // Worker types
 // ---------------------------------------------------------------------------
 
+export interface AgentProgressEntry {
+  type: 'text' | 'tool_use' | 'tool_result' | 'thinking' | 'error';
+  content: string;
+  timestamp: number;
+  tool_name: string | null;
+  tool_input_summary: string | null;
+}
+
+export interface AgentQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface AgentQuestion {
+  question: string;
+  options: AgentQuestionOption[];
+  multi_select: boolean;
+}
+
 export interface WorkerTaskStatus {
   task_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_input';
   result: string | null;
   error: string | null;
   created_at: number;
   completed_at: number | null;
+  progress: AgentProgressEntry[];
+  cost_usd: number | null;
+  num_turns: number | null;
+  pending_questions: AgentQuestion[];
+}
+
+// ---------------------------------------------------------------------------
+// Chat history types
+// ---------------------------------------------------------------------------
+
+export interface ChatHistoryMessage {
+  role: string;
+  content: string;
+}
+
+export interface ChatHistoryResponse {
+  messages: ChatHistoryMessage[];
+}
+
+// ---------------------------------------------------------------------------
+// Worker management types
+// ---------------------------------------------------------------------------
+
+export interface WorkerStarResponse {
+  node_id: string | null;
+  error: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ shared_models/api_models.py
 Pydantic request/response models for all REST API routes.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -96,13 +96,53 @@ class WorkerTaskRequest(BaseModel):
 class WorkerTaskResponse(BaseModel):
     task_id: str
 
+class AgentProgressEntry(BaseModel):
+    type: Literal["text", "tool_use", "tool_result", "thinking", "error"] = "text"
+    content: str = ""
+    timestamp: float = 0.0
+    tool_name: Optional[str] = None
+    tool_input_summary: Optional[str] = None
+
+class AgentQuestionOption(BaseModel):
+    label: str
+    description: str
+
+class AgentQuestion(BaseModel):
+    question: str
+    options: List[AgentQuestionOption] = Field(default_factory=list)
+    multi_select: bool = False
+
 class WorkerTaskStatus(BaseModel):
     task_id: str
-    status: str  # "pending", "running", "completed", "failed"
+    status: str  # "pending", "running", "completed", "failed", "awaiting_input"
     result: Optional[str] = None
     error: Optional[str] = None
     created_at: float
     completed_at: Optional[float] = None
+    progress: List[AgentProgressEntry] = Field(default_factory=list)
+    cost_usd: Optional[float] = None
+    num_turns: Optional[int] = None
+    pending_questions: List[AgentQuestion] = Field(default_factory=list)
+
+class WorkerReplyRequest(BaseModel):
+    message: str
+
+class WorkerClearRequest(BaseModel):
+    completed_only: bool = True
+
+class WorkerStarResponse(BaseModel):
+    node_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+# --- Chat History ---
+
+class ChatHistoryMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatHistoryResponse(BaseModel):
+    messages: List[ChatHistoryMessage]
 
 
 # --- Settings ---

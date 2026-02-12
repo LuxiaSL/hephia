@@ -122,8 +122,8 @@ impl BackendManager {
         let child = Command::new(&program)
             .args(&args)
             .current_dir(project_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("Failed to spawn backend process: {}", e))?;

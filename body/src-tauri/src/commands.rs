@@ -11,15 +11,35 @@ use crate::AppState;
 
 const BACKEND_URL: &str = "http://127.0.0.1:5517";
 
+/// Helper: parse a response, checking the HTTP status code.
+/// Returns `Err` for 4xx/5xx responses so the JS side gets an exception.
+async fn parse_response(resp: reqwest::Response) -> Result<Value, String> {
+    let status = resp.status();
+    let body = resp
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("Parse failed: {}", e))?;
+
+    if status.is_client_error() || status.is_server_error() {
+        // Extract FastAPI's "detail" field — may be a string or array
+        let detail = match body.get("detail") {
+            Some(Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+            None => "Unknown error".to_string(),
+        };
+        return Err(format!("Backend error {}: {}", status.as_u16(), detail));
+    }
+
+    Ok(body)
+}
+
 /// Helper: make a GET request to the backend.
 async fn backend_get(path: &str) -> Result<Value, String> {
     let url = format!("{}{}", BACKEND_URL, path);
     let resp = reqwest::get(&url)
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    resp.json::<Value>()
-        .await
-        .map_err(|e| format!("Parse failed: {}", e))
+    parse_response(resp).await
 }
 
 /// Helper: make a POST request to the backend.
@@ -32,9 +52,7 @@ async fn backend_post(path: &str, body: &Value) -> Result<Value, String> {
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    resp.json::<Value>()
-        .await
-        .map_err(|e| format!("Parse failed: {}", e))
+    parse_response(resp).await
 }
 
 /// Helper: make a PUT request to the backend.
@@ -47,9 +65,7 @@ async fn backend_put(path: &str, body: &Value) -> Result<Value, String> {
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    resp.json::<Value>()
-        .await
-        .map_err(|e| format!("Parse failed: {}", e))
+    parse_response(resp).await
 }
 
 /// Helper: make a DELETE request to the backend.
@@ -61,9 +77,7 @@ async fn backend_delete(path: &str) -> Result<Value, String> {
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
-    resp.json::<Value>()
-        .await
-        .map_err(|e| format!("Parse failed: {}", e))
+    parse_response(resp).await
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +228,42 @@ pub async fn submit_worker_task(task: String, context: Option<String>) -> Result
 #[tauri::command]
 pub async fn get_worker_status(task_id: String) -> Result<Value, String> {
     backend_get(&format!("/worker/{}", task_id)).await
+}
+
+#[tauri::command]
+pub async fn reply_to_worker_task(task_id: String, message: String) -> Result<Value, String> {
+    let body = serde_json::json!({ "message": message });
+    backend_post(&format!("/worker/{}/reply", task_id), &body).await
+}
+
+#[tauri::command]
+pub async fn stop_worker_task(task_id: String) -> Result<Value, String> {
+    backend_post(&format!("/worker/{}/stop", task_id), &serde_json::json!({})).await
+}
+
+#[tauri::command]
+pub async fn get_chat_history(limit: Option<u32>) -> Result<Value, String> {
+    let mut path = "/chat/history".to_string();
+    if let Some(l) = limit {
+        path = format!("{}?limit={}", path, l);
+    }
+    backend_get(&path).await
+}
+
+#[tauri::command]
+pub async fn delete_worker_task(task_id: String) -> Result<Value, String> {
+    backend_delete(&format!("/worker/{}", task_id)).await
+}
+
+#[tauri::command]
+pub async fn clear_worker_tasks(completed_only: bool) -> Result<Value, String> {
+    let body = serde_json::json!({ "completed_only": completed_only });
+    backend_post("/worker/clear", &body).await
+}
+
+#[tauri::command]
+pub async fn star_worker_task(task_id: String) -> Result<Value, String> {
+    backend_post(&format!("/worker/{}/star", task_id), &serde_json::json!({})).await
 }
 
 // ---------------------------------------------------------------------------

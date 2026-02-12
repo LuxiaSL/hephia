@@ -282,6 +282,54 @@ class Config:
     PET_MODEL = "haiku-4.5"
     WORKER_MODEL = "opus-4.6"
 
+    # Agent SDK settings (for worker task queue)
+    AGENT_MAX_TURNS = 200
+    AGENT_MAX_BUDGET_USD = 2.0
+    AGENT_ALLOWED_TOOLS = [
+        "Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch",
+    ]
+    # Working directory for the agent. Empty string = user home directory (blanket access).
+    # Set to a specific path to restrict the agent's primary working directory.
+    AGENT_CWD = ""
+    # Optional comma-separated list of additional directories the agent can access.
+    # Only meaningful when AGENT_CWD is set to a specific directory.
+    # Empty = no additional dirs (if CWD is set) or unrestricted (if CWD is home).
+    AGENT_ALLOWED_DIRS: list[str] = []
+
+    @classmethod
+    def get_agent_max_turns(cls) -> int:
+        """Get max agent turns from env or default."""
+        return int(os.getenv("AGENT_MAX_TURNS", str(cls.AGENT_MAX_TURNS)))
+
+    @classmethod
+    def get_agent_max_budget(cls) -> float:
+        """Get max agent budget (USD) from env or default."""
+        return float(os.getenv("AGENT_MAX_BUDGET_USD", str(cls.AGENT_MAX_BUDGET_USD)))
+
+    @classmethod
+    def get_agent_allowed_tools(cls) -> list[str]:
+        """Get allowed agent tools from env or default."""
+        env_val = os.getenv("AGENT_ALLOWED_TOOLS")
+        if env_val:
+            return [t.strip() for t in env_val.split(",") if t.strip()]
+        return list(cls.AGENT_ALLOWED_TOOLS)
+
+    @classmethod
+    def get_agent_cwd(cls) -> str:
+        """Get agent working directory. Empty/unset = user home (blanket access)."""
+        cwd = os.getenv("AGENT_CWD", cls.AGENT_CWD).strip()
+        if not cwd:
+            return str(Path.home())
+        return cwd
+
+    @classmethod
+    def get_agent_allowed_dirs(cls) -> list[str]:
+        """Get additional directories the agent can access."""
+        env_val = os.getenv("AGENT_ALLOWED_DIRS")
+        if env_val:
+            return [d.strip() for d in env_val.split(",") if d.strip()]
+        return list(cls.AGENT_ALLOWED_DIRS)
+
     DISCORD_BOT_URL = "http://localhost:5518"
 
     MAX_STICKY_NOTES = 3

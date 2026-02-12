@@ -2,24 +2,34 @@
   import { onMount, onDestroy } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { setupIPCListeners } from '$state/ipc-listener';
-  import { chatMessages, addChatMessage, addChatResponse } from '$state/stores';
-  import { sendChatMessage } from '$lib/tauri-commands';
+  import { chatMessages, chatHistory, addChatMessage, addChatResponse, setChatHistory } from '$state/stores';
+  import { sendChatMessage, getChatHistory } from '$lib/tauri-commands';
   import type { ChatMessage, ChatResponse } from '$lib/types';
 
-  let messages: ChatMessage[] = [];
+  let historyMessages: ChatMessage[] = [];
+  let liveMessages: ChatMessage[] = [];
   let inputText = '';
   let sending = false;
+  let historyLoaded = false;
   let messagesContainer: HTMLDivElement;
+  let separatorEl: HTMLDivElement;
   let unlisten: (() => void) | null = null;
+  let userScrolledUp = false;
+
+  chatHistory.subscribe((v) => {
+    historyMessages = v;
+  });
 
   chatMessages.subscribe((v) => {
-    messages = v;
-    // Auto-scroll to bottom on new message
-    requestAnimationFrame(() => {
-      if (messagesContainer) {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      }
-    });
+    liveMessages = v;
+    // Auto-scroll on new message unless user scrolled up
+    if (!userScrolledUp) {
+      requestAnimationFrame(() => {
+        if (messagesContainer) {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+      });
+    }
   });
 
   onMount(async () => {
@@ -29,11 +39,42 @@
         sending = false;
       },
     });
+
+    // Load conversation history from backend
+    try {
+      const resp = await getChatHistory();
+      if (resp?.messages?.length > 0) {
+        const msgs: ChatMessage[] = resp.messages.map((m) => ({
+          role: m.role as ChatMessage['role'],
+          content: m.content,
+        }));
+        setChatHistory(msgs);
+        historyLoaded = true;
+
+        // Scroll to separator on mount
+        requestAnimationFrame(() => {
+          if (separatorEl) {
+            separatorEl.scrollIntoView({ block: 'start' });
+          } else if (messagesContainer) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          }
+        });
+      }
+    } catch (e) {
+      // Backend might not be ready — that's fine, no history to show
+      console.warn('Failed to load chat history:', e);
+    }
   });
 
   onDestroy(() => {
     if (unlisten) unlisten();
   });
+
+  function handleScroll() {
+    if (!messagesContainer) return;
+    const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 30;
+    userScrolledUp = !atBottom;
+  }
 
   async function handleSend() {
     const text = inputText.trim();
@@ -66,20 +107,35 @@
     const win = getCurrentWindow();
     await win.hide();
   }
+
+  function handleTitlebarDrag() {
+    getCurrentWindow().startDragging();
+  }
 </script>
 
 <div class="chat-root">
   <!-- Custom title bar -->
-  <div class="titlebar">
+  <div class="titlebar" on:mousedown={handleTitlebarDrag}>
     <span class="titlebar-title">Hephia Chat</span>
     <div class="titlebar-controls">
-      <button class="titlebar-btn close" on:click={handleClose}>✕</button>
+      <button class="titlebar-btn close" on:click|stopPropagation={handleClose}>✕</button>
     </div>
   </div>
 
   <!-- Messages -->
-  <div class="messages" bind:this={messagesContainer}>
-    {#each messages as msg}
+  <div class="messages" bind:this={messagesContainer} on:scroll={handleScroll}>
+    {#if historyMessages.length > 0}
+      {#each historyMessages as msg}
+        <div class="message message-{msg.role} history">
+          <div class="message-content">{msg.content}</div>
+        </div>
+      {/each}
+      <div class="separator" bind:this={separatorEl}>
+        <span class="separator-text">-- earlier --</span>
+      </div>
+    {/if}
+
+    {#each liveMessages as msg}
       <div class="message message-{msg.role}">
         <div class="message-content">{msg.content}</div>
       </div>
@@ -175,6 +231,10 @@
     word-wrap: break-word;
   }
 
+  .message.history {
+    opacity: 0.55;
+  }
+
   .message-user {
     align-self: flex-end;
     background: var(--accent-primary);
@@ -196,6 +256,34 @@
     font-size: 12px;
     text-align: center;
   }
+
+  .separator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 0;
+  }
+
+  .separator-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    padding: 0 12px;
+    position: relative;
+  }
+
+  .separator-text::before,
+  .separator-text::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 40px;
+    height: 1px;
+    background: var(--border-subtle);
+  }
+
+  .separator-text::before { right: 100%; }
+  .separator-text::after { left: 100%; }
 
   .typing-indicator {
     display: flex;

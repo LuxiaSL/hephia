@@ -16,6 +16,7 @@
     "core:window:allow-cursor-position",
     "core:window:allow-current-monitor",
     "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-start-dragging",
     "core:window:allow-is-visible",
     "core:window:allow-create",
     "core:window:allow-destroy",

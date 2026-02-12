@@ -11,8 +11,10 @@
 
   let canvas: HTMLCanvasElement;
   let unlisten: (() => void) | null = null;
-  let loopTimerId: number = 0;
+  let animFrameId: number = 0;
+  let watchdogId: number = 0;
   let lastTime = 0;
+  let lastFrameTime = 0;
   let renderer: CreatureRenderer | null = null;
 
   const CANVAS_SIZE = 192; // logical pixels
@@ -90,21 +92,32 @@
       },
     });
 
-    // Start render loop — use setInterval instead of requestAnimationFrame
-    // so the pet keeps animating when the overlay loses focus (alt-tab, etc.)
+    // Start render loop with rAF + watchdog fallback.
+    // rAF gives smooth 60fps when active. The watchdog detects when WebKitGTK
+    // throttles rAF (alt-tab, focus loss) and keeps the loop alive at ~4fps.
     lastTime = performance.now();
-    loopTimerId = window.setInterval(() => renderLoop(performance.now()), 16);
+    lastFrameTime = lastTime;
+    animFrameId = requestAnimationFrame(renderLoop);
+    watchdogId = window.setInterval(() => {
+      if (performance.now() - lastFrameTime > 250) {
+        // rAF has stalled — run a frame directly and re-request
+        cancelAnimationFrame(animFrameId);
+        renderLoop(performance.now());
+      }
+    }, 250);
   });
 
   onDestroy(() => {
     if (unlisten) unlisten();
-    if (loopTimerId) window.clearInterval(loopTimerId);
+    if (animFrameId) cancelAnimationFrame(animFrameId);
+    if (watchdogId) window.clearInterval(watchdogId);
     if (renderer) renderer.destroy();
   });
 
   function renderLoop(now: number) {
     const dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
+    lastFrameTime = now;
 
     // Advance state interpolation
     tickCreatureState(creatureState, dt);
@@ -126,7 +139,7 @@
       renderer.render(dt);
     }
 
-    // loop continues via setInterval — no need to re-schedule
+    animFrameId = requestAnimationFrame(renderLoop);
   }
 
   /** Move the Tauri overlay window via Rust command. Only caches position on success. */

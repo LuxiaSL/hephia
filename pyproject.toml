@@ -7,7 +7,7 @@ name = "hephia"
 version = "0.3"
 description = "An autonomous independent digital companion"
 readme = "README.md"
-requires-python = ">=3.9, <3.13"
+requires-python = ">=3.10, <3.13"
 license = { text = "MIT" }
 authors = [
     { name = "Luxia", email = "lucia@kaleidoscope.glass" }
@@ -32,6 +32,7 @@ dependencies = [
     "sortedcontainers",
     "aiorwlock",
     "spacy",
+    "claude-agent-sdk",
 ]
 
 [tool.setuptools.packages.find]

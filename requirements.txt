@@ -16,6 +16,7 @@ psutil
 sortedcontainers
 aiorwlock
 spacy
+claude-agent-sdk
 
 # Curses on Windows vs. non-Windows
 windows-curses; sys_platform == "win32"

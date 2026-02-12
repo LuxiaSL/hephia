@@ -6,11 +6,13 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   ActionInfo,
   ActionResponse,
+  ChatHistoryResponse,
   EnvironmentStatus,
   MemoryResponse,
   NoteResponse,
   PetSettings,
   SettingsResponse,
+  WorkerStarResponse,
   WorkerTaskStatus,
 } from './types';
 
@@ -20,6 +22,10 @@ import type {
 
 export async function sendChatMessage(message: string): Promise<void> {
   return invoke('send_chat_message', { message });
+}
+
+export async function getChatHistory(limit?: number): Promise<ChatHistoryResponse> {
+  return invoke('get_chat_history', { limit });
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +111,27 @@ export async function submitWorkerTask(
 }
 
 export async function getWorkerStatus(taskId: string): Promise<WorkerTaskStatus> {
-  return invoke('get_worker_status', { task_id: taskId });
+  return invoke('get_worker_status', { taskId });
+}
+
+export async function replyToWorkerTask(taskId: string, message: string): Promise<WorkerTaskStatus> {
+  return invoke('reply_to_worker_task', { taskId, message });
+}
+
+export async function stopWorkerTask(taskId: string): Promise<WorkerTaskStatus> {
+  return invoke('stop_worker_task', { taskId });
+}
+
+export async function deleteWorkerTask(taskId: string): Promise<void> {
+  return invoke('delete_worker_task', { taskId });
+}
+
+export async function clearWorkerTasks(completedOnly: boolean): Promise<{ removed: number }> {
+  return invoke('clear_worker_tasks', { completedOnly });
+}
+
+export async function starWorkerTask(taskId: string): Promise<WorkerStarResponse> {
+  return invoke('star_worker_task', { taskId });
 }
 
 // ---------------------------------------------------------------------------

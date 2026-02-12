@@ -4,10 +4,17 @@ core/routes/chat.py
 Chat endpoints — OpenAI-compat and simple alias.
 """
 
-from fastapi import APIRouter, Request, HTTPException, Body
+from typing import Optional
+from fastapi import APIRouter, Request, HTTPException, Body, Query
 
 from config import Config
-from shared_models.api_models import ChatRequest, SimpleChatRequest, SimpleChatResponse
+from shared_models.api_models import (
+    ChatRequest,
+    ChatHistoryMessage,
+    ChatHistoryResponse,
+    SimpleChatRequest,
+    SimpleChatResponse,
+)
 from loggers import SystemLogger
 
 router = APIRouter()
@@ -44,6 +51,22 @@ async def handle_conversation(request: Request, body: ChatRequest = Body(...)):
         raise
     except Exception as e:
         SystemLogger.error(f"Chat endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/history", response_model=ChatHistoryResponse)
+async def get_chat_history(request: Request, limit: Optional[int] = Query(None)):
+    """Return persisted conversation history."""
+    mind = request.app.state.mind
+    try:
+        history = mind.conversation.get_history(limit=limit)
+        messages = [
+            ChatHistoryMessage(role=msg.role, content=msg.content)
+            for msg in history
+        ]
+        return ChatHistoryResponse(messages=messages)
+    except Exception as e:
+        SystemLogger.error(f"Chat history endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

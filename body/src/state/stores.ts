@@ -63,6 +63,9 @@ export const systemContext = createStore<SystemContext | null>(null);
 /** Chat message history (local to this session). */
 export const chatMessages = createStore<ChatMessage[]>([]);
 
+/** Chat history loaded from backend (persisted across sessions). */
+export const chatHistory = createStore<ChatMessage[]>([]);
+
 /** Pending thought bubble notifications. */
 export const thoughtBubbles = createStore<ThoughtBubblePayload[]>([]);
 
@@ -89,6 +92,10 @@ export function addChatResponse(response: ChatResponse): void {
       memories_used: response.memories_used,
     },
   });
+}
+
+export function setChatHistory(msgs: ChatMessage[]): void {
+  chatHistory.set(msgs);
 }
 
 export function addThoughtBubble(thought: ThoughtBubblePayload): void {

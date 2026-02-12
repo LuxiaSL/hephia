@@ -84,6 +84,7 @@ the frontend connects to the backend via websocket on port 5517. state updates p
 
 - **memory system**: the crown jewel. echo, ghosting, merge, synthesis, consolidation — see [memory system readme](internal/modules/memory/README.md) for the deep dive
 - **two models**: the pet model handles conversation (small, cheap, personality-rich). the worker model handles tasks on demand (capable, expensive, only when needed)
+- **agent worker**: if [claude code CLI](https://claude.com/claude-code) is installed (`npm install -g @anthropic-ai/claude-code`), the worker tab becomes a full multi-turn agent with file access, shell commands, web search, and live progress streaming. without it, tasks still work but use a simpler single-shot model call
 - **this is alpha**: it works, it's usable, but it's still growing. particle visuals need tuning, some features are scaffolded but not fully connected
 
 ---
